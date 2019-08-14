@@ -49,7 +49,7 @@ which protoc
 which protoc-gen-rust
 [ $? -eq 0 ] || die "Please install protobuf-codegen from github.com/pingcap/grpc-rs"
 which ttrpc_rust_plugin
-[ $? -eq 0 ] || die "Please install from ttrpc-rust/compiler"
+[ $? -eq 0 ] || die "Please install ttrpc_rust_plugin from ttrpc-rust/compiler"
 
 if [ $UPDATE_PROTOS ]; then
     if [ ! $GOPATH ]; then
