@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::str::FromStr;
 use std::fmt::{Debug, Formatter};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -204,14 +205,30 @@ impl Server {
             return Err(Error::Others(format!("Host {} is not right", host)));
         }
         let scheme = hostv[0].to_lowercase();
-        if scheme != "unix" {
-            return Err(Error::Others(format!("Scheme {} is not supported", scheme)));
-        }
 
-        let fd = socket(AddressFamily::Unix, SockType::Stream, SockFlag::empty(), None).map_err(|e| Error::Socket(e.to_string()))?;
-        let sockaddr = hostv[1].to_owned() + &"\x00".to_string();
-        let sockaddr = UnixAddr::new_abstract(sockaddr.as_bytes()).map_err(err_to_Others!(e, ""))?;
-        let sockaddr = SockAddr::Unix(sockaddr);
+        let sockaddr :SockAddr;
+        let fd :RawFd;
+
+        match scheme.as_str() {
+            "unix" => {
+                fd = socket(AddressFamily::Unix, SockType::Stream, SockFlag::empty(), None).map_err(|e| Error::Socket(e.to_string()))?;
+                let sockaddr_h = hostv[1].to_owned() + &"\x00".to_string();
+                let sockaddr_u = UnixAddr::new_abstract(sockaddr_h.as_bytes()).map_err(err_to_Others!(e, ""))?;
+                sockaddr = SockAddr::Unix(sockaddr_u);
+            },
+
+            "vsock" => {
+                let host_port_v: Vec<&str> = hostv[1].split(":").collect();
+                if host_port_v.len() != 2 {
+                    return Err(Error::Others(format!("Host {} is not right for vsock", host)));
+                }
+                let cid = libc::VMADDR_CID_ANY;
+                let port: u32 = FromStr::from_str(host_port_v[1]).expect("the vsock port is not an number");
+                fd = socket(AddressFamily::Vsock, SockType::Stream, SockFlag::empty(), None).map_err(|e| Error::Socket(e.to_string()))?;
+                sockaddr = SockAddr::new_vsock(cid, port);
+            },
+            _ => return Err(Error::Others(format!("Scheme {} is not supported", scheme)))
+        };
 
         bind(fd, &sockaddr).map_err(err_to_Others!(e, ""))?;
         self.listeners.push(fd);
