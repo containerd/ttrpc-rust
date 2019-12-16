@@ -46,6 +46,7 @@ use super::util::{self, fq_grpc, to_snake_case, MethodType};
 
 struct MethodGen<'a> {
     proto: &'a MethodDescriptorProto,
+    package_name: String,
     service_name: String,
     service_path: String,
     root_scope: &'a RootScope<'a>,
@@ -54,12 +55,14 @@ struct MethodGen<'a> {
 impl<'a> MethodGen<'a> {
     fn new(
         proto: &'a MethodDescriptorProto,
+        package_name: String,
         service_name: String,
         service_path: String,
         root_scope: &'a RootScope<'a>,
     ) -> MethodGen<'a> {
         MethodGen {
             proto,
+            package_name,
             service_name,
             service_path,
             root_scope,
@@ -146,9 +149,11 @@ impl<'a> MethodGen<'a> {
     }
 
     fn write_handler(&self, w: &mut CodeWriter) {
-        w.block(&format!("struct {}_method {{", self.name()), "}",
-        |w| {
-            w.write_line(&format!("service: Arc<std::boxed::Box<{} + Send + Sync>>,", self.service_name));
+        w.block(&format!("struct {}_method {{", self.name()), "}", |w| {
+            w.write_line(&format!(
+                "service: Arc<std::boxed::Box<{} + Send + Sync>>,",
+                self.service_name
+            ));
         });
         w.write_line("");
         w.block(&format!("impl ::ttrpc::MethodHandler for {}_method {{", self.name()), "}",
@@ -293,9 +298,10 @@ impl<'a> MethodGen<'a> {
                         self.output()
                     ));
                     w.write_line(&format!(
-                        "::ttrpc::client_request!(self, req, timeout_nano, \"grpc.{}\", \"{}\", cres);",
+                        "::ttrpc::client_request!(self, req, timeout_nano, \"{}.{}\", \"{}\", cres);",
+                        self.package_name,
                         self.service_name,
-                        &self.proto.get_name()
+                        &self.proto.get_name(),
                     ));
                     w.write_line("Ok(cres)");
                 });
@@ -324,15 +330,17 @@ impl<'a> MethodGen<'a> {
         );
 
         w.def_fn(&sig, |w| {
-            w.write_line(format!("Err(::ttrpc::Error::RpcStatus(::ttrpc::get_Status(::ttrpc::Code::NOT_FOUND, \"/grpc.{}/{} is not supported\".to_string())))",
-                                 self.service_name, self.proto.get_name(),));
+            w.write_line(format!("Err(::ttrpc::Error::RpcStatus(::ttrpc::get_Status(::ttrpc::Code::NOT_FOUND, \"/{}.{}/{} is not supported\".to_string())))",
+            self.package_name,
+            self.service_name, self.proto.get_name(),));
         });
     }
 
     fn write_bind(&self, w: &mut CodeWriter) {
-        let s = format!("methods.insert(\"/grpc.{}/{}\".to_string(),
+        let s = format!("methods.insert(\"/{}.{}/{}\".to_string(),
                     std::boxed::Box::new({}_method{{service: service.clone()}}) as std::boxed::Box<::ttrpc::MethodHandler + Send + Sync>);",
-                        self.service_name, self.proto.get_name(), self.name());
+                    self.package_name,
+                    self.service_name, self.proto.get_name(), self.name());
         w.write_line(&s);
     }
 }
@@ -349,9 +357,9 @@ impl<'a> ServiceGen<'a> {
         root_scope: &'a RootScope,
     ) -> ServiceGen<'a> {
         let service_path = if file.get_package().is_empty() {
-            format!("/{}", proto.get_name())
+            format!("{}", proto.get_name())
         } else {
-            format!("/{}.{}", file.get_package(), proto.get_name())
+            format!("{}.{}", file.get_package(), proto.get_name())
         };
         let methods = proto
             .get_method()
@@ -359,6 +367,7 @@ impl<'a> ServiceGen<'a> {
             .map(|m| {
                 MethodGen::new(
                     m,
+                    file.get_package().to_string(),
                     util::to_camel_case(proto.get_name()),
                     service_path.clone(),
                     root_scope,
