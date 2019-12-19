@@ -146,9 +146,11 @@ impl<'a> MethodGen<'a> {
     }
 
     fn write_handler(&self, w: &mut CodeWriter) {
-        w.block(&format!("struct {}_method {{", self.name()), "}",
-        |w| {
-            w.write_line(&format!("service: Arc<std::boxed::Box<{} + Send + Sync>>,", self.service_name));
+        w.block(&format!("struct {}_method {{", self.name()), "}", |w| {
+            w.write_line(&format!(
+                "service: Arc<std::boxed::Box<{} + Send + Sync>>,",
+                self.service_name
+            ));
         });
         w.write_line("");
         w.block(&format!("impl ::ttrpc::MethodHandler for {}_method {{", self.name()), "}",

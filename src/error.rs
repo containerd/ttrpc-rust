@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::ttrpc::{Code, Status};
 use std::result;
-use crate::ttrpc::{Status, Code};
 
 #[derive(Debug)]
 pub enum Error {
