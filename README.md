@@ -1,10 +1,12 @@
 # ttrpc-rust
 
-`ttrpc-rust` is a Rust version of [ttrpc](https://github.com/containerd/ttrpc). [ttrpc](https://github.com/containerd/ttrpc) is GRPC for low-memory environments.
+_ttrpc-rust is a **non-core** subproject of containerd_
+
+`ttrpc-rust` is the Rust version of [ttrpc](https://github.com/containerd/ttrpc). [ttrpc](https://github.com/containerd/ttrpc) is GRPC for low-memory environments.
 
 The ttrpc compiler of `ttrpc-rust` `ttrpc_rust_plugin` is modified from gRPC compiler of [gRPC-rs](https://github.com/pingcap/grpc-rs) [grpcio-compiler](https://github.com/pingcap/grpc-rs/tree/master/compiler).
 
-# Usage
+## Usage
 
 To generate the sources from proto files:
 
