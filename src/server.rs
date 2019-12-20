@@ -12,24 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::fmt;
-use std::str::FromStr;
-use std::fmt::{Debug, Formatter};
-use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
-use std::process;
-use std::os::unix::io::RawFd;
 use nix::sys::socket::*;
 use nix::unistd::close;
 use protobuf::{CodedInputStream, CodedOutputStream, Message};
+use std::collections::HashMap;
+use std::fmt;
+use std::fmt::{Debug, Formatter};
+use std::net::{IpAddr, SocketAddr};
+use std::os::unix::io::RawFd;
+use std::process;
+use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-use crate::channel::{message_header, read_message, write_message, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
-use crate::ttrpc::{Request, Response, Status, Code};
-use crate::error::{Result, get_Status, Error};
+use crate::channel::{
+    message_header, read_message, write_message, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
+};
+use crate::error::{get_Status, Error, Result};
+use crate::ttrpc::{Code, Request, Response, Status};
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -59,14 +61,17 @@ struct ThreadS<'a> {
     max: usize,
 }
 
-fn start_method_handler_thread(fd: RawFd,
-                               fdlock: Arc<Mutex<()>>,
-                               wtc: Arc<AtomicUsize>,
-                               quit: Arc<AtomicBool>,
-                               methods: Arc<HashMap<String, Box<MethodHandler + Send + Sync>>>,
-                               res_tx: Sender<(message_header, Vec<u8>)>,
-                               control_tx: SyncSender<()>,
-                               min: usize, max: usize) {
+fn start_method_handler_thread(
+    fd: RawFd,
+    fdlock: Arc<Mutex<()>>,
+    wtc: Arc<AtomicUsize>,
+    quit: Arc<AtomicBool>,
+    methods: Arc<HashMap<String, Box<MethodHandler + Send + Sync>>>,
+    res_tx: Sender<(message_header, Vec<u8>)>,
+    control_tx: SyncSender<()>,
+    min: usize,
+    max: usize,
+) {
     thread::spawn(move || {
         while !quit.load(Ordering::SeqCst) {
             let c = wtc.fetch_add(1, Ordering::SeqCst) + 1;
@@ -99,19 +104,17 @@ fn start_method_handler_thread(fd: RawFd,
                 Ok((x, y)) => {
                     mh = x;
                     buf = y;
-                },
-                Err(x) => {
-                    match x {
-                        Error::Socket(y) => {
-                            trace!("Socket error {}", y);
-                            quit.store(true, Ordering::SeqCst);
-                            control_tx.try_send(());
-                            break;
-                        },
-                        _ => {
-                            trace!("Others error {:?}", x);
-                            continue;
-                        },
+                }
+                Err(x) => match x {
+                    Error::Socket(y) => {
+                        trace!("Socket error {}", y);
+                        quit.store(true, Ordering::SeqCst);
+                        control_tx.try_send(());
+                        break;
+                    }
+                    _ => {
+                        trace!("Others error {:?}", x);
+                        continue;
                     }
                 },
             }
@@ -151,7 +154,11 @@ fn start_method_handler_thread(fd: RawFd,
                 }
                 continue;
             }
-            let ctx = TtrpcContext{fd: fd, mh: mh, res_tx: res_tx.clone()};
+            let ctx = TtrpcContext {
+                fd: fd,
+                mh: mh,
+                res_tx: res_tx.clone(),
+            };
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);
                 quit.store(true, Ordering::SeqCst);
@@ -167,13 +174,17 @@ fn start_method_handler_threads(num: usize, ts: &ThreadS) {
         if (ts.quit.load(Ordering::SeqCst)) {
             break;
         }
-        start_method_handler_thread(ts.fd,
-                                    ts.fdlock.clone(),
-                                    ts.wtc.clone(),
-                                    ts.quit.clone(),
-                                    ts.methods.clone(),
-                                    ts.res_tx.clone(),
-                                    ts.control_tx.clone(), ts.min, ts.max);
+        start_method_handler_thread(
+            ts.fd,
+            ts.fdlock.clone(),
+            ts.wtc.clone(),
+            ts.quit.clone(),
+            ts.methods.clone(),
+            ts.res_tx.clone(),
+            ts.control_tx.clone(),
+            ts.min,
+            ts.max,
+        );
     }
 }
 
@@ -206,28 +217,45 @@ impl Server {
         }
         let scheme = hostv[0].to_lowercase();
 
-        let sockaddr :SockAddr;
-        let fd :RawFd;
+        let sockaddr: SockAddr;
+        let fd: RawFd;
 
         match scheme.as_str() {
             "unix" => {
-                fd = socket(AddressFamily::Unix, SockType::Stream, SockFlag::empty(), None).map_err(|e| Error::Socket(e.to_string()))?;
+                fd = socket(
+                    AddressFamily::Unix,
+                    SockType::Stream,
+                    SockFlag::empty(),
+                    None,
+                )
+                .map_err(|e| Error::Socket(e.to_string()))?;
                 let sockaddr_h = hostv[1].to_owned() + &"\x00".to_string();
-                let sockaddr_u = UnixAddr::new_abstract(sockaddr_h.as_bytes()).map_err(err_to_Others!(e, ""))?;
+                let sockaddr_u =
+                    UnixAddr::new_abstract(sockaddr_h.as_bytes()).map_err(err_to_Others!(e, ""))?;
                 sockaddr = SockAddr::Unix(sockaddr_u);
-            },
+            }
 
             "vsock" => {
                 let host_port_v: Vec<&str> = hostv[1].split(":").collect();
                 if host_port_v.len() != 2 {
-                    return Err(Error::Others(format!("Host {} is not right for vsock", host)));
+                    return Err(Error::Others(format!(
+                        "Host {} is not right for vsock",
+                        host
+                    )));
                 }
                 let cid = libc::VMADDR_CID_ANY;
-                let port: u32 = FromStr::from_str(host_port_v[1]).expect("the vsock port is not an number");
-                fd = socket(AddressFamily::Vsock, SockType::Stream, SockFlag::empty(), None).map_err(|e| Error::Socket(e.to_string()))?;
+                let port: u32 =
+                    FromStr::from_str(host_port_v[1]).expect("the vsock port is not an number");
+                fd = socket(
+                    AddressFamily::Vsock,
+                    SockType::Stream,
+                    SockFlag::empty(),
+                    None,
+                )
+                .map_err(|e| Error::Socket(e.to_string()))?;
                 sockaddr = SockAddr::new_vsock(cid, port);
-            },
-            _ => return Err(Error::Others(format!("Scheme {} is not supported", scheme)))
+            }
+            _ => return Err(Error::Others(format!("Scheme {} is not supported", scheme))),
         };
 
         bind(fd, &sockaddr).map_err(err_to_Others!(e, ""))?;
@@ -236,7 +264,10 @@ impl Server {
         Ok(self)
     }
 
-    pub fn register_service(mut self, methods: HashMap<String, Box<MethodHandler + Send + Sync>>) -> Server {
+    pub fn register_service(
+        mut self,
+        methods: HashMap<String, Box<MethodHandler + Send + Sync>>,
+    ) -> Server {
         self.methods.extend(methods);
         self
     }
@@ -258,10 +289,14 @@ impl Server {
 
     pub fn start(self) -> Result<()> {
         if self.thread_count_default >= self.thread_count_max {
-            return Err(Error::Others(format!("thread_count_default should smaller than thread_count_max")));
+            return Err(Error::Others(format!(
+                "thread_count_default should smaller than thread_count_max"
+            )));
         }
         if self.thread_count_default <= self.thread_count_min {
-            return Err(Error::Others(format!("thread_count_default should biger than thread_count_min")));
+            return Err(Error::Others(format!(
+                "thread_count_default should biger than thread_count_min"
+            )));
         }
 
         if self.listeners.len() <= 0 {
@@ -281,7 +316,10 @@ impl Server {
 
                 // Start response thread
                 let quit_res = quit.clone();
-                let (res_tx, res_rx): (Sender<(message_header, Vec<u8>)>, Receiver<(message_header, Vec<u8>)>) = channel();
+                let (res_tx, res_rx): (
+                    Sender<(message_header, Vec<u8>)>,
+                    Receiver<(message_header, Vec<u8>)>,
+                ) = channel();
                 thread::spawn(move || {
                     for r in res_rx.iter() {
                         if (quit_res.load(Ordering::SeqCst)) {
@@ -338,7 +376,11 @@ pub trait MethodHandler {
     fn handler(&self, ctx: TtrpcContext, req: Request) -> Result<()>;
 }
 
-pub fn response_to_channel(StreamID: u32, res: Response, tx: Sender<(message_header, Vec<u8>)>) -> Result<()> {
+pub fn response_to_channel(
+    StreamID: u32,
+    res: Response,
+    tx: Sender<(message_header, Vec<u8>)>,
+) -> Result<()> {
     let mut buf = Vec::with_capacity(res.compute_size() as usize);
     let mut s = CodedOutputStream::vec(&mut buf);
     res.write_to(&mut s).map_err(err_to_Others!(e, ""))?;
@@ -360,25 +402,28 @@ macro_rules! request_handler {
     ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
         let mut s = CodedInputStream::from_bytes(&$req.payload);
         let mut req = super::$server::$req_type::new();
-        req.merge_from(&mut s).map_err(::ttrpc::Err_to_Others!(e, ""))?;
+        req.merge_from(&mut s)
+            .map_err(::ttrpc::Err_to_Others!(e, ""))?;
 
         let mut res = ::ttrpc::Response::new();
         match $class.service.$req_fn(&$ctx, req) {
-            Ok(rep)  => {
+            Ok(rep) => {
                 res.set_status(::ttrpc::get_Status(::ttrpc::Code::OK, "".to_string()));
                 res.payload.reserve(rep.compute_size() as usize);
                 let mut s = CodedOutputStream::vec(&mut res.payload);
-                rep.write_to(&mut s).map_err(::ttrpc::Err_to_Others!(e, ""))?;
+                rep.write_to(&mut s)
+                    .map_err(::ttrpc::Err_to_Others!(e, ""))?;
                 s.flush().map_err(::ttrpc::Err_to_Others!(e, ""))?;
-            },
-            Err(x) => {
-                match x {
-                    ::ttrpc::Error::RpcStatus(s) => {
-                        res.set_status(s);
-                    },
-                    _ => {
-                        res.set_status(::ttrpc::get_Status(::ttrpc::Code::UNKNOWN, format!("{:?}", x)));
-                    },
+            }
+            Err(x) => match x {
+                ::ttrpc::Error::RpcStatus(s) => {
+                    res.set_status(s);
+                }
+                _ => {
+                    res.set_status(::ttrpc::get_Status(
+                        ::ttrpc::Code::UNKNOWN,
+                        format!("{:?}", x),
+                    ));
                 }
             },
         }

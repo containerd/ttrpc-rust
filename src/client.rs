@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::os::unix::io::RawFd;
-use protobuf::{CodedInputStream, CodedOutputStream, Message};
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use std::sync::mpsc;
-use std::thread;
-use nix::unistd::close;
-use nix::sys::socket::*;
 use nix::sys::select::*;
+use nix::sys::socket::*;
+use nix::unistd::close;
+use protobuf::{CodedInputStream, CodedOutputStream, Message};
+use std::collections::HashMap;
+use std::os::unix::io::RawFd;
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
+use crate::channel::{
+    message_header, read_message, write_message, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
+};
 use crate::error::{get_Status, Error, Result};
-use crate::ttrpc::{Request, Response, Status, Code};
-use crate::channel::{message_header, read_message, write_message, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
+use crate::ttrpc::{Code, Request, Response, Status};
 
 #[derive(Clone)]
 pub struct Client {
@@ -36,18 +38,28 @@ pub struct Client {
 impl Client {
     /// Initialize a new [`Client`].
     pub fn new(fd: RawFd) -> Client {
-        let (sender_tx, rx)
-            : (mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>,
-               mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>) = mpsc::channel();
+        let (sender_tx, rx): (
+            mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>,
+            mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>,
+        ) = mpsc::channel();
 
-        let (recver_fd, close_fd) = socketpair(AddressFamily::Unix, SockType::Stream, None, SockFlag::empty()).unwrap();
-        let client_close = Arc::new(Client_close{fd: fd, close_fd: close_fd});
+        let (recver_fd, close_fd) = socketpair(
+            AddressFamily::Unix,
+            SockType::Stream,
+            None,
+            SockFlag::empty(),
+        )
+        .unwrap();
+        let client_close = Arc::new(Client_close {
+            fd: fd,
+            close_fd: close_fd,
+        });
 
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
 
         //Sender
         let recver_map = recver_map_orig.clone();
-        thread::spawn(move|| {
+        thread::spawn(move || {
             let mut streamID: u32 = 1;
             for (buf, recver_tx) in rx.iter() {
                 let current_streamID = streamID;
@@ -77,7 +89,7 @@ impl Client {
 
         //Recver
         let recver_map = recver_map_orig.clone();
-        thread::spawn(move|| {
+        thread::spawn(move || {
             let bigfd = {
                 if fd > recver_fd {
                     fd + 1
@@ -102,31 +114,31 @@ impl Client {
                     Ok((x, y)) => {
                         mh = x;
                         buf = y;
-                    },
-                    Err(x) => {
-                        match x {
-                            Error::Socket(y) => {
-                                trace!("Socket error {}", y);
-                                break;
-                            },
-                            _ => {
-                                trace!("Others error {:?}", x);
-                                continue;
-                            },
+                    }
+                    Err(x) => match x {
+                        Error::Socket(y) => {
+                            trace!("Socket error {}", y);
+                            break;
+                        }
+                        _ => {
+                            trace!("Others error {:?}", x);
+                            continue;
                         }
                     },
                 };
                 let mut map = recver_map.lock().unwrap();
-                let recver_tx = match(map.get(&mh.StreamID)) {
-                    Some(tx) => { tx },
+                let recver_tx = match (map.get(&mh.StreamID)) {
+                    Some(tx) => tx,
                     None => {
                         debug!("Recver got unknown packet {:?} {:?}", mh, buf);
                         continue;
-                    },
+                    }
                 };
-                
                 if mh.Type != MESSAGE_TYPE_RESPONSE {
-                    recver_tx.send(Err(Error::Others(format!("Recver got malformed packet {:?} {:?}", mh, buf))));
+                    recver_tx.send(Err(Error::Others(format!(
+                        "Recver got malformed packet {:?} {:?}",
+                        mh, buf
+                    ))));
                     continue;
                 }
 
@@ -137,13 +149,12 @@ impl Client {
             trace!("Recver quit");
         });
 
-        Client { 
+        Client {
             fd: fd,
             sender_tx: sender_tx,
             client_close: client_close,
         }
     }
-    
     pub fn request(&self, req: Request) -> Result<Response> {
         let mut buf = Vec::with_capacity(req.compute_size() as usize);
         let mut s = CodedOutputStream::vec(&mut buf);
@@ -152,13 +163,18 @@ impl Client {
 
         let (tx, rx) = mpsc::sync_channel(0);
 
-        self.sender_tx.send((buf, tx)).map_err(err_to_Others!(e, "Send packet to sender error "))?;
-        let result = rx.recv().map_err(err_to_Others!(e, "Recive packet from recver error "))?;
+        self.sender_tx
+            .send((buf, tx))
+            .map_err(err_to_Others!(e, "Send packet to sender error "))?;
+        let result = rx
+            .recv()
+            .map_err(err_to_Others!(e, "Recive packet from recver error "))?;
 
         let buf = result?;
         let mut s = CodedInputStream::from_bytes(&buf);
         let mut res = Response::new();
-        res.merge_from(&mut s).map_err(err_to_Others!(e, "Unpack response error "))?;
+        res.merge_from(&mut s)
+            .map_err(err_to_Others!(e, "Unpack response error "))?;
 
         let status = res.get_status();
         if status.get_code() != Code::OK {
@@ -191,11 +207,14 @@ macro_rules! client_request {
         creq.set_timeout_nano($timeout_nano);
         creq.payload.reserve($req.compute_size() as usize);
         let mut s = CodedOutputStream::vec(&mut creq.payload);
-        $req.write_to(&mut s).map_err(::ttrpc::Err_to_Others!(e, ""))?;
+        $req.write_to(&mut s)
+            .map_err(::ttrpc::Err_to_Others!(e, ""))?;
         s.flush().map_err(::ttrpc::Err_to_Others!(e, ""))?;
 
         let res = $self.client.request(creq)?;
         let mut s = CodedInputStream::from_bytes(&res.payload);
-        $cres.merge_from(&mut s).map_err(::ttrpc::Err_to_Others!(e, "Unpack get error "))?;
-    }
+        $cres
+            .merge_from(&mut s)
+            .map_err(::ttrpc::Err_to_Others!(e, "Unpack get error "))?;
+    };
 }
