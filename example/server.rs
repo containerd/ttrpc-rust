@@ -17,24 +17,32 @@ mod protocols;
 #[macro_use]
 extern crate log;
 
-use std::sync::Arc;
 use std::env;
+use std::sync::Arc;
 
 use log::LevelFilter;
 
+use ttrpc::error::{Error, Result};
 use ttrpc::server::*;
-use ttrpc::ttrpc::{Response, Status, Code};
-use ttrpc::error::{Result, Error};
+use ttrpc::ttrpc::{Code, Status};
 
-struct healthService;
-impl protocols::health_ttrpc::Health for healthService {
-    fn check(&self, ctx: &::ttrpc::TtrpcContext, req: protocols::health::CheckRequest) -> Result<protocols::health::HealthCheckResponse> {
+struct HealthService;
+impl protocols::health_ttrpc::Health for HealthService {
+    fn check(
+        &self,
+        _ctx: &::ttrpc::TtrpcContext,
+        _req: protocols::health::CheckRequest,
+    ) -> Result<protocols::health::HealthCheckResponse> {
         let mut status = Status::new();
         status.set_code(Code::NOT_FOUND);
         status.set_message("Just for fun".to_string());
         Err(Error::RpcStatus(status))
     }
-    fn version(&self, ctx: &::ttrpc::TtrpcContext, req: protocols::health::CheckRequest) -> Result<protocols::health::VersionCheckResponse> {
+    fn version(
+        &self,
+        _ctx: &::ttrpc::TtrpcContext,
+        req: protocols::health::CheckRequest,
+    ) -> Result<protocols::health::VersionCheckResponse> {
         info!("version {:?}", req);
         let mut rep = protocols::health::VersionCheckResponse::new();
         rep.agent_version = "mock.0.1".to_string();
@@ -45,9 +53,13 @@ impl protocols::health_ttrpc::Health for healthService {
     }
 }
 
-struct agentService;
-impl protocols::agent_ttrpc::AgentService for agentService {
-    fn list_interfaces(&self, ctx: &::ttrpc::TtrpcContext, req: protocols::agent::ListInterfacesRequest) -> ::ttrpc::Result<protocols::agent::Interfaces> {
+struct AgentService;
+impl protocols::agent_ttrpc::AgentService for AgentService {
+    fn list_interfaces(
+        &self,
+        _ctx: &::ttrpc::TtrpcContext,
+        _req: protocols::agent::ListInterfacesRequest,
+    ) -> ::ttrpc::Result<protocols::agent::Interfaces> {
         let mut rp = protobuf::RepeatedField::new();
 
         let mut i = protocols::types::Interface::new();
@@ -73,16 +85,18 @@ fn main() {
         panic!("Usage: {} unix_addr", args[0]);
     }
 
-    let h = Box::new(healthService {}) as Box<protocols::health_ttrpc::Health + Send + Sync>;
+    let h = Box::new(HealthService {}) as Box<dyn protocols::health_ttrpc::Health + Send + Sync>;
     let h = Arc::new(h);
     let hservice = protocols::health_ttrpc::create_health(h);
 
-    let a = Box::new(agentService {}) as Box<protocols::agent_ttrpc::AgentService + Send + Sync>;
+    let a =
+        Box::new(AgentService {}) as Box<dyn protocols::agent_ttrpc::AgentService + Send + Sync>;
     let a = Arc::new(a);
     let aservice = protocols::agent_ttrpc::create_agent_service(a);
 
     let server = Server::new()
-        .bind("unix:///tmp/1").unwrap()
+        .bind("unix:///tmp/1")
+        .unwrap()
         .register_service(hservice)
         .register_service(aservice);
 
