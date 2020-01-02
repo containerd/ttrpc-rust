@@ -151,7 +151,7 @@ impl<'a> MethodGen<'a> {
     fn write_handler(&self, w: &mut CodeWriter) {
         w.block(&format!("struct {}_method {{", self.name()), "}", |w| {
             w.write_line(&format!(
-                "service: Arc<std::boxed::Box<{} + Send + Sync>>,",
+                "service: Arc<std::boxed::Box<dyn {} + Send + Sync>>,",
                 self.service_name
             ));
         });
@@ -321,7 +321,7 @@ impl<'a> MethodGen<'a> {
         };
 
         let sig = format!(
-            "{}(&self, ctx: &{}, {}: {}) -> ::ttrpc::Result<{}>",
+            "{}(&self, _ctx: &{}, _{}: {}) -> ::ttrpc::Result<{}>",
             self.name(),
             fq_grpc("TtrpcContext"),
             req,
@@ -330,7 +330,7 @@ impl<'a> MethodGen<'a> {
         );
 
         w.def_fn(&sig, |w| {
-            w.write_line(format!("Err(::ttrpc::Error::RpcStatus(::ttrpc::get_Status(::ttrpc::Code::NOT_FOUND, \"/{}.{}/{} is not supported\".to_string())))",
+            w.write_line(format!("Err(::ttrpc::Error::RpcStatus(::ttrpc::get_status(::ttrpc::Code::NOT_FOUND, \"/{}.{}/{} is not supported\".to_string())))",
             self.package_name,
             self.service_name, self.proto.get_name(),));
         });
@@ -338,7 +338,7 @@ impl<'a> MethodGen<'a> {
 
     fn write_bind(&self, w: &mut CodeWriter) {
         let s = format!("methods.insert(\"/{}.{}/{}\".to_string(),
-                    std::boxed::Box::new({}_method{{service: service.clone()}}) as std::boxed::Box<::ttrpc::MethodHandler + Send + Sync>);",
+                    std::boxed::Box::new({}_method{{service: service.clone()}}) as std::boxed::Box<dyn ::ttrpc::MethodHandler + Send + Sync>);",
                     self.package_name,
                     self.service_name, self.proto.get_name(), self.name());
         w.write_line(&s);
@@ -418,7 +418,7 @@ impl<'a> ServiceGen<'a> {
         w.write_line("");
 
         let s = format!(
-            "create_{}(service: Arc<std::boxed::Box<{} + Send + Sync>>) -> HashMap <String, Box<::ttrpc::MethodHandler + Send + Sync>>",
+            "create_{}(service: Arc<std::boxed::Box<dyn {} + Send + Sync>>) -> HashMap <String, Box<dyn ::ttrpc::MethodHandler + Send + Sync>>",
             to_snake_case(&self.service_name()), self.service_name()
         );
 
@@ -475,6 +475,8 @@ fn gen_file(
     let mut v = Vec::new();
     {
         let mut w = CodeWriter::new(&mut v);
+
+        w.write_generated();
 
         w.write_line("use protobuf::{CodedInputStream, CodedOutputStream, Message};");
         w.write_line("use std::collections::HashMap;");
