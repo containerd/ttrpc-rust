@@ -476,8 +476,6 @@ fn gen_file(
     {
         let mut w = CodeWriter::new(&mut v);
 
-        w.write_generated();
-
         w.write_line("use protobuf::{CodedInputStream, CodedOutputStream, Message};");
         w.write_line("use std::collections::HashMap;");
         w.write_line("use std::sync::Arc;");
