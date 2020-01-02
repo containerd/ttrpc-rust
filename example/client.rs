@@ -20,7 +20,6 @@ use std::thread;
 use nix::sys::socket::*;
 use nix::unistd::close;
 
-use log::LevelFilter;
 use ttrpc::client::Client;
 
 fn main() {
@@ -76,5 +75,5 @@ fn main() {
 
     t.join().unwrap();
 
-    close(fd);
+    close(fd).unwrap();
 }
