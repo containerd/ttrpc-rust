@@ -24,7 +24,7 @@ pub enum Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
-pub fn get_Status(c: Code, msg: String) -> Status {
+pub fn get_status(c: Code, msg: String) -> Status {
     let mut status = Status::new();
     status.set_code(c);
     status.set_message(msg);
@@ -32,13 +32,13 @@ pub fn get_Status(c: Code, msg: String) -> Status {
     status
 }
 
-pub fn get_RpcStatus(c: Code, msg: String) -> Error {
-    Error::RpcStatus(get_Status(c, msg))
+pub fn get_rpc_status(c: Code, msg: String) -> Error {
+    Error::RpcStatus(get_status(c, msg))
 }
 
 macro_rules! err_to_RpcStatus {
     ($c: expr, $e: ident, $s: expr) => {
-        |$e| get_RpcStatus($c, $s.to_string() + &$e.to_string())
+        |$e| get_rpc_status($c, $s.to_string() + &$e.to_string())
     };
 }
 

@@ -23,16 +23,16 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::channel::{
-    message_header, read_message, write_message, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
+    read_message, write_message, MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
 };
-use crate::error::{get_Status, Error, Result};
-use crate::ttrpc::{Code, Request, Response, Status};
+use crate::error::{Error, Result};
+use crate::ttrpc::{Code, Request, Response};
 
 #[derive(Clone)]
 pub struct Client {
     fd: RawFd,
     sender_tx: mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>,
-    client_close: Arc<Client_close>,
+    client_close: Arc<ClientClose>,
 }
 
 impl Client {
@@ -50,7 +50,7 @@ impl Client {
             SockFlag::empty(),
         )
         .unwrap();
-        let client_close = Arc::new(Client_close {
+        let client_close = Arc::new(ClientClose {
             fd: fd,
             close_fd: close_fd,
         });
@@ -60,28 +60,28 @@ impl Client {
         //Sender
         let recver_map = recver_map_orig.clone();
         thread::spawn(move || {
-            let mut streamID: u32 = 1;
+            let mut stream_id: u32 = 1;
             for (buf, recver_tx) in rx.iter() {
-                let current_streamID = streamID;
-                streamID += 2;
-                //Put current_streamID and recver_tx to recver_map
+                let current_stream_id = stream_id;
+                stream_id += 2;
+                //Put current_stream_id and recver_tx to recver_map
                 {
                     let mut map = recver_map.lock().unwrap();
-                    map.insert(current_streamID, recver_tx.clone());
+                    map.insert(current_stream_id, recver_tx.clone());
                 }
-                let mh = message_header {
-                    Length: buf.len() as u32,
-                    StreamID: current_streamID,
-                    Type: MESSAGE_TYPE_REQUEST,
-                    Flags: 0,
+                let mh = MessageHeader {
+                    length: buf.len() as u32,
+                    stream_id: current_stream_id,
+                    type_: MESSAGE_TYPE_REQUEST,
+                    flags: 0,
                 };
                 if let Err(e) = write_message(fd, mh, buf) {
-                    //Remove current_streamID and recver_tx to recver_map
+                    //Remove current_stream_id and recver_tx to recver_map
                     {
                         let mut map = recver_map.lock().unwrap();
-                        map.remove(&current_streamID);
+                        map.remove(&current_stream_id);
                     }
-                    recver_tx.send(Err(e));
+                    recver_tx.send(Err(e)).unwrap();
                 }
             }
             trace!("Sender quit");
@@ -127,24 +127,26 @@ impl Client {
                     },
                 };
                 let mut map = recver_map.lock().unwrap();
-                let recver_tx = match (map.get(&mh.StreamID)) {
+                let recver_tx = match map.get(&mh.stream_id) {
                     Some(tx) => tx,
                     None => {
                         debug!("Recver got unknown packet {:?} {:?}", mh, buf);
                         continue;
                     }
                 };
-                if mh.Type != MESSAGE_TYPE_RESPONSE {
-                    recver_tx.send(Err(Error::Others(format!(
-                        "Recver got malformed packet {:?} {:?}",
-                        mh, buf
-                    ))));
+                if mh.type_ != MESSAGE_TYPE_RESPONSE {
+                    recver_tx
+                        .send(Err(Error::Others(format!(
+                            "Recver got malformed packet {:?} {:?}",
+                            mh, buf
+                        ))))
+                        .unwrap();
                     continue;
                 }
 
-                recver_tx.send(Ok(buf));
+                recver_tx.send(Ok(buf)).unwrap();
 
-                map.remove(&mh.StreamID);
+                map.remove(&mh.stream_id);
             }
             trace!("Recver quit");
         });
@@ -185,15 +187,15 @@ impl Client {
     }
 }
 
-struct Client_close {
+struct ClientClose {
     fd: RawFd,
     close_fd: RawFd,
 }
 
-impl Drop for Client_close {
+impl Drop for ClientClose {
     fn drop(&mut self) {
-        close(self.close_fd);
-        close(self.fd);
+        close(self.close_fd).unwrap();
+        close(self.fd).unwrap();
         trace!("All client is droped");
     }
 }

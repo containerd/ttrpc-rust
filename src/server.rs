@@ -16,11 +16,7 @@ use nix::sys::socket::*;
 use nix::unistd::close;
 use protobuf::{CodedInputStream, CodedOutputStream, Message};
 use std::collections::HashMap;
-use std::fmt;
-use std::fmt::{Debug, Formatter};
-use std::net::{IpAddr, SocketAddr};
 use std::os::unix::io::RawFd;
-use std::process;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
@@ -28,10 +24,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::channel::{
-    message_header, read_message, write_message, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
+    read_message, write_message, MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
 };
-use crate::error::{get_Status, Error, Result};
-use crate::ttrpc::{Code, Request, Response, Status};
+use crate::error::{get_status, Error, Result};
+use crate::ttrpc::{Code, Request, Response};
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -42,7 +38,7 @@ const DEFAULT_WAIT_THREAD_COUNT_MAX: usize = 5;
 
 pub struct Server {
     listeners: Vec<RawFd>,
-    methods: HashMap<String, Box<MethodHandler + Send + Sync>>,
+    methods: HashMap<String, Box<dyn MethodHandler + Send + Sync>>,
     thread_count_default: usize,
     thread_count_min: usize,
     thread_count_max: usize,
@@ -53,8 +49,8 @@ struct ThreadS<'a> {
     fdlock: &'a Arc<Mutex<()>>,
     wtc: &'a Arc<AtomicUsize>,
     quit: &'a Arc<AtomicBool>,
-    methods: &'a Arc<HashMap<String, Box<MethodHandler + Send + Sync>>>,
-    res_tx: &'a Sender<(message_header, Vec<u8>)>,
+    methods: &'a Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
+    res_tx: &'a Sender<(MessageHeader, Vec<u8>)>,
     control_tx: &'a SyncSender<()>,
     default: usize,
     min: usize,
@@ -66,8 +62,8 @@ fn start_method_handler_thread(
     fdlock: Arc<Mutex<()>>,
     wtc: Arc<AtomicUsize>,
     quit: Arc<AtomicBool>,
-    methods: Arc<HashMap<String, Box<MethodHandler + Send + Sync>>>,
-    res_tx: Sender<(message_header, Vec<u8>)>,
+    methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
+    res_tx: Sender<(MessageHeader, Vec<u8>)>,
     control_tx: SyncSender<()>,
     min: usize,
     max: usize,
@@ -82,7 +78,7 @@ fn start_method_handler_thread(
 
             let result;
             {
-                let guard = fdlock.lock().unwrap();
+                let _guard = fdlock.lock().unwrap();
                 if quit.load(Ordering::SeqCst) {
                     break;
                 }
@@ -95,7 +91,7 @@ fn start_method_handler_thread(
 
             let c = wtc.fetch_sub(1, Ordering::SeqCst) - 1;
             if c < min {
-                control_tx.try_send(());
+                control_tx.try_send(()).unwrap();
             }
 
             let mh;
@@ -109,7 +105,7 @@ fn start_method_handler_thread(
                     Error::Socket(y) => {
                         trace!("Socket error {}", y);
                         quit.store(true, Ordering::SeqCst);
-                        control_tx.try_send(());
+                        control_tx.try_send(()).unwrap();
                         break;
                     }
                     _ => {
@@ -119,19 +115,19 @@ fn start_method_handler_thread(
                 },
             }
 
-            if mh.Type != MESSAGE_TYPE_REQUEST {
+            if mh.type_ != MESSAGE_TYPE_REQUEST {
                 continue;
             }
             let mut s = CodedInputStream::from_bytes(&buf);
             let mut req = Request::new();
             if let Err(x) = req.merge_from(&mut s) {
-                let status = get_Status(Code::INVALID_ARGUMENT, x.to_string());
+                let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
                 let mut res = Response::new();
                 res.set_status(status);
-                if let Err(x) = response_to_channel(mh.StreamID, res, res_tx.clone()) {
+                if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                     debug!("response_to_channel get error {:?}", x);
                     quit.store(true, Ordering::SeqCst);
-                    control_tx.try_send(());
+                    control_tx.try_send(()).unwrap();
                     break;
                 }
                 continue;
@@ -143,13 +139,13 @@ fn start_method_handler_thread(
             if let Some(x) = methods.get(&path) {
                 method = x;
             } else {
-                let status = get_Status(Code::INVALID_ARGUMENT, format!("{} does not exist", path));
+                let status = get_status(Code::INVALID_ARGUMENT, format!("{} does not exist", path));
                 let mut res = Response::new();
                 res.set_status(status);
-                if let Err(x) = response_to_channel(mh.StreamID, res, res_tx.clone()) {
+                if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                     debug!("response_to_channel get error {:?}", x);
                     quit.store(true, Ordering::SeqCst);
-                    control_tx.try_send(());
+                    control_tx.try_send(()).unwrap();
                     break;
                 }
                 continue;
@@ -162,7 +158,7 @@ fn start_method_handler_thread(
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);
                 quit.store(true, Ordering::SeqCst);
-                control_tx.try_send(());
+                control_tx.try_send(()).unwrap();
                 break;
             }
         }
@@ -171,7 +167,7 @@ fn start_method_handler_thread(
 
 fn start_method_handler_threads(num: usize, ts: &ThreadS) {
     for _ in 0..num {
-        if (ts.quit.load(Ordering::SeqCst)) {
+        if ts.quit.load(Ordering::SeqCst) {
             break;
         }
         start_method_handler_thread(
@@ -266,7 +262,7 @@ impl Server {
 
     pub fn register_service(
         mut self,
-        methods: HashMap<String, Box<MethodHandler + Send + Sync>>,
+        methods: HashMap<String, Box<dyn MethodHandler + Send + Sync>>,
     ) -> Server {
         self.methods.extend(methods);
         self
@@ -317,12 +313,12 @@ impl Server {
                 // Start response thread
                 let quit_res = quit.clone();
                 let (res_tx, res_rx): (
-                    Sender<(message_header, Vec<u8>)>,
-                    Receiver<(message_header, Vec<u8>)>,
+                    Sender<(MessageHeader, Vec<u8>)>,
+                    Receiver<(MessageHeader, Vec<u8>)>,
                 ) = channel();
                 thread::spawn(move || {
                     for r in res_rx.iter() {
-                        if (quit_res.load(Ordering::SeqCst)) {
+                        if quit_res.load(Ordering::SeqCst) {
                             break;
                         }
                         trace!("response thread get {:?}", r);
@@ -357,19 +353,17 @@ impl Server {
                     }
                 }
 
-                close(fd);
+                close(fd).unwrap();
                 trace!("client thread quit");
             });
         }
-
-        Ok(())
     }
 }
 
 pub struct TtrpcContext {
     pub fd: RawFd,
-    pub mh: message_header,
-    pub res_tx: Sender<(message_header, Vec<u8>)>,
+    pub mh: MessageHeader,
+    pub res_tx: Sender<(MessageHeader, Vec<u8>)>,
 }
 
 pub trait MethodHandler {
@@ -377,20 +371,20 @@ pub trait MethodHandler {
 }
 
 pub fn response_to_channel(
-    StreamID: u32,
+    stream_id: u32,
     res: Response,
-    tx: Sender<(message_header, Vec<u8>)>,
+    tx: Sender<(MessageHeader, Vec<u8>)>,
 ) -> Result<()> {
     let mut buf = Vec::with_capacity(res.compute_size() as usize);
     let mut s = CodedOutputStream::vec(&mut buf);
     res.write_to(&mut s).map_err(err_to_Others!(e, ""))?;
     s.flush().map_err(err_to_Others!(e, ""))?;
 
-    let mh = message_header {
-        Length: buf.len() as u32,
-        StreamID: StreamID,
-        Type: MESSAGE_TYPE_RESPONSE,
-        Flags: 0,
+    let mh = MessageHeader {
+        length: buf.len() as u32,
+        stream_id: stream_id,
+        type_: MESSAGE_TYPE_RESPONSE,
+        flags: 0,
     };
     tx.send((mh, buf)).map_err(err_to_Others!(e, ""))?;
 
@@ -408,7 +402,7 @@ macro_rules! request_handler {
         let mut res = ::ttrpc::Response::new();
         match $class.service.$req_fn(&$ctx, req) {
             Ok(rep) => {
-                res.set_status(::ttrpc::get_Status(::ttrpc::Code::OK, "".to_string()));
+                res.set_status(::ttrpc::get_status(::ttrpc::Code::OK, "".to_string()));
                 res.payload.reserve(rep.compute_size() as usize);
                 let mut s = CodedOutputStream::vec(&mut res.payload);
                 rep.write_to(&mut s)
@@ -420,13 +414,13 @@ macro_rules! request_handler {
                     res.set_status(s);
                 }
                 _ => {
-                    res.set_status(::ttrpc::get_Status(
+                    res.set_status(::ttrpc::get_status(
                         ::ttrpc::Code::UNKNOWN,
                         format!("{:?}", x),
                     ));
                 }
             },
         }
-        ::ttrpc::response_to_channel($ctx.mh.StreamID, res, $ctx.res_tx)?
+        ::ttrpc::response_to_channel($ctx.mh.stream_id, res, $ctx.res_tx)?
     };
 }
