@@ -21,16 +21,17 @@ $ protoc --rust_out=. --ttrpc_out=. --plugin=protoc-gen-ttrpc=`which ttrpc_rust_
 ```
 
 # Run Examples
-1. Generate codes from .proto file
-```
-$ cd ttrpc-rust/examples/protocols
-$ ./hack/update-generated-proto.sh
-```
-2. Start server
-`$ cargo run --example server unix:///tmp/1`
+1. Go to the directory
 
-3. Start Client
-`$ cargo run --example client /tmp/1`
+    `$ cd ttrpc-rust/example`
+
+2. Start the server
+
+    `$ cargo run --example server unix:///tmp/1`
+
+3. Start a client
+
+    `$ cargo run --example client /tmp/1`
 
 # Notes
 

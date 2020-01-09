@@ -5,3 +5,5 @@ Cargo.lock
 .vscode
 .idea
 *.o
+example/protocols/*.rs
+!example/protocols/mod.rs
