@@ -2,7 +2,7 @@
 name = "ttrpc-compiler"
 version = "0.1.0"
 edition = "2018"
-authors = ["Hui Zhu"]
+authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 license = "Apache-2.0"
 keywords = ["compiler", "ttrpc", "protobuf"]
 description = "ttRPC compiler for ttrpc"
