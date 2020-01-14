@@ -11,8 +11,16 @@ To generate the sources from proto files:
 1. Install protoc from github.com/protocolbuffers/protobuf
 
 2. Install protobuf-codegen from github.com/pingcap/grpc-rs
+```
+cd grpc-rs
+cargo install --force protobuf-codegen
+```
 
 3. Install ttrpc_rust_plugin from ttrpc-rust/compiler
+```
+cd ttrpc-rust/compiler
+cargo install --force --path .
+```
 
 4. Generate the sources:
 
