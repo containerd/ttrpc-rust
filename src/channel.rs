@@ -16,8 +16,8 @@ use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use nix::sys::socket::*;
 use std::os::unix::io::RawFd;
 
-use crate::error::{get_RpcStatus, Error, Result};
-use crate::ttrpc::{Code, Status};
+use crate::error::{get_rpc_status, Error, Result};
+use crate::ttrpc::Code;
 
 const MESSAGE_HEADER_LENGTH: usize = 10;
 const MESSAGE_LENGTH_MAX: usize = 4 << 20;
@@ -26,11 +26,11 @@ pub const MESSAGE_TYPE_REQUEST: u8 = 0x1;
 pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
 
 #[derive(Default, Debug)]
-pub struct message_header {
-    pub Length: u32,
-    pub StreamID: u32,
-    pub Type: u8,
-    pub Flags: u8,
+pub struct MessageHeader {
+    pub length: u32,
+    pub stream_id: u32,
+    pub type_: u8,
+    pub flags: u8,
 }
 
 const SOCK_DICONNECTED: &str = "socket disconnected";
@@ -40,10 +40,10 @@ fn sock_error_msg(size: usize, msg: String) -> Error {
         return Error::Socket(SOCK_DICONNECTED.to_string());
     }
 
-    get_RpcStatus(Code::INVALID_ARGUMENT, msg)
+    get_rpc_status(Code::INVALID_ARGUMENT, msg)
 }
 
-fn read_message_header(fd: RawFd) -> Result<message_header> {
+fn read_message_header(fd: RawFd) -> Result<MessageHeader> {
     let mut buf = [0u8; MESSAGE_HEADER_LENGTH];
     let size = recv(fd, &mut buf, MsgFlags::empty()).map_err(|e| Error::Socket(e.to_string()))?;
     if size != MESSAGE_HEADER_LENGTH {
@@ -53,45 +53,45 @@ fn read_message_header(fd: RawFd) -> Result<message_header> {
         ));
     }
 
-    let mut mh = message_header::default();
+    let mut mh = MessageHeader::default();
     let mut covbuf: &[u8] = &buf[..4];
-    mh.Length =
+    mh.length =
         covbuf
             .read_u32::<BigEndian>()
             .map_err(err_to_RpcStatus!(Code::INVALID_ARGUMENT, e, ""))?;
     let mut covbuf: &[u8] = &buf[4..8];
-    mh.StreamID =
+    mh.stream_id =
         covbuf
             .read_u32::<BigEndian>()
             .map_err(err_to_RpcStatus!(Code::INVALID_ARGUMENT, e, ""))?;
-    mh.Type = buf[8];
-    mh.Flags = buf[9];
+    mh.type_ = buf[8];
+    mh.flags = buf[9];
 
     Ok(mh)
 }
 
-pub fn read_message(fd: RawFd) -> Result<(message_header, Vec<u8>)> {
+pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
     let mh = read_message_header(fd)?;
     trace!("Got Message header {:?}", mh);
 
-    if mh.Length > MESSAGE_LENGTH_MAX as u32 {
-        return Err(get_RpcStatus(
+    if mh.length > MESSAGE_LENGTH_MAX as u32 {
+        return Err(get_rpc_status(
             Code::INVALID_ARGUMENT,
             format!(
                 "message length {} exceed maximum message size of {}",
-                mh.Length, MESSAGE_LENGTH_MAX
+                mh.length, MESSAGE_LENGTH_MAX
             ),
         ));
     }
 
     let mut buf: Vec<u8> = Vec::new();
-    buf.resize(mh.Length as usize, 0);
+    buf.resize(mh.length as usize, 0);
     let size = recv(fd, buf.as_mut_slice(), MsgFlags::empty())
         .map_err(|e| Error::Socket(e.to_string()))?;
-    if size != mh.Length as usize {
+    if size != mh.length as usize {
         return Err(sock_error_msg(
             size,
-            format!("Message length {} is not {}", size, mh.Length),
+            format!("Message length {} is not {}", size, mh.length),
         ));
     }
     trace!("Got Message body {:?}", buf);
@@ -99,15 +99,15 @@ pub fn read_message(fd: RawFd) -> Result<(message_header, Vec<u8>)> {
     Ok((mh, buf))
 }
 
-fn write_message_header(fd: RawFd, mh: message_header) -> Result<()> {
+fn write_message_header(fd: RawFd, mh: MessageHeader) -> Result<()> {
     let mut buf = [0u8; MESSAGE_HEADER_LENGTH];
 
     let mut covbuf: &mut [u8] = &mut buf[..4];
-    BigEndian::write_u32(&mut covbuf, mh.Length);
+    BigEndian::write_u32(&mut covbuf, mh.length);
     let mut covbuf: &mut [u8] = &mut buf[4..8];
-    BigEndian::write_u32(&mut covbuf, mh.StreamID);
-    buf[8] = mh.Type;
-    buf[9] = mh.Flags;
+    BigEndian::write_u32(&mut covbuf, mh.stream_id);
+    buf[8] = mh.type_;
+    buf[9] = mh.flags;
 
     let size = send(fd, &buf, MsgFlags::empty()).map_err(|e| Error::Socket(e.to_string()))?;
     if size != MESSAGE_HEADER_LENGTH {
@@ -120,7 +120,7 @@ fn write_message_header(fd: RawFd, mh: message_header) -> Result<()> {
     Ok(())
 }
 
-pub fn write_message(fd: RawFd, mh: message_header, buf: Vec<u8>) -> Result<()> {
+pub fn write_message(fd: RawFd, mh: MessageHeader, buf: Vec<u8>) -> Result<()> {
     write_message_header(fd, mh)?;
 
     let size = send(fd, &buf, MsgFlags::empty()).map_err(|e| Error::Socket(e.to_string()))?;

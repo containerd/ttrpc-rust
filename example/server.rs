@@ -24,14 +24,14 @@ use log::LevelFilter;
 
 use ttrpc::error::{Error, Result};
 use ttrpc::server::*;
-use ttrpc::ttrpc::{Code, Response, Status};
+use ttrpc::ttrpc::{Code, Status};
 
-struct healthService;
-impl protocols::health_ttrpc::Health for healthService {
+struct HealthService;
+impl protocols::health_ttrpc::Health for HealthService {
     fn check(
         &self,
-        ctx: &::ttrpc::TtrpcContext,
-        req: protocols::health::CheckRequest,
+        _ctx: &::ttrpc::TtrpcContext,
+        _req: protocols::health::CheckRequest,
     ) -> Result<protocols::health::HealthCheckResponse> {
         let mut status = Status::new();
         status.set_code(Code::NOT_FOUND);
@@ -40,7 +40,7 @@ impl protocols::health_ttrpc::Health for healthService {
     }
     fn version(
         &self,
-        ctx: &::ttrpc::TtrpcContext,
+        _ctx: &::ttrpc::TtrpcContext,
         req: protocols::health::CheckRequest,
     ) -> Result<protocols::health::VersionCheckResponse> {
         info!("version {:?}", req);
@@ -53,12 +53,12 @@ impl protocols::health_ttrpc::Health for healthService {
     }
 }
 
-struct agentService;
-impl protocols::agent_ttrpc::AgentService for agentService {
+struct AgentService;
+impl protocols::agent_ttrpc::AgentService for AgentService {
     fn list_interfaces(
         &self,
-        ctx: &::ttrpc::TtrpcContext,
-        req: protocols::agent::ListInterfacesRequest,
+        _ctx: &::ttrpc::TtrpcContext,
+        _req: protocols::agent::ListInterfacesRequest,
     ) -> ::ttrpc::Result<protocols::agent::Interfaces> {
         let mut rp = protobuf::RepeatedField::new();
 
@@ -85,11 +85,12 @@ fn main() {
         panic!("Usage: {} unix_addr", args[0]);
     }
 
-    let h = Box::new(healthService {}) as Box<protocols::health_ttrpc::Health + Send + Sync>;
+    let h = Box::new(HealthService {}) as Box<dyn protocols::health_ttrpc::Health + Send + Sync>;
     let h = Arc::new(h);
     let hservice = protocols::health_ttrpc::create_health(h);
 
-    let a = Box::new(agentService {}) as Box<protocols::agent_ttrpc::AgentService + Send + Sync>;
+    let a =
+        Box::new(AgentService {}) as Box<dyn protocols::agent_ttrpc::AgentService + Send + Sync>;
     let a = Arc::new(a);
     let aservice = protocols::agent_ttrpc::create_agent_service(a);
 
