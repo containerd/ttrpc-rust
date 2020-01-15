@@ -24,7 +24,7 @@ pub mod server;
 pub mod ttrpc;
 
 pub use crate::channel::{
-  write_message, MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
+    write_message, MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
 };
 pub use crate::client::Client;
 pub use crate::error::{get_status, Error, Result};
