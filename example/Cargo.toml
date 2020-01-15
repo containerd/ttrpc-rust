@@ -17,7 +17,7 @@ libc = "0.2.59"
 byteorder = "1.3.2"
 log = "0.4.6"
 simple-logging = "2.0.2"
-nix = "0.15.0"
+nix = "0.16.1"
 ttrpc = { path = "../" }
 
 
