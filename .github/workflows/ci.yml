@@ -1,0 +1,13 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  make:
+    name: Make
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+      - name: Make
+        run: |
+          make deps
+          make

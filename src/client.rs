@@ -50,10 +50,7 @@ impl Client {
             SockFlag::empty(),
         )
         .unwrap();
-        let client_close = Arc::new(ClientClose {
-            fd: fd,
-            close_fd: close_fd,
-        });
+        let client_close = Arc::new(ClientClose { fd, close_fd });
 
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
 
@@ -152,9 +149,9 @@ impl Client {
         });
 
         Client {
-            fd: fd,
-            sender_tx: sender_tx,
-            client_close: client_close,
+            fd,
+            sender_tx,
+            client_close,
         }
     }
     pub fn request(&self, req: Request) -> Result<Response> {
