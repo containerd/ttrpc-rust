@@ -151,8 +151,8 @@ fn start_method_handler_thread(
                 continue;
             }
             let ctx = TtrpcContext {
-                fd: fd,
-                mh: mh,
+                fd,
+                mh,
                 res_tx: res_tx.clone(),
             };
             if let Err(x) = method.handler(ctx, req) {
@@ -191,8 +191,8 @@ fn check_method_handler_threads(ts: &ThreadS) {
     }
 }
 
-impl Server {
-    pub fn new() -> Server {
+impl Default for Server {
+    fn default() -> Self {
         Server {
             listeners: Vec::with_capacity(1),
             methods: HashMap::new(),
@@ -201,10 +201,18 @@ impl Server {
             thread_count_max: DEFAULT_WAIT_THREAD_COUNT_MAX,
         }
     }
+}
+
+impl Server {
+    pub fn new() -> Server {
+        Server::default()
+    }
 
     pub fn bind(mut self, host: &str) -> Result<Server> {
-        if self.listeners.len() > 0 {
-            return Err(Error::Others(format!("ttrpc-rust just support 1 host now")));
+        if !self.listeners.is_empty() {
+            return Err(Error::Others(
+                "ttrpc-rust just support 1 host now".to_string(),
+            ));
         }
 
         let hostv: Vec<&str> = host.trim().split("://").collect();
@@ -232,7 +240,7 @@ impl Server {
             }
 
             "vsock" => {
-                let host_port_v: Vec<&str> = hostv[1].split(":").collect();
+                let host_port_v: Vec<&str> = hostv[1].split(':').collect();
                 if host_port_v.len() != 2 {
                     return Err(Error::Others(format!(
                         "Host {} is not right for vsock",
@@ -285,18 +293,18 @@ impl Server {
 
     pub fn start(self) -> Result<()> {
         if self.thread_count_default >= self.thread_count_max {
-            return Err(Error::Others(format!(
-                "thread_count_default should smaller than thread_count_max"
-            )));
+            return Err(Error::Others(
+                "thread_count_default should smaller than thread_count_max".to_string(),
+            ));
         }
         if self.thread_count_default <= self.thread_count_min {
-            return Err(Error::Others(format!(
-                "thread_count_default should biger than thread_count_min"
-            )));
+            return Err(Error::Others(
+                "thread_count_default should biger than thread_count_min".to_string(),
+            ));
         }
 
-        if self.listeners.len() <= 0 {
-            return Err(Error::Others(format!("ttrpc-rust not bind")));
+        if self.listeners.is_empty() {
+            return Err(Error::Others("ttrpc-rust not bind".to_string()));
         }
         listen(self.listeners[0], 10).map_err(|e| Error::Socket(e.to_string()))?;
         let methods = Arc::new(self.methods);
@@ -333,22 +341,22 @@ impl Server {
 
                 let (control_tx, control_rx): (SyncSender<()>, Receiver<()>) = sync_channel(0);
                 let ts = ThreadS {
-                    fd: fd,
+                    fd,
                     fdlock: &Arc::new(Mutex::new(())),
                     wtc: &Arc::new(AtomicUsize::new(0)),
                     methods: &methods,
                     res_tx: &res_tx,
                     control_tx: &control_tx,
                     quit: &quit,
-                    default: default,
-                    min: min,
-                    max: max,
+                    default,
+                    min,
+                    max,
                 };
                 start_method_handler_threads(ts.default, &ts);
 
                 while !quit.load(Ordering::SeqCst) {
                     check_method_handler_threads(&ts);
-                    if let Err(_) = control_rx.recv() {
+                    if control_rx.recv().is_err() {
                         break;
                     }
                 }
@@ -382,7 +390,7 @@ pub fn response_to_channel(
 
     let mh = MessageHeader {
         length: buf.len() as u32,
-        stream_id: stream_id,
+        stream_id,
         type_: MESSAGE_TYPE_RESPONSE,
         flags: 0,
     };

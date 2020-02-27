@@ -19,7 +19,11 @@ extern crate log;
 pub mod error;
 #[macro_use]
 mod channel;
+// TODO: address this after merging linters
+#[allow(clippy::type_complexity, clippy::redundant_clone)]
 pub mod client;
+// TODO: address this after merging linters
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub mod server;
 pub mod ttrpc;
 
