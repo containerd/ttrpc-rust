@@ -229,7 +229,7 @@ impl Server {
                 fd = socket(
                     AddressFamily::Unix,
                     SockType::Stream,
-                    SockFlag::empty(),
+                    SockFlag::SOCK_CLOEXEC,
                     None,
                 )
                 .map_err(|e| Error::Socket(e.to_string()))?;
@@ -253,7 +253,7 @@ impl Server {
                 fd = socket(
                     AddressFamily::Vsock,
                     SockType::Stream,
-                    SockFlag::empty(),
+                    SockFlag::SOCK_CLOEXEC,
                     None,
                 )
                 .map_err(|e| Error::Socket(e.to_string()))?;
@@ -312,7 +312,8 @@ impl Server {
         let min = self.thread_count_min;
         let max = self.thread_count_max;
         loop {
-            let fd = accept(self.listeners[0]).map_err(|e| Error::Socket(e.to_string()))?;
+            let fd = accept4(self.listeners[0], SockFlag::SOCK_CLOEXEC)
+                .map_err(|e| Error::Socket(e.to_string()))?;
             let methods = methods.clone();
             let quit = Arc::new(AtomicBool::new(false));
             thread::spawn(move || {
