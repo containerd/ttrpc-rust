@@ -268,6 +268,12 @@ impl Server {
         Ok(self)
     }
 
+    pub fn add_listener(mut self, fd: RawFd) -> Result<Server> {
+        self.listeners.push(fd);
+
+        Ok(self)
+    }
+
     pub fn register_service(
         mut self,
         methods: HashMap<String, Box<dyn MethodHandler + Send + Sync>>,
