@@ -51,7 +51,8 @@ fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
         match recv(fd, &mut v[len..], MsgFlags::empty()) {
             Ok(l) => {
                 len += l;
-                if len == count {
+                // when socket peer closed, it would return 0.
+                if len == count || l == 0 {
                     break;
                 }
             }
@@ -64,7 +65,7 @@ fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
         }
     }
 
-    Ok(v.to_vec())
+    Ok(v[0..len].to_vec())
 }
 
 fn write_count(fd: RawFd, buf: &[u8], count: usize) -> Result<usize> {
