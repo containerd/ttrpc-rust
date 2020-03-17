@@ -105,7 +105,12 @@ fn start_method_handler_thread(
                     Error::Socket(y) => {
                         trace!("Socket error {}", y);
                         quit.store(true, Ordering::SeqCst);
-                        control_tx.try_send(()).unwrap();
+                        // the client connection would be closed and
+                        // the connection dealing main thread would
+                        // have exited.
+                        control_tx
+                            .try_send(())
+                            .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
                         break;
                     }
                     _ => {
@@ -127,7 +132,12 @@ fn start_method_handler_thread(
                 if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                     debug!("response_to_channel get error {:?}", x);
                     quit.store(true, Ordering::SeqCst);
-                    control_tx.try_send(()).unwrap();
+                    // the client connection would be closed and
+                    // the connection dealing main thread would have
+                    // exited.
+                    control_tx
+                        .try_send(())
+                        .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
                     break;
                 }
                 continue;
@@ -145,7 +155,12 @@ fn start_method_handler_thread(
                 if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                     debug!("response_to_channel get error {:?}", x);
                     quit.store(true, Ordering::SeqCst);
-                    control_tx.try_send(()).unwrap();
+                    // the client connection would be closed and
+                    // the connection dealing main thread would have
+                    // exited.
+                    control_tx
+                        .try_send(())
+                        .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
                     break;
                 }
                 continue;
@@ -158,7 +173,12 @@ fn start_method_handler_thread(
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);
                 quit.store(true, Ordering::SeqCst);
-                control_tx.try_send(()).unwrap();
+                // the client connection would be closed and
+                // the connection dealing main thread would have
+                // exited.
+                control_tx
+                    .try_send(())
+                    .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
                 break;
             }
         }
