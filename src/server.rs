@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use nix::sys::socket::*;
+use nix::fcntl::{fcntl, FcntlArg, OFlag};
+use nix::sys::select::{select, FdSet};
+use nix::sys::socket::{self, *};
 use nix::unistd::close;
+use nix::unistd::pipe2;
 use protobuf::{CodedInputStream, CodedOutputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
@@ -22,6 +25,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::thread::JoinHandle;
 
 use crate::channel::{
     read_message, write_message, MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
@@ -38,10 +42,28 @@ const DEFAULT_WAIT_THREAD_COUNT_MAX: usize = 5;
 
 pub struct Server {
     listeners: Vec<RawFd>,
-    methods: HashMap<String, Box<dyn MethodHandler + Send + Sync>>,
+    monitor_fd: (RawFd, RawFd),
+    quit: Arc<AtomicBool>,
+    connections: Arc<Mutex<HashMap<RawFd, Connection>>>,
+    methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
+    handler: Option<JoinHandle<()>>,
     thread_count_default: usize,
     thread_count_min: usize,
     thread_count_max: usize,
+}
+
+struct Connection {
+    fd: RawFd,
+    quit: Arc<AtomicBool>,
+    handler: Option<JoinHandle<()>>,
+}
+
+impl Connection {
+    fn close(&self) {
+        self.quit.store(true, Ordering::SeqCst);
+        // in case the connection had closed
+        socket::shutdown(self.fd, Shutdown::Read).unwrap_or(());
+    }
 }
 
 struct ThreadS<'a> {
@@ -80,18 +102,28 @@ fn start_method_handler_thread(
             {
                 let _guard = fdlock.lock().unwrap();
                 if quit.load(Ordering::SeqCst) {
+                    // notify the connection dealing main thread to stop.
+                    control_tx
+                        .try_send(())
+                        .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
                     break;
                 }
                 result = read_message(fd);
             }
 
             if quit.load(Ordering::SeqCst) {
+                // notify the connection dealing main thread to stop.
+                control_tx
+                    .try_send(())
+                    .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
                 break;
             }
 
             let c = wtc.fetch_sub(1, Ordering::SeqCst) - 1;
             if c < min {
-                control_tx.try_send(()).unwrap();
+                control_tx
+                    .try_send(())
+                    .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
             }
 
             let mh;
@@ -153,7 +185,7 @@ fn start_method_handler_thread(
                 let mut res = Response::new();
                 res.set_status(status);
                 if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
-                    debug!("response_to_channel get error {:?}", x);
+                    info!("response_to_channel get error {:?}", x);
                     quit.store(true, Ordering::SeqCst);
                     // the client connection would be closed and
                     // the connection dealing main thread would have
@@ -213,9 +245,14 @@ fn check_method_handler_threads(ts: &ThreadS) {
 
 impl Default for Server {
     fn default() -> Self {
+        let (rfd, wfd) = pipe2(OFlag::O_CLOEXEC).unwrap();
         Server {
             listeners: Vec::with_capacity(1),
-            methods: HashMap::new(),
+            monitor_fd: (rfd, wfd),
+            quit: Arc::new(AtomicBool::new(false)),
+            connections: Arc::new(Mutex::new(HashMap::new())),
+            methods: Arc::new(HashMap::new()),
+            handler: None,
             thread_count_default: DEFAULT_WAIT_THREAD_COUNT_DEFAULT,
             thread_count_min: DEFAULT_WAIT_THREAD_COUNT_MIN,
             thread_count_max: DEFAULT_WAIT_THREAD_COUNT_MAX,
@@ -298,7 +335,8 @@ impl Server {
         mut self,
         methods: HashMap<String, Box<dyn MethodHandler + Send + Sync>>,
     ) -> Server {
-        self.methods.extend(methods);
+        let mut_methods = Arc::get_mut(&mut self.methods).unwrap();
+        mut_methods.extend(methods);
         self
     }
 
@@ -317,7 +355,7 @@ impl Server {
         self
     }
 
-    pub fn start(self) -> Result<()> {
+    pub fn start(&mut self) -> Result<()> {
         if self.thread_count_default >= self.thread_count_max {
             return Err(Error::Others(
                 "thread_count_default should smaller than thread_count_max".to_string(),
@@ -329,68 +367,179 @@ impl Server {
             ));
         }
 
+        let connections = self.connections.clone();
+
         if self.listeners.is_empty() {
             return Err(Error::Others("ttrpc-rust not bind".to_string()));
         }
-        listen(self.listeners[0], 10).map_err(|e| Error::Socket(e.to_string()))?;
-        let methods = Arc::new(self.methods);
+
+        let listener = self.listeners[0];
+
+        let methods = self.methods.clone();
         let default = self.thread_count_default;
         let min = self.thread_count_min;
         let max = self.thread_count_max;
-        loop {
-            let fd = accept4(self.listeners[0], SockFlag::SOCK_CLOEXEC)
-                .map_err(|e| Error::Socket(e.to_string()))?;
-            let methods = methods.clone();
-            let quit = Arc::new(AtomicBool::new(false));
-            thread::spawn(move || {
-                trace!("Got new client");
+        let service_quit = self.quit.clone();
+        let monitor_fd = self.monitor_fd.0;
 
-                // Start response thread
-                let quit_res = quit.clone();
-                let (res_tx, res_rx): (
-                    Sender<(MessageHeader, Vec<u8>)>,
-                    Receiver<(MessageHeader, Vec<u8>)>,
-                ) = channel();
-                thread::spawn(move || {
-                    for r in res_rx.iter() {
-                        if quit_res.load(Ordering::SeqCst) {
-                            break;
-                        }
-                        trace!("response thread get {:?}", r);
-                        if let Err(e) = write_message(fd, r.0, r.1) {
-                            trace!("write_message got {:?}", e);
-                            quit_res.store(true, Ordering::SeqCst);
-                            break;
+        if let Err(e) = fcntl(listener, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)) {
+            return Err(Error::Others(format!(
+                "failed to set listener fd: {} as non block: {}",
+                listener, e
+            )));
+        }
+
+        let handler = thread::Builder::new()
+            .name("listener_loop".into())
+            .spawn(move || {
+                listen(listener, 10)
+                    .map_err(|e| Error::Socket(e.to_string()))
+                    .unwrap();
+                loop {
+                    if service_quit.load(Ordering::SeqCst) {
+                        break;
+                    }
+
+                    let mut fd_set = FdSet::new();
+                    fd_set.insert(listener);
+                    fd_set.insert(monitor_fd);
+
+                    match select(
+                        Some(fd_set.highest().unwrap() + 1),
+                        &mut fd_set,
+                        None,
+                        None,
+                        None,
+                    ) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            if e == nix::Error::from(nix::errno::Errno::EINTR) {
+                                continue;
+                            } else {
+                                break;
+                            }
                         }
                     }
-                    trace!("response thread quit");
-                });
 
-                let (control_tx, control_rx): (SyncSender<()>, Receiver<()>) = sync_channel(0);
-                let ts = ThreadS {
-                    fd,
-                    fdlock: &Arc::new(Mutex::new(())),
-                    wtc: &Arc::new(AtomicUsize::new(0)),
-                    methods: &methods,
-                    res_tx: &res_tx,
-                    control_tx: &control_tx,
-                    quit: &quit,
-                    default,
-                    min,
-                    max,
-                };
-                start_method_handler_threads(ts.default, &ts);
+                    if fd_set.contains(monitor_fd) || !fd_set.contains(listener) {
+                        continue;
+                    }
 
-                while !quit.load(Ordering::SeqCst) {
-                    check_method_handler_threads(&ts);
-                    if control_rx.recv().is_err() {
+                    if service_quit.load(Ordering::SeqCst) {
                         break;
+                    }
+
+                    let fd = match accept4(listener, SockFlag::SOCK_CLOEXEC) {
+                        Ok(fd) => fd,
+                        Err(_e) => break,
+                    };
+
+                    let methods = methods.clone();
+                    let quit = Arc::new(AtomicBool::new(false));
+                    let child_quit = quit.clone();
+
+                    let handler = thread::Builder::new()
+                        .name("client_handler".into())
+                        .spawn(move || {
+                            debug!("Got new client");
+                            // Start response thread
+                            let quit_res = child_quit.clone();
+                            let (res_tx, res_rx): (
+                                Sender<(MessageHeader, Vec<u8>)>,
+                                Receiver<(MessageHeader, Vec<u8>)>,
+                            ) = channel();
+                            let handler = thread::spawn(move || {
+                                for r in res_rx.iter() {
+                                    info!("response thread get {:?}", r);
+                                    if let Err(e) = write_message(fd, r.0, r.1) {
+                                        info!("write_message got {:?}", e);
+                                        quit_res.store(true, Ordering::SeqCst);
+                                        break;
+                                    }
+                                }
+
+                                trace!("response thread quit");
+                            });
+
+                            let (control_tx, control_rx): (SyncSender<()>, Receiver<()>) =
+                                sync_channel(0);
+                            let ts = ThreadS {
+                                fd,
+                                fdlock: &Arc::new(Mutex::new(())),
+                                wtc: &Arc::new(AtomicUsize::new(0)),
+                                methods: &methods,
+                                res_tx: &res_tx,
+                                control_tx: &control_tx,
+                                quit: &child_quit,
+                                default,
+                                min,
+                                max,
+                            };
+                            start_method_handler_threads(ts.default, &ts);
+
+                            while !child_quit.load(Ordering::SeqCst) {
+                                check_method_handler_threads(&ts);
+                                if control_rx.recv().is_err() {
+                                    break;
+                                }
+                            }
+
+                            // drop the res_tx, thus the res_rx would get terminated notification.
+                            drop(res_tx);
+                            handler.join().unwrap_or(());
+                            close(fd).unwrap_or(());
+
+                            info!("client thread quit");
+                        })
+                        .unwrap();
+
+                    let mut cns = connections.lock().unwrap();
+                    cns.insert(
+                        fd,
+                        Connection {
+                            fd,
+                            handler: Some(handler),
+                            quit: quit.clone(),
+                        },
+                    );
+                } // end loop
+
+                let mut cns = connections.lock().unwrap();
+                for (_fd, cn) in cns.iter_mut() {
+                    if let Some(handler) = cn.handler.take() {
+                        handler.join().unwrap_or(())
                     }
                 }
 
-                close(fd).unwrap();
-                trace!("client thread quit");
-            });
+                info!("ttrpc server stopped");
+            })
+            .unwrap();
+
+        self.handler = Some(handler);
+
+        Ok(())
+    }
+
+    pub fn shutdown(mut self) {
+        self.quit.store(true, Ordering::SeqCst);
+        close(self.monitor_fd.1).unwrap_or_else(|e| {
+            warn!(
+                "failed to close notify fd: {} with error: {}",
+                self.monitor_fd.1, e
+            )
+        });
+        let connections = self.connections.lock().unwrap();
+
+        for (_fd, c) in connections.iter() {
+            c.close();
+        }
+
+        // release connections's lock, since the following handler.join()
+        // would wait on the other thread's exit in which would take the lock.
+        drop(connections);
+
+        if let Some(handler) = self.handler.take() {
+            handler.join().unwrap();
         }
     }
 }
