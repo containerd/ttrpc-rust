@@ -32,3 +32,5 @@ path = "./server.rs"
 [build-dependencies]
 protoc-rust = "2.8.0"
 cmd_lib = "0.7.8"
+protoc-rust-ttrpc = { path = "../protoc-rust-ttrpc"}
+
