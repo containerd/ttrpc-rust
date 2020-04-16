@@ -43,6 +43,9 @@ use protobuf::compiler_plugin;
 use protobuf::descriptor::*;
 use protobuf::descriptorx::*;
 use protobuf_codegen::code_writer::CodeWriter;
+use std::fs::File;
+use std::io::{self, Write};
+use std::path::Path;
 
 use super::util::{self, fq_grpc, to_camel_case, to_snake_case, MethodType};
 
@@ -558,6 +561,24 @@ pub fn gen(
     }
 
     results
+}
+
+pub fn gen_and_write(
+    file_descriptors: &[FileDescriptorProto],
+    files_to_generate: &[String],
+    out_dir: &Path,
+) -> io::Result<()> {
+    let results = gen(file_descriptors, files_to_generate);
+
+    for r in &results {
+        let mut file_path = out_dir.to_owned();
+        file_path.push(&r.name);
+        let mut file_writer = File::create(&file_path)?;
+        file_writer.write_all(&r.content)?;
+        file_writer.flush()?;
+    }
+
+    Ok(())
 }
 
 pub fn protoc_gen_grpc_rust_main() {
