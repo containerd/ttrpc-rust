@@ -8,6 +8,7 @@ The ttrpc compiler of `ttrpc-rust` `ttrpc_rust_plugin` is modified from gRPC com
 
 ## Usage
 
+### 1. Generate with `protoc` command
 To generate the sources from proto files:
 
 1. Install protoc from github.com/protocolbuffers/protobuf
@@ -28,6 +29,27 @@ cargo install --force --path .
 
 ```
 $ protoc --rust_out=. --ttrpc_out=. --plugin=protoc-gen-ttrpc=`which ttrpc_rust_plugin` example.proto
+```
+
+
+### 2. Generate programmatically
+
+API to generate .rs files to be used e. g. from build.rs.
+
+Example code:
+
+```
+fn main() {
+    protoc_rust_ttrpc::Codegen::new()
+        .out_dir("protocols")
+        .inputs(&[
+            "protocols/protos/agent.proto",
+        ])
+        .include("protocols/protos")
+        .rust_protobuf() // also generate protobuf messages, not just services
+        .run()
+        .expect("Codegen failed.");
+}
 ```
 
 # Run Examples
