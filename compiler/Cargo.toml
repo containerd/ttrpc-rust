@@ -10,7 +10,7 @@ categories = ["network-programming"]
 
 [dependencies]
 protobuf = "2.0"
-protobuf-codegen = "2.0"
+protobuf-codegen = "2.14.0"
 prost = "0.5"
 prost-build = "0.5"
 prost-types = "0.5"
