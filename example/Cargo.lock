@@ -63,6 +63,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "475bd7aa7680b4ed8f6bb59745e882bcbaeb39326532bb79ffb1716480d9a274"
 
 [[package]]
+name = "ctrlc"
+version = "3.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a4ba686dff9fa4c1c9636ce1010b0cf98ceb421361b0bb3d6faeec43bd217a7"
+dependencies = [
+ "nix 0.17.0",
+ "winapi",
+]
+
+[[package]]
 name = "derive-new"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -164,6 +174,19 @@ name = "nix"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd0eaf8df8bab402257e0a5c17a254e4cc1f72a93588a1ddfb5d356c801aa7cb"
+dependencies = [
+ "bitflags",
+ "cc",
+ "cfg-if",
+ "libc",
+ "void",
+]
+
+[[package]]
+name = "nix"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50e4785f2c3b7589a0d0c1dd60285e1188adac4006e8abd6dd578e1567027363"
 dependencies = [
  "bitflags",
  "cc",
@@ -453,12 +476,12 @@ dependencies = [
 
 [[package]]
 name = "ttrpc"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "byteorder",
  "libc",
  "log",
- "nix",
+ "nix 0.16.1",
  "protobuf",
  "protobuf-codegen-pure",
 ]
@@ -483,9 +506,10 @@ dependencies = [
  "byteorder",
  "bytes",
  "cmd_lib",
+ "ctrlc",
  "libc",
  "log",
- "nix",
+ "nix 0.16.1",
  "protobuf",
  "protoc-rust",
  "protoc-rust-ttrpc",
