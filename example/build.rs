@@ -3,15 +3,22 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 fn main() {
+    let protos = vec![
+        "protocols/protos/github.com/kata-containers/agent/pkg/types/types.proto",
+        "protocols/protos/agent.proto",
+        "protocols/protos/health.proto",
+        "protocols/protos/google/protobuf/empty.proto",
+        "protocols/protos/oci.proto",
+    ];
+
+    // Tell Cargo that if the .proto files changed, to rerun this build script.
+    protos
+        .iter()
+        .for_each(|p| println!("cargo:rerun-if-changed={}", &p));
+
     protoc_rust_ttrpc::Codegen::new()
         .out_dir("protocols")
-        .inputs(&[
-            "protocols/protos/github.com/kata-containers/agent/pkg/types/types.proto",
-            "protocols/protos/agent.proto",
-            "protocols/protos/health.proto",
-            "protocols/protos/google/protobuf/empty.proto",
-            "protocols/protos/oci.proto",
-        ])
+        .inputs(&protos)
         .include("protocols/protos")
         .rust_protobuf()
         .run()
