@@ -438,6 +438,7 @@ impl Server {
                     let quit = Arc::new(AtomicBool::new(false));
                     let child_quit = quit.clone();
 
+                    let connections_child = connections.clone();
                     let handler = thread::Builder::new()
                         .name("client_handler".into())
                         .spawn(move || {
@@ -489,6 +490,8 @@ impl Server {
                             handler.join().unwrap_or(());
                             close(fd).unwrap_or(());
 
+                            let _ = connections_child.lock().unwrap().remove(&fd);
+
                             info!("client thread quit");
                         })
                         .unwrap();
@@ -521,6 +524,8 @@ impl Server {
     }
 
     pub fn shutdown(mut self) {
+        let connections = self.connections.lock().unwrap();
+
         self.quit.store(true, Ordering::SeqCst);
         close(self.monitor_fd.1).unwrap_or_else(|e| {
             warn!(
@@ -528,7 +533,6 @@ impl Server {
                 self.monitor_fd.1, e
             )
         });
-        let connections = self.connections.lock().unwrap();
 
         for (_fd, c) in connections.iter() {
             c.close();
