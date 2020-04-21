@@ -18,7 +18,6 @@ use std::env;
 use std::thread;
 
 use nix::sys::socket::*;
-use nix::unistd::close;
 
 use ttrpc::client::Client;
 
@@ -74,6 +73,4 @@ fn main() {
     println!("main online_cpu_mem: {}", show);
 
     t.join().unwrap();
-
-    close(fd).unwrap();
 }
