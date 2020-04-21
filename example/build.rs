@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::Path;
 
 fn main() {
     let protos = vec![
@@ -31,13 +30,14 @@ fn main() {
         "protocols/oci.rs",
         "self: Box<Self>",
         "self: ::std::boxed::Box<Self>",
-    );
+    )
+    .unwrap();
 }
 
 fn replace_text_in_file(file_name: &str, from: &str, to: &str) -> Result<(), std::io::Error> {
     let mut src = File::open(file_name)?;
     let mut contents = String::new();
-    src.read_to_string(&mut contents);
+    src.read_to_string(&mut contents).unwrap();
     drop(src);
 
     let new_contents = contents.replace(from, to);
