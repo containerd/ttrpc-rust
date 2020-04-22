@@ -395,6 +395,25 @@ impl Server {
                 listen(listener, 10)
                     .map_err(|e| Error::Socket(e.to_string()))
                     .unwrap();
+
+                let (reaper_tx, reaper_rx) = channel();
+                let reaper_connections = connections.clone();
+
+                let reaper = thread::Builder::new()
+                    .name("reaper".into())
+                    .spawn(move || {
+                        for fd in reaper_rx.iter() {
+                            reaper_connections
+                                .lock()
+                                .unwrap()
+                                .remove(&fd)
+                                .map(|mut cn| {
+                                    cn.handler.take().map(|handler| handler.join().unwrap())
+                                });
+                        }
+                    })
+                    .unwrap();
+
                 loop {
                     if service_quit.load(Ordering::SeqCst) {
                         break;
@@ -437,8 +456,8 @@ impl Server {
                     let methods = methods.clone();
                     let quit = Arc::new(AtomicBool::new(false));
                     let child_quit = quit.clone();
+                    let reaper_tx_child = reaper_tx.clone();
 
-                    let connections_child = connections.clone();
                     let handler = thread::Builder::new()
                         .name("client_handler".into())
                         .spawn(move || {
@@ -489,8 +508,7 @@ impl Server {
                             drop(res_tx);
                             handler.join().unwrap_or(());
                             close(fd).unwrap_or(());
-
-                            let _ = connections_child.lock().unwrap().remove(&fd);
+                            reaper_tx_child.send(fd).unwrap();
 
                             info!("client thread quit");
                         })
@@ -507,13 +525,9 @@ impl Server {
                     );
                 } // end loop
 
-                let mut cns = connections.lock().unwrap();
-                for (_fd, cn) in cns.iter_mut() {
-                    if let Some(handler) = cn.handler.take() {
-                        handler.join().unwrap_or(())
-                    }
-                }
-
+                // notify reaper thread to exit.
+                drop(reaper_tx);
+                reaper.join().unwrap();
                 info!("ttrpc server stopped");
             })
             .unwrap();
