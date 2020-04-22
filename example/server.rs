@@ -19,6 +19,7 @@ extern crate log;
 
 use std::env;
 use std::sync::Arc;
+use std::thread;
 
 use log::LevelFilter;
 
@@ -94,11 +95,23 @@ fn main() {
     let a = Arc::new(a);
     let aservice = protocols::agent_ttrpc::create_agent_service(a);
 
-    let server = Server::new()
+    let mut server = Server::new()
         .bind("unix:///tmp/1")
         .unwrap()
         .register_service(hservice)
         .register_service(aservice);
 
     server.start().unwrap();
+
+    // Hold the main thread until receiving signal SIGTERM
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        ctrlc::set_handler(move || {
+            tx.send(()).unwrap();
+        })
+        .expect("Error setting Ctrl-C handler");
+        println!("Server is running, press Ctrl + C to exit");
+    });
+
+    rx.recv().unwrap();
 }

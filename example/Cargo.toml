@@ -10,7 +10,7 @@ repository = "https://github.com/alipay/ttrpc-rust"
 homepage = "https://github.com/alipay/ttrpc-rust"
 description = "An example of ttrpc."
 
-[dependencies]
+[dev-dependencies]
 protobuf = "2.8.0"
 bytes = "0.4.11"
 libc = "0.2.59"
@@ -19,6 +19,7 @@ log = "0.4.6"
 simple-logging = "2.0.2"
 nix = "0.16.1"
 ttrpc = { path = "../" }
+ctrlc = { version = "3.0", features = ["termination"] }
 
 
 [[example]]
