@@ -11,3 +11,14 @@ jobs:
         run: |
           make deps
           make
+  clippy_check:
+    name: Clippy Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - run: rustup component add clippy
+      - uses: tim-actions/clippy-check@master
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
+
