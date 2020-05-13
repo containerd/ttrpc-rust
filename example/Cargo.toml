@@ -18,8 +18,9 @@ byteorder = "1.3.2"
 log = "0.4.6"
 simple-logging = "2.0.2"
 nix = "0.16.1"
-ttrpc = { path = "../" }
+ttrpc = { path = "../", features = ["async"] }
 ctrlc = { version = "3.0", features = ["termination"] }
+tokio = { version = "0.2", features = ["signal"] }
 
 
 [[example]]
@@ -29,6 +30,10 @@ path = "./client.rs"
 [[example]]
 name = "server"
 path = "./server.rs"
+
+[[example]]
+name = "async-server"
+path = "./async-server.rs"
 
 [build-dependencies]
 protoc-rust = "2.8.0"

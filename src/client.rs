@@ -22,11 +22,10 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::channel::{
-    read_message, write_message, MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
-};
+use crate::channel::{read_message, write_message, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
 use crate::ttrpc::{Code, Request, Response};
+use crate::MessageHeader;
 
 #[derive(Clone)]
 pub struct Client {

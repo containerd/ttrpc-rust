@@ -36,6 +36,15 @@ pub fn get_rpc_status(c: Code, msg: String) -> Error {
     Error::RpcStatus(get_status(c, msg))
 }
 
+const SOCK_DICONNECTED: &str = "socket disconnected";
+pub fn sock_error_msg(size: usize, msg: String) -> Error {
+    if size == 0 {
+        return Error::Socket(SOCK_DICONNECTED.to_string());
+    }
+
+    get_rpc_status(Code::INVALID_ARGUMENT, msg)
+}
+
 macro_rules! err_to_RpcStatus {
     ($c: expr, $e: ident, $s: expr) => {
         |$e| get_rpc_status($c, $s.to_string() + &$e.to_string())

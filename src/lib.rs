@@ -23,14 +23,17 @@ mod channel;
 #[allow(clippy::type_complexity, clippy::redundant_clone)]
 pub mod client;
 // TODO: address this after merging linters
+pub mod common;
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub mod server;
 pub mod ttrpc;
 
-pub use crate::channel::{
-    write_message, MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
-};
+pub use crate::channel::{write_message, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
 pub use crate::client::Client;
+pub use crate::common::{response_to_channel, MessageHeader, MethodHandler, TtrpcContext};
 pub use crate::error::{get_status, Error, Result};
-pub use crate::server::{response_to_channel, MethodHandler, Server, TtrpcContext};
+pub use crate::server::Server;
 pub use crate::ttrpc::{Code, Request, Response, Status};
+
+#[cfg(feature = "async")]
+pub mod asynchronous;
