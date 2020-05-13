@@ -17,11 +17,9 @@ mod protocols;
 #[macro_use]
 extern crate log;
 
-use std::env;
+use log::LevelFilter;
 use std::sync::Arc;
 use std::thread;
-
-use log::LevelFilter;
 
 use ttrpc::error::{Error, Result};
 use ttrpc::server::*;
@@ -80,11 +78,6 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
 
 fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
-
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        panic!("Usage: {} unix_addr", args[0]);
-    }
 
     let h = Box::new(HealthService {}) as Box<dyn protocols::health_ttrpc::Health + Send + Sync>;
     let h = Arc::new(h);

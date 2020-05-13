@@ -14,20 +14,12 @@
 
 mod protocols;
 
-use std::env;
-use std::thread;
-
 use nix::sys::socket::*;
-
+use std::thread;
 use ttrpc::client::Client;
 
 fn main() {
-    //simple_logging::log_to_stderr(LevelFilter::Trace);
-
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        panic!("Usage: {} unix_addr", args[0]);
-    }
+    let path = "/tmp/1";
 
     let fd = socket(
         AddressFamily::Unix,
@@ -36,7 +28,7 @@ fn main() {
         None,
     )
     .unwrap();
-    let sockaddr = args[1].clone() + &"\x00".to_string();
+    let sockaddr = path.to_owned() + &"\x00".to_string();
     let sockaddr = UnixAddr::new_abstract(sockaddr.as_bytes()).unwrap();
     let sockaddr = SockAddr::Unix(sockaddr);
     connect(fd, &sockaddr).unwrap();

@@ -59,11 +59,11 @@ fn main() {
 
 2. Start the server
 
-    `$ cargo run --example server unix:///tmp/1`
+    `$ cargo run --example server`
 
 3. Start a client
 
-    `$ cargo run --example client /tmp/1`
+    `$ cargo run --example client`
 
 # Notes: the version of protobuf
 protobuf-codegen, ttrpc_rust_plugin and your code should use the same version protobuf.
