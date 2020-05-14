@@ -14,3 +14,10 @@
 pub mod codegen;
 pub mod prost_codegen;
 mod util;
+
+#[derive(Default, Debug, Clone)]
+pub struct Customize {
+    pub async_all: bool,
+    pub async_client: bool,
+    pub async_server: bool,
+}

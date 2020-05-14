@@ -1,3 +1,9 @@
+// Copyright (c) 2020 Ant Financial
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+
+use protoc_rust_ttrpc::Customize;
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -20,6 +26,10 @@ fn main() {
         .inputs(&protos)
         .include("protocols/protos")
         .rust_protobuf()
+        .customize(Customize {
+            async_server: true,
+            ..Default::default()
+        })
         .run()
         .expect("Codegen failed.");
 

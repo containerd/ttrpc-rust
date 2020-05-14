@@ -9,12 +9,12 @@ use std::os::unix::io::RawFd;
 use std::sync::Arc;
 
 use crate::asynchronous::stream::{receive, respond, respond_with_status};
-use crate::channel::MESSAGE_TYPE_REQUEST;
 use crate::common;
+use crate::common::MESSAGE_TYPE_REQUEST;
 use crate::error::{get_status, Error, Result};
+use crate::r#async::{MethodHandler, TtrpcContext};
 use crate::ttrpc::{Code, Request};
 use crate::MessageHeader;
-use crate::{MethodHandler, TtrpcContext};
 use futures::StreamExt as _;
 use std::os::unix::io::FromRawFd;
 use tokio::{
@@ -102,7 +102,6 @@ impl Server {
 
                         tokio::spawn(async move {
                             while let Some(buf) = rx.recv().await {
-                                println!("got = {:?}", &buf);
                                 if let Err(e) = writer.write_all(&buf).await {
                                     error!("write_message got error: {:?}", e);
                                 }
@@ -165,21 +164,17 @@ async fn handle_request(
     let path = format!("/{}/{}", req.service, req.method);
     if let Some(x) = methods.get(&path) {
         let method = x;
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let ctx = TtrpcContext { fd, mh: header };
 
-        let ctx = TtrpcContext {
-            fd,
-            mh: header,
-            res_tx: sender,
-        };
-
-        if let Err(x) = method.handler(ctx, req) {
-            error!("method handle {} get error {:?}", path, x);
-        }
-
-        let (header, body) = receiver.recv().unwrap();
-        if let Err(x) = respond(tx.clone(), header, body).await {
-            error!("respond get error {:?}", x);
+        match method.handler(ctx, req).await {
+            Ok((stream_id, body)) => {
+                if let Err(x) = respond(tx.clone(), stream_id, body).await {
+                    error!("respond get error {:?}", x);
+                }
+            }
+            Err(e) => {
+                error!("method handle {} get error {:?}", path, e);
+            }
         }
     } else {
         let status = get_status(Code::INVALID_ARGUMENT, format!("{} does not exist", path));

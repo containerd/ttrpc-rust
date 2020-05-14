@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use protobuf_codegen::code_writer::CodeWriter;
 use std::fmt;
 use std::str;
 
@@ -95,6 +96,32 @@ pub fn to_camel_case(name: &str) -> String {
 
 pub fn fq_grpc(item: &str) -> String {
     format!("::ttrpc::{}", item)
+}
+
+pub fn async_on(customize: &crate::Customize, r#type: &str) -> bool {
+    if r#type == "server" {
+        customize.async_all || customize.async_server
+    } else {
+        customize.async_all || customize.async_client
+    }
+}
+
+pub fn async_fn_block<F>(w: &mut CodeWriter, public: bool, sig: &str, cb: F)
+where
+    F: Fn(&mut CodeWriter),
+{
+    if public {
+        w.expr_block(&format!("pub async fn {}", sig), cb);
+    } else {
+        w.expr_block(&format!("async fn {}", sig), cb);
+    }
+}
+
+pub fn def_async_fn<F>(w: &mut CodeWriter, sig: &str, cb: F)
+where
+    F: Fn(&mut CodeWriter),
+{
+    async_fn_block(w, false, sig, cb);
 }
 
 pub enum MethodType {

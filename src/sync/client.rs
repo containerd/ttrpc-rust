@@ -22,8 +22,9 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::channel::{read_message, write_message, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
+use crate::common::{MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
+use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
 use crate::MessageHeader;
 

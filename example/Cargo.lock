@@ -16,6 +16,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b585a98a234c46fc563103e9278c9391fde1f4e6850334da895d27edb9580f62"
 
 [[package]]
+name = "async-trait"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26c4f3195085c36ea8d24d32b2f828d23296a9370a28aa39d111f6f16bef9f3b"
+dependencies = [
+ "proc-macro2 1.0.12",
+ "quote 1.0.4",
+ "syn 1.0.20",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -607,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "protoc-rust-ttrpc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "protobuf",
  "protobuf-codegen",
@@ -786,6 +797,7 @@ dependencies = [
  "num_cpus",
  "pin-project-lite",
  "signal-hook-registry",
+ "slab",
  "tokio-macros",
  "winapi 0.3.8",
 ]
@@ -805,6 +817,7 @@ dependencies = [
 name = "ttrpc"
 version = "0.3.1"
 dependencies = [
+ "async-trait",
  "byteorder",
  "futures",
  "libc",
@@ -817,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "ttrpc-compiler"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "derive-new",
  "prost",
@@ -830,8 +843,9 @@ dependencies = [
 
 [[package]]
 name = "ttrpc-example"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "async-trait",
  "byteorder",
  "bytes 0.4.12",
  "cmd_lib",

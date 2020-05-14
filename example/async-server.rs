@@ -16,24 +16,32 @@ use ttrpc::asynchronous::server::*;
 use ttrpc::error::{Error, Result};
 use ttrpc::ttrpc::{Code, Status};
 
+use async_trait::async_trait;
 use tokio;
 use tokio::signal::unix::{signal, SignalKind};
 
 struct HealthService;
+
+#[async_trait]
 impl protocols::health_ttrpc::Health for HealthService {
-    fn check(
+    async fn check(
         &self,
-        _ctx: &::ttrpc::TtrpcContext,
+        _ctx: &::ttrpc::r#async::TtrpcContext,
         _req: protocols::health::CheckRequest,
     ) -> Result<protocols::health::HealthCheckResponse> {
         let mut status = Status::new();
+
         status.set_code(Code::NOT_FOUND);
         status.set_message("Just for fun".to_string());
+
+        let delay = tokio::time::delay_for(std::time::Duration::from_secs(10));
+        delay.await;
+
         Err(Error::RpcStatus(status))
     }
-    fn version(
+    async fn version(
         &self,
-        _ctx: &::ttrpc::TtrpcContext,
+        _ctx: &::ttrpc::r#async::TtrpcContext,
         req: protocols::health::CheckRequest,
     ) -> Result<protocols::health::VersionCheckResponse> {
         info!("version {:?}", req);
@@ -47,10 +55,12 @@ impl protocols::health_ttrpc::Health for HealthService {
 }
 
 struct AgentService;
+
+#[async_trait]
 impl protocols::agent_ttrpc::AgentService for AgentService {
-    fn list_interfaces(
+    async fn list_interfaces(
         &self,
-        _ctx: &::ttrpc::TtrpcContext,
+        _ctx: &::ttrpc::r#async::TtrpcContext,
         _req: protocols::agent::ListInterfacesRequest,
     ) -> ::ttrpc::Result<protocols::agent::Interfaces> {
         let mut rp = protobuf::RepeatedField::new();

@@ -1,6 +1,6 @@
 [package]
 name = "protoc-rust-ttrpc"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Tim Zhang <tim@hyper.sh>"]
 edition = "2018"
 

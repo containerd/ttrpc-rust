@@ -26,9 +26,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 
-use crate::channel::{read_message, write_message, MESSAGE_TYPE_REQUEST};
-use crate::common;
+use crate::common::{self, MESSAGE_TYPE_REQUEST};
 use crate::error::{get_status, Error, Result};
+use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
 use crate::MessageHeader;
 use crate::{response_to_channel, MethodHandler, TtrpcContext};

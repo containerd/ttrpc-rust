@@ -16,15 +16,10 @@ use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use nix::sys::socket::*;
 use std::os::unix::io::RawFd;
 
+use crate::common::{MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX};
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
 use crate::ttrpc::Code;
 use crate::MessageHeader;
-
-const MESSAGE_HEADER_LENGTH: usize = 10;
-const MESSAGE_LENGTH_MAX: usize = 4 << 20;
-
-pub const MESSAGE_TYPE_REQUEST: u8 = 0x1;
-pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
 
 fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
     let mut v: Vec<u8> = vec![0; count];

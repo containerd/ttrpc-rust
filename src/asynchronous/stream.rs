@@ -5,17 +5,13 @@
 
 use byteorder::{BigEndian, ByteOrder};
 
+use crate::common::{MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX, MESSAGE_TYPE_RESPONSE};
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
+use crate::r#async::utils;
 use crate::ttrpc::{Code, Response, Status};
 use crate::MessageHeader;
 use protobuf::Message;
 use tokio::io::AsyncReadExt;
-
-const MESSAGE_HEADER_LENGTH: usize = 10;
-const MESSAGE_LENGTH_MAX: usize = 4 << 20;
-
-pub const MESSAGE_TYPE_REQUEST: u8 = 0x1;
-pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
 
 async fn receive_count<T>(reader: &mut T, count: usize) -> Result<Vec<u8>>
 where
@@ -109,9 +105,10 @@ fn get_response_body(res: &Response) -> Result<Vec<u8>> {
 
 pub async fn respond(
     mut tx: tokio::sync::mpsc::Sender<Vec<u8>>,
-    header: MessageHeader,
+    stream_id: u32,
     mut body: Vec<u8>,
 ) -> Result<()> {
+    let header = utils::get_response_header_from_body(stream_id, &body);
     let mut buf = header_to_buf(header);
     buf.append(&mut body);
 
