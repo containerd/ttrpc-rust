@@ -6,6 +6,7 @@
 mod protocols;
 
 use nix::sys::socket::*;
+use protocols::r#async::{agent, agent_ttrpc, health, health_ttrpc};
 use tokio;
 use ttrpc::r#async::Client;
 
@@ -26,8 +27,8 @@ async fn main() {
     connect(fd, &sockaddr).unwrap();
 
     let c = Client::new(fd);
-    let mut hc = protocols::health_ttrpc::HealthClient::new(c.clone());
-    let mut ac = protocols::agent_ttrpc::AgentServiceClient::new(c);
+    let mut hc = health_ttrpc::HealthClient::new(c.clone());
+    let mut ac = agent_ttrpc::AgentServiceClient::new(c);
 
     let mut thc = hc.clone();
     let mut tac = ac.clone();
@@ -35,7 +36,7 @@ async fn main() {
     let now = std::time::Instant::now();
 
     let t1 = tokio::spawn(async move {
-        let req = protocols::health::CheckRequest::new();
+        let req = health::CheckRequest::new();
         println!(
             "Green Thread 1 - {} started: {:?}",
             "health.check()",
@@ -57,7 +58,7 @@ async fn main() {
         );
 
         let show = match tac
-            .list_interfaces(&protocols::agent::ListInterfacesRequest::new(), 0)
+            .list_interfaces(&agent::ListInterfacesRequest::new(), 0)
             .await
         {
             Err(e) => format!("{:?}", e),
@@ -80,7 +81,7 @@ async fn main() {
         );
 
         let show = match ac
-            .online_cpu_mem(&protocols::agent::OnlineCPUMemRequest::new(), 0)
+            .online_cpu_mem(&agent::OnlineCPUMemRequest::new(), 0)
             .await
         {
             Err(e) => format!("{:?}", e),
@@ -101,7 +102,7 @@ async fn main() {
         println!(
             "Green Thread 3 - {} -> {:?} ended: {:?}",
             "health.version()",
-            hc.version(&protocols::health::CheckRequest::new(), 0).await,
+            hc.version(&health::CheckRequest::new(), 0).await,
             now.elapsed()
         );
     });

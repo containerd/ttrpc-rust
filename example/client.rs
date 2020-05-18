@@ -15,6 +15,7 @@
 mod protocols;
 
 use nix::sys::socket::*;
+use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
 use ttrpc::client::Client;
 
@@ -34,8 +35,8 @@ fn main() {
     connect(fd, &sockaddr).unwrap();
 
     let c = Client::new(fd);
-    let hc = protocols::health_ttrpc::HealthClient::new(c.clone());
-    let ac = protocols::agent_ttrpc::AgentServiceClient::new(c);
+    let hc = health_ttrpc::HealthClient::new(c.clone());
+    let ac = agent_ttrpc::AgentServiceClient::new(c);
 
     let thc = hc.clone();
     let tac = ac.clone();
@@ -43,7 +44,7 @@ fn main() {
     let now = std::time::Instant::now();
 
     let t = thread::spawn(move || {
-        let req = protocols::health::CheckRequest::new();
+        let req = health::CheckRequest::new();
         println!(
             "OS Thread {:?} - {} started: {:?}",
             std::thread::current().id(),
@@ -67,7 +68,7 @@ fn main() {
             now.elapsed(),
         );
 
-        let show = match tac.list_interfaces(&protocols::agent::ListInterfacesRequest::new(), 0) {
+        let show = match tac.list_interfaces(&agent::ListInterfacesRequest::new(), 0) {
             Err(e) => format!("{:?}", e),
             Ok(s) => format!("{:?}", s),
         };
@@ -86,7 +87,7 @@ fn main() {
         "agent.online_cpu_mem()",
         now.elapsed()
     );
-    let show = match ac.online_cpu_mem(&protocols::agent::OnlineCPUMemRequest::new(), 0) {
+    let show = match ac.online_cpu_mem(&agent::OnlineCPUMemRequest::new(), 0) {
         Err(e) => format!("{:?}", e),
         Ok(s) => format!("{:?}", s),
     };
@@ -107,7 +108,7 @@ fn main() {
     println!(
         "Main OS Thread - {} -> {:?} ended: {:?}",
         "health.version()",
-        hc.version(&protocols::health::CheckRequest::new(), 0),
+        hc.version(&health::CheckRequest::new(), 0),
         now.elapsed()
     );
 
