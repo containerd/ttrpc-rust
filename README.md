@@ -52,18 +52,65 @@ fn main() {
 }
 ```
 
+# async/.await
+ttrpc-rust supports async/.await. By using async/.await you can reduce the overhead and resource consumption caused by threads.
+
+## Usage
+### 1. Generate codes in async version
+Currently we only support generating async codes by using protoc_rust_ttrpc
+
+```
+    protoc_rust_ttrpc::Codegen::new()
+        .out_dir("protocols/asynchronous")
+        .inputs(&protos)
+        .include("protocols/protos")
+        .rust_protobuf()
+        .customize(Customize {
+            async_all: true, // It's the key option.
+            ..Default::default()
+        })
+        .run()
+        .expect("Gen async codes failed.");
+```
+
+Provide customize option
+- `async_all`: generate async codes for both server and client
+- `async_server`: generate async codes for server
+- `async_client`: generate async codes for client
+
+> See more in `example/build.rs`
+
+### 2. Write your implemention in async/.await's way
+Please follow the guidlines in `example/async-server.rs` and `example/async-client.rs`
+
 # Run Examples
 1. Go to the directory
 
-    `$ cd ttrpc-rust/example`
+    ```
+    $ cd ttrpc-rust/example
+    ```
 
 2. Start the server
 
-    `$ cargo run --example server`
+    ```
+    $ cargo run --example server
+    ```
+    or
+
+    ```
+    $ cargo run --example async-server
+    ```
 
 3. Start a client
 
-    `$ cargo run --example client`
+    ```
+    $ cargo run --example client
+    ```
+    or
+    ```
+    $ cargo run --example async-client
+    ```
+
 
 # Notes: the version of protobuf
 protobuf-codegen, ttrpc_rust_plugin and your code should use the same version protobuf.
