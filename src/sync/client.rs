@@ -28,20 +28,20 @@ use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
 use crate::MessageHeader;
 
+type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
+type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
+
 #[derive(Clone)]
 pub struct Client {
     fd: RawFd,
-    sender_tx: mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>,
+    sender_tx: Sender,
     client_close: Arc<ClientClose>,
 }
 
 impl Client {
     /// Initialize a new [`Client`].
     pub fn new(fd: RawFd) -> Client {
-        let (sender_tx, rx): (
-            mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>,
-            mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>,
-        ) = mpsc::channel();
+        let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
 
         let (recver_fd, close_fd) = socketpair(
             AddressFamily::Unix,
@@ -85,7 +85,6 @@ impl Client {
         });
 
         //Recver
-        let recver_map = recver_map_orig.clone();
         thread::spawn(move || {
             let bigfd = {
                 if fd > recver_fd {
@@ -123,7 +122,7 @@ impl Client {
                         }
                     },
                 };
-                let mut map = recver_map.lock().unwrap();
+                let mut map = recver_map_orig.lock().unwrap();
                 let recver_tx = match map.get(&mh.stream_id) {
                     Some(tx) => tx,
                     None => {

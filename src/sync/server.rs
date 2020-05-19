@@ -40,6 +40,9 @@ const DEFAULT_WAIT_THREAD_COUNT_DEFAULT: usize = 3;
 const DEFAULT_WAIT_THREAD_COUNT_MIN: usize = 1;
 const DEFAULT_WAIT_THREAD_COUNT_MAX: usize = 5;
 
+type MessageSender = Sender<(MessageHeader, Vec<u8>)>;
+type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
+
 pub struct Server {
     listeners: Vec<RawFd>,
     monitor_fd: (RawFd, RawFd),
@@ -72,7 +75,7 @@ struct ThreadS<'a> {
     wtc: &'a Arc<AtomicUsize>,
     quit: &'a Arc<AtomicBool>,
     methods: &'a Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
-    res_tx: &'a Sender<(MessageHeader, Vec<u8>)>,
+    res_tx: &'a MessageSender,
     control_tx: &'a SyncSender<()>,
     default: usize,
     min: usize,
@@ -85,7 +88,7 @@ fn start_method_handler_thread(
     wtc: Arc<AtomicUsize>,
     quit: Arc<AtomicBool>,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
-    res_tx: Sender<(MessageHeader, Vec<u8>)>,
+    res_tx: MessageSender,
     control_tx: SyncSender<()>,
     min: usize,
     max: usize,
@@ -408,10 +411,7 @@ impl Server {
                             debug!("Got new client");
                             // Start response thread
                             let quit_res = child_quit.clone();
-                            let (res_tx, res_rx): (
-                                Sender<(MessageHeader, Vec<u8>)>,
-                                Receiver<(MessageHeader, Vec<u8>)>,
-                            ) = channel();
+                            let (res_tx, res_rx): (MessageSender, MessageReceiver) = channel();
                             let handler = thread::spawn(move || {
                                 for r in res_rx.iter() {
                                     info!("response thread get {:?}", r);

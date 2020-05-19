@@ -17,9 +17,6 @@ extern crate log;
 
 #[macro_use]
 pub mod error;
-// TODO: address this after merging linters
-#[allow(clippy::type_complexity, clippy::redundant_clone)]
-// TODO: address this after merging linters
 #[macro_use]
 pub mod common;
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]

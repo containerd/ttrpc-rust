@@ -23,12 +23,15 @@ use tokio::{
     sync::Notify,
 };
 
-type AsyncSender = Sender<(Vec<u8>, Sender<Result<Vec<u8>>>)>;
-type AsyncReceiver = Receiver<(Vec<u8>, Sender<Result<Vec<u8>>>)>;
+type RequestSender = Sender<(Vec<u8>, Sender<Result<Vec<u8>>>)>;
+type RequestReceiver = Receiver<(Vec<u8>, Sender<Result<Vec<u8>>>)>;
+
+type ResponseSender = Sender<Result<Vec<u8>>>;
+type ResponseReceiver = Receiver<Result<Vec<u8>>>;
 
 #[derive(Clone)]
 pub struct Client {
-    req_tx: AsyncSender,
+    req_tx: RequestSender,
 }
 
 impl Client {
@@ -37,7 +40,7 @@ impl Client {
         let stream = utils::new_unix_stream_from_raw_fd(fd);
 
         let (mut reader, mut writer) = split(stream);
-        let (req_tx, mut rx): (AsyncSender, AsyncReceiver) = channel(100);
+        let (req_tx, mut rx): (RequestSender, RequestReceiver) = channel(100);
 
         let req_map = Arc::new(Mutex::new(HashMap::new()));
         let req_map2 = req_map.clone();
@@ -79,12 +82,10 @@ impl Client {
             notify.notify();
         });
 
-        let req_map2 = req_map.clone();
-
         // Response receiver
         tokio::spawn(async move {
             loop {
-                let req_map2 = req_map2.clone();
+                let req_map = req_map.clone();
                 tokio::select! {
                     _ = notify2.notified() => {
                         break;
@@ -95,7 +96,7 @@ impl Client {
                                 tokio::spawn(async move {
                                     let mut resp_tx2;
                                     {
-                                        let mut map = req_map2.lock().unwrap();
+                                        let mut map = req_map.lock().unwrap();
                                         let resp_tx = match map.get(&header.stream_id) {
                                             Some(tx) => tx,
                                             None => {
@@ -108,7 +109,6 @@ impl Client {
                                         };
 
                                         resp_tx2 = resp_tx.clone();
-
                                         map.remove(&header.stream_id); // Forget the result, just remove.
                                     }
 
@@ -147,7 +147,7 @@ impl Client {
             s.flush().map_err(err_to_Others!(e, ""))?;
         }
 
-        let (tx, mut rx): (Sender<Result<Vec<u8>>>, Receiver<Result<Vec<u8>>>) = channel(100);
+        let (tx, mut rx): (ResponseSender, ResponseReceiver) = channel(100);
         self.req_tx
             .send((buf, tx))
             .await
@@ -156,7 +156,7 @@ impl Client {
         let result = rx
             .recv()
             .await
-            .ok_or(Error::Others("Recive packet from recver error".to_string()))?;
+            .ok_or_else(|| Error::Others("Recive packet from recver error".to_string()))?;
 
         let buf = result?;
         let mut s = CodedInputStream::from_bytes(&buf);

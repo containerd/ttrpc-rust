@@ -94,7 +94,7 @@ pub fn convert_response_to_buf(res: Response) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-pub fn get_response_header_from_body(stream_id: u32, body: &Vec<u8>) -> MessageHeader {
+pub fn get_response_header_from_body(stream_id: u32, body: &[u8]) -> MessageHeader {
     MessageHeader {
         length: body.len() as u32,
         stream_id,
@@ -103,7 +103,7 @@ pub fn get_response_header_from_body(stream_id: u32, body: &Vec<u8>) -> MessageH
     }
 }
 
-pub fn get_request_header_from_body(stream_id: u32, body: &Vec<u8>) -> MessageHeader {
+pub fn get_request_header_from_body(stream_id: u32, body: &[u8]) -> MessageHeader {
     MessageHeader {
         length: body.len() as u32,
         stream_id,
