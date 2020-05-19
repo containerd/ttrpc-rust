@@ -562,6 +562,7 @@ impl Server {
     }
 }
 
+#[derive(Debug)]
 pub struct TtrpcContext {
     pub fd: RawFd,
     pub mh: MessageHeader,
