@@ -94,6 +94,22 @@ fn header_to_buf(mh: MessageHeader) -> Vec<u8> {
     buf
 }
 
+pub fn to_req_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
+    let header = utils::get_request_header_from_body(stream_id, &body);
+    let mut buf = header_to_buf(header);
+    buf.append(&mut body);
+
+    buf
+}
+
+pub fn to_res_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
+    let header = utils::get_response_header_from_body(stream_id, &body);
+    let mut buf = header_to_buf(header);
+    buf.append(&mut body);
+
+    buf
+}
+
 fn get_response_body(res: &Response) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(res.compute_size() as usize);
     let mut s = protobuf::CodedOutputStream::vec(&mut buf);
@@ -106,11 +122,9 @@ fn get_response_body(res: &Response) -> Result<Vec<u8>> {
 pub async fn respond(
     mut tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     stream_id: u32,
-    mut body: Vec<u8>,
+    body: Vec<u8>,
 ) -> Result<()> {
-    let header = utils::get_response_header_from_body(stream_id, &body);
-    let mut buf = header_to_buf(header);
-    buf.append(&mut body);
+    let buf = to_res_buf(stream_id, body);
 
     tx.send(buf)
         .await

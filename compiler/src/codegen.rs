@@ -48,7 +48,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use super::util::{
-    self, async_on, def_async_fn, fq_grpc, to_camel_case, to_snake_case, MethodType,
+    self, async_on, def_async_fn, fq_grpc, pub_async_fn, to_camel_case, to_snake_case, MethodType,
 };
 
 struct MethodGen<'a> {
@@ -220,36 +220,12 @@ impl<'a> MethodGen<'a> {
         )
     }
 
-    fn unary_opt(&self, method_name: &str) -> String {
-        format!(
-            "{}_opt(&self, req: &{}, opt: {}) -> {}<{}>",
-            method_name,
-            self.input(),
-            fq_grpc("CallOption"),
-            fq_grpc("Result"),
-            self.output()
-        )
-    }
-
     fn unary_async(&self, method_name: &str) -> String {
         format!(
-            "{}_async(&self, req: &{}) -> {}<{}<{}>>",
+            "{}(&mut self, req: &{}, timeout_nano: i64) -> {}<{}>",
             method_name,
             self.input(),
             fq_grpc("Result"),
-            fq_grpc("ClientUnaryReceiver"),
-            self.output()
-        )
-    }
-
-    fn unary_async_opt(&self, method_name: &str) -> String {
-        format!(
-            "{}_async_opt(&self, req: &{}, opt: {}) -> {}<{}<{}>>",
-            method_name,
-            self.input(),
-            fq_grpc("CallOption"),
-            fq_grpc("Result"),
-            fq_grpc("ClientUnaryReceiver"),
             self.output()
         )
     }
@@ -344,6 +320,26 @@ impl<'a> MethodGen<'a> {
                         &self.proto.get_name(),
                     ));
                     w.write_line("Ok(cres)");
+                });
+            }
+
+            _ => {}
+        };
+    }
+
+    fn write_async_client(&self, w: &mut CodeWriter) {
+        let method_name = self.name();
+        match self.method_type().0 {
+            // Unary
+            MethodType::Unary => {
+                pub_async_fn(w, &self.unary_async(&method_name), |w| {
+                    w.write_line(&format!("let mut cres = {}::new();", self.output()));
+                    w.write_line(&format!(
+                        "::ttrpc::async_client_request!(self, req, timeout_nano, \"{}.{}\", \"{}\", cres);",
+                        self.package_name,
+                        self.service_name,
+                        &self.proto.get_name(),
+                    ));
                 });
             }
 
@@ -454,6 +450,14 @@ impl<'a> ServiceGen<'a> {
     }
 
     fn write_client(&self, w: &mut CodeWriter) {
+        if async_on(self.customize, "client") {
+            self.write_async_client(w)
+        } else {
+            self.write_sync_client(w)
+        }
+    }
+
+    fn write_sync_client(&self, w: &mut CodeWriter) {
         w.write_line("#[derive(Clone)]");
         w.pub_struct(&self.client_name(), |w| {
             w.field_decl("client", "::ttrpc::Client");
@@ -471,6 +475,28 @@ impl<'a> ServiceGen<'a> {
             for method in &self.methods {
                 w.write_line("");
                 method.write_client(w);
+            }
+        });
+    }
+
+    fn write_async_client(&self, w: &mut CodeWriter) {
+        w.write_line("#[derive(Clone)]");
+        w.pub_struct(&self.client_name(), |w| {
+            w.field_decl("client", "::ttrpc::r#async::Client");
+        });
+
+        w.write_line("");
+
+        w.impl_self_block(&self.client_name(), |w| {
+            w.pub_fn("new(client: ::ttrpc::r#async::Client) -> Self", |w| {
+                w.expr_block(&self.client_name(), |w| {
+                    w.field_entry("client", "client");
+                });
+            });
+
+            for method in &self.methods {
+                w.write_line("");
+                method.write_async_client(w);
             }
         });
     }

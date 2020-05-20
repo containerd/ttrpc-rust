@@ -115,7 +115,7 @@ impl Server {
                             match receive(&mut reader).await {
                                 Ok(message) => {
                                     tokio::spawn(async move {
-                                        handle_request(tx, listener, methods, message).await
+                                        handle_request(tx, listener, methods, message).await;
                                     });
                                 }
                                 Err(e) => {

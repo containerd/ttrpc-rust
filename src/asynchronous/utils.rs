@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::common::{MessageHeader, MESSAGE_TYPE_RESPONSE};
+use crate::common::{MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
 use crate::ttrpc::{Request, Response};
 use async_trait::async_trait;
 use protobuf::Message;
+use std::os::unix::io::{FromRawFd, RawFd};
+use tokio::net::UnixStream;
 
 #[macro_export]
 macro_rules! async_request_handler {
@@ -47,6 +49,31 @@ macro_rules! async_request_handler {
     };
 }
 
+#[macro_export]
+macro_rules! async_client_request {
+    ($self: ident, $req: ident, $timeout_nano: ident, $server: expr, $method: expr, $cres: ident) => {
+        let mut creq = ::ttrpc::Request::new();
+        creq.set_service($server.to_string());
+        creq.set_method($method.to_string());
+        creq.set_timeout_nano($timeout_nano);
+        creq.payload.reserve($req.compute_size() as usize);
+        {
+            let mut s = CodedOutputStream::vec(&mut creq.payload);
+            $req.write_to(&mut s)
+                .map_err(::ttrpc::Err_to_Others!(e, ""))?;
+            s.flush().map_err(::ttrpc::Err_to_Others!(e, ""))?;
+        }
+
+        let res = $self.client.request(creq).await?;
+        let mut s = CodedInputStream::from_bytes(&res.payload);
+        $cres
+            .merge_from(&mut s)
+            .map_err(::ttrpc::Err_to_Others!(e, "Unpack get error "))?;
+
+        return Ok($cres);
+    };
+}
+
 #[async_trait]
 pub trait MethodHandler {
     async fn handler(&self, ctx: TtrpcContext, req: Request) -> Result<(u32, Vec<u8>)>;
@@ -74,4 +101,21 @@ pub fn get_response_header_from_body(stream_id: u32, body: &Vec<u8>) -> MessageH
         type_: MESSAGE_TYPE_RESPONSE,
         flags: 0,
     }
+}
+
+pub fn get_request_header_from_body(stream_id: u32, body: &Vec<u8>) -> MessageHeader {
+    MessageHeader {
+        length: body.len() as u32,
+        stream_id,
+        type_: MESSAGE_TYPE_REQUEST,
+        flags: 0,
+    }
+}
+
+pub fn new_unix_stream_from_raw_fd(fd: RawFd) -> UnixStream {
+    let std_stream: std::os::unix::net::UnixStream;
+    unsafe {
+        std_stream = std::os::unix::net::UnixStream::from_raw_fd(fd);
+    }
+    UnixStream::from_std(std_stream).unwrap()
 }

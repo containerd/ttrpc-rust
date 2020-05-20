@@ -27,7 +27,7 @@ fn main() {
         .include("protocols/protos")
         .rust_protobuf()
         .customize(Customize {
-            async_server: true,
+            async_all: true,
             ..Default::default()
         })
         .run()

@@ -101,12 +101,12 @@ fn main() {
     thread::sleep(std::time::Duration::from_secs(2));
     println!(
         "Main OS Thread - {} started: {:?}",
-        "agent.online_cpu_mem()",
+        "health.version()",
         now.elapsed()
     );
     println!(
         "Main OS Thread - {} -> {:?} ended: {:?}",
-        "agent.online_cpu_mem()",
+        "health.version()",
         hc.version(&protocols::health::CheckRequest::new(), 0),
         now.elapsed()
     );

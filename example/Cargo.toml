@@ -36,6 +36,10 @@ path = "./server.rs"
 name = "async-server"
 path = "./async-server.rs"
 
+[[example]]
+name = "async-client"
+path = "./async-client.rs"
+
 [build-dependencies]
 protoc-rust = "2.8.0"
 cmd_lib = "0.7.8"

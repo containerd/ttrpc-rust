@@ -196,24 +196,3 @@ impl Drop for ClientClose {
         trace!("All client is droped");
     }
 }
-
-#[macro_export]
-macro_rules! client_request {
-    ($self: ident, $req: ident, $timeout_nano: ident, $server: expr, $method: expr, $cres: ident) => {
-        let mut creq = ::ttrpc::Request::new();
-        creq.set_service($server.to_string());
-        creq.set_method($method.to_string());
-        creq.set_timeout_nano($timeout_nano);
-        creq.payload.reserve($req.compute_size() as usize);
-        let mut s = CodedOutputStream::vec(&mut creq.payload);
-        $req.write_to(&mut s)
-            .map_err(::ttrpc::Err_to_Others!(e, ""))?;
-        s.flush().map_err(::ttrpc::Err_to_Others!(e, ""))?;
-
-        let res = $self.client.request(creq)?;
-        let mut s = CodedInputStream::from_bytes(&res.payload);
-        $cres
-            .merge_from(&mut s)
-            .map_err(::ttrpc::Err_to_Others!(e, "Unpack get error "))?;
-    };
-}

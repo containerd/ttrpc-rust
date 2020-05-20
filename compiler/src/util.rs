@@ -117,6 +117,13 @@ where
     }
 }
 
+pub fn pub_async_fn<F>(w: &mut CodeWriter, sig: &str, cb: F)
+where
+    F: Fn(&mut CodeWriter),
+{
+    async_fn_block(w, true, sig, cb);
+}
+
 pub fn def_async_fn<F>(w: &mut CodeWriter, sig: &str, cb: F)
 where
     F: Fn(&mut CodeWriter),
