@@ -1,3 +1,9 @@
+// Copyright (c) 2020 Ant Financial
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+
+use protoc_rust_ttrpc::Customize;
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -16,18 +22,40 @@ fn main() {
         .for_each(|p| println!("cargo:rerun-if-changed={}", &p));
 
     protoc_rust_ttrpc::Codegen::new()
-        .out_dir("protocols")
+        .out_dir("protocols/sync")
         .inputs(&protos)
         .include("protocols/protos")
         .rust_protobuf()
+        .customize(Customize {
+            ..Default::default()
+        })
         .run()
-        .expect("Codegen failed.");
+        .expect("Gen sync codes failed.");
+
+    protoc_rust_ttrpc::Codegen::new()
+        .out_dir("protocols/asynchronous")
+        .inputs(&protos)
+        .include("protocols/protos")
+        .rust_protobuf()
+        .customize(Customize {
+            async_all: true,
+            ..Default::default()
+        })
+        .run()
+        .expect("Gen async codes failed.");
 
     // There is a message named 'Box' in oci.proto
     // so there is a struct named 'Box', we should replace Box<Self> to ::std::boxed::Box<Self>
     // to avoid the conflict.
     replace_text_in_file(
-        "protocols/oci.rs",
+        "protocols/sync/oci.rs",
+        "self: Box<Self>",
+        "self: ::std::boxed::Box<Self>",
+    )
+    .unwrap();
+
+    replace_text_in_file(
+        "protocols/asynchronous/oci.rs",
         "self: Box<Self>",
         "self: ::std::boxed::Box<Self>",
     )

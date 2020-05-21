@@ -14,20 +14,13 @@
 
 mod protocols;
 
-use std::env;
-use std::thread;
-
 use nix::sys::socket::*;
-
+use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
+use std::thread;
 use ttrpc::client::Client;
 
 fn main() {
-    //simple_logging::log_to_stderr(LevelFilter::Trace);
-
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        panic!("Usage: {} unix_addr", args[0]);
-    }
+    let path = "/tmp/1";
 
     let fd = socket(
         AddressFamily::Unix,
@@ -36,41 +29,89 @@ fn main() {
         None,
     )
     .unwrap();
-    let sockaddr = args[1].clone() + &"\x00".to_string();
+    let sockaddr = path.to_owned() + &"\x00".to_string();
     let sockaddr = UnixAddr::new_abstract(sockaddr.as_bytes()).unwrap();
     let sockaddr = SockAddr::Unix(sockaddr);
     connect(fd, &sockaddr).unwrap();
 
     let c = Client::new(fd);
-    let hc = protocols::health_ttrpc::HealthClient::new(c.clone());
-    let ac = protocols::agent_ttrpc::AgentServiceClient::new(c);
+    let hc = health_ttrpc::HealthClient::new(c.clone());
+    let ac = agent_ttrpc::AgentServiceClient::new(c);
 
     let thc = hc.clone();
     let tac = ac.clone();
+
+    let now = std::time::Instant::now();
+
     let t = thread::spawn(move || {
-        let req = protocols::health::CheckRequest::new();
+        let req = health::CheckRequest::new();
+        println!(
+            "OS Thread {:?} - {} started: {:?}",
+            std::thread::current().id(),
+            "health.check()",
+            now.elapsed(),
+        );
+        println!(
+            "OS Thread {:?} - {} -> {:?} ended: {:?}",
+            std::thread::current().id(),
+            "health.check()",
+            thc.check(&req, 0),
+            now.elapsed(),
+        );
+    });
 
-        println!("thread check: {:?}", thc.check(&req, 0));
+    let t2 = thread::spawn(move || {
+        println!(
+            "OS Thread {:?} - {} started: {:?}",
+            std::thread::current().id(),
+            "agent.list_interfaces()",
+            now.elapsed(),
+        );
 
-        println!("thread version: {:?}", thc.version(&req, 0));
-
-        let show = match tac.list_interfaces(&protocols::agent::ListInterfacesRequest::new(), 0) {
+        let show = match tac.list_interfaces(&agent::ListInterfacesRequest::new(), 0) {
             Err(e) => format!("{:?}", e),
             Ok(s) => format!("{:?}", s),
         };
-        println!("thread list_interfaces: {}", show);
+
+        println!(
+            "OS Thread {:?} - {} -> {} ended: {:?}",
+            std::thread::current().id(),
+            "agent.list_interfaces()",
+            show,
+            now.elapsed(),
+        );
     });
 
     println!(
-        "main check: {:?}",
-        hc.check(&protocols::health::CheckRequest::new(), 0)
+        "Main OS Thread - {} started: {:?}",
+        "agent.online_cpu_mem()",
+        now.elapsed()
     );
-
-    let show = match ac.online_cpu_mem(&protocols::agent::OnlineCPUMemRequest::new(), 0) {
+    let show = match ac.online_cpu_mem(&agent::OnlineCPUMemRequest::new(), 0) {
         Err(e) => format!("{:?}", e),
         Ok(s) => format!("{:?}", s),
     };
-    println!("main online_cpu_mem: {}", show);
+    println!(
+        "Main OS Thread - {} -> {} ended: {:?}",
+        "agent.online_cpu_mem()",
+        show,
+        now.elapsed()
+    );
+
+    println!("\nsleep 2 seconds ...\n");
+    thread::sleep(std::time::Duration::from_secs(2));
+    println!(
+        "Main OS Thread - {} started: {:?}",
+        "health.version()",
+        now.elapsed()
+    );
+    println!(
+        "Main OS Thread - {} -> {:?} ended: {:?}",
+        "health.version()",
+        hc.version(&health::CheckRequest::new(), 0),
+        now.elapsed()
+    );
 
     t.join().unwrap();
+    t2.join().unwrap();
 }

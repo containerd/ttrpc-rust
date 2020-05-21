@@ -12,26 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use nix::fcntl::{fcntl, FcntlArg, OFlag};
+use nix::fcntl::OFlag;
 use nix::sys::select::{select, FdSet};
 use nix::sys::socket::{self, *};
 use nix::unistd::close;
 use nix::unistd::pipe2;
-use protobuf::{CodedInputStream, CodedOutputStream, Message};
+use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 
-use crate::channel::{
-    read_message, write_message, MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
-};
+use crate::common::{self, MESSAGE_TYPE_REQUEST};
 use crate::error::{get_status, Error, Result};
+use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
+use crate::MessageHeader;
+use crate::{response_to_channel, MethodHandler, TtrpcContext};
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -39,6 +39,9 @@ use crate::ttrpc::{Code, Request, Response};
 const DEFAULT_WAIT_THREAD_COUNT_DEFAULT: usize = 3;
 const DEFAULT_WAIT_THREAD_COUNT_MIN: usize = 1;
 const DEFAULT_WAIT_THREAD_COUNT_MAX: usize = 5;
+
+type MessageSender = Sender<(MessageHeader, Vec<u8>)>;
+type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
 
 pub struct Server {
     listeners: Vec<RawFd>,
@@ -72,7 +75,7 @@ struct ThreadS<'a> {
     wtc: &'a Arc<AtomicUsize>,
     quit: &'a Arc<AtomicBool>,
     methods: &'a Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
-    res_tx: &'a Sender<(MessageHeader, Vec<u8>)>,
+    res_tx: &'a MessageSender,
     control_tx: &'a SyncSender<()>,
     default: usize,
     min: usize,
@@ -85,7 +88,7 @@ fn start_method_handler_thread(
     wtc: Arc<AtomicUsize>,
     quit: Arc<AtomicBool>,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
-    res_tx: Sender<(MessageHeader, Vec<u8>)>,
+    res_tx: MessageSender,
     control_tx: SyncSender<()>,
     min: usize,
     max: usize,
@@ -272,54 +275,7 @@ impl Server {
             ));
         }
 
-        let hostv: Vec<&str> = host.trim().split("://").collect();
-        if hostv.len() != 2 {
-            return Err(Error::Others(format!("Host {} is not right", host)));
-        }
-        let scheme = hostv[0].to_lowercase();
-
-        let sockaddr: SockAddr;
-        let fd: RawFd;
-
-        match scheme.as_str() {
-            "unix" => {
-                fd = socket(
-                    AddressFamily::Unix,
-                    SockType::Stream,
-                    SockFlag::SOCK_CLOEXEC,
-                    None,
-                )
-                .map_err(|e| Error::Socket(e.to_string()))?;
-                let sockaddr_h = hostv[1].to_owned() + &"\x00".to_string();
-                let sockaddr_u =
-                    UnixAddr::new_abstract(sockaddr_h.as_bytes()).map_err(err_to_Others!(e, ""))?;
-                sockaddr = SockAddr::Unix(sockaddr_u);
-            }
-
-            "vsock" => {
-                let host_port_v: Vec<&str> = hostv[1].split(':').collect();
-                if host_port_v.len() != 2 {
-                    return Err(Error::Others(format!(
-                        "Host {} is not right for vsock",
-                        host
-                    )));
-                }
-                let cid = libc::VMADDR_CID_ANY;
-                let port: u32 =
-                    FromStr::from_str(host_port_v[1]).expect("the vsock port is not an number");
-                fd = socket(
-                    AddressFamily::Vsock,
-                    SockType::Stream,
-                    SockFlag::SOCK_CLOEXEC,
-                    None,
-                )
-                .map_err(|e| Error::Socket(e.to_string()))?;
-                sockaddr = SockAddr::new_vsock(cid, port);
-            }
-            _ => return Err(Error::Others(format!("Scheme {} is not supported", scheme))),
-        };
-
-        bind(fd, &sockaddr).map_err(err_to_Others!(e, ""))?;
+        let fd = common::do_bind(host)?;
         self.listeners.push(fd);
 
         Ok(self)
@@ -382,20 +338,11 @@ impl Server {
         let service_quit = self.quit.clone();
         let monitor_fd = self.monitor_fd.0;
 
-        if let Err(e) = fcntl(listener, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)) {
-            return Err(Error::Others(format!(
-                "failed to set listener fd: {} as non block: {}",
-                listener, e
-            )));
-        }
+        common::do_listen(listener)?;
 
         let handler = thread::Builder::new()
             .name("listener_loop".into())
             .spawn(move || {
-                listen(listener, 10)
-                    .map_err(|e| Error::Socket(e.to_string()))
-                    .unwrap();
-
                 let (reaper_tx, reaper_rx) = channel();
                 let reaper_connections = connections.clone();
 
@@ -464,10 +411,7 @@ impl Server {
                             debug!("Got new client");
                             // Start response thread
                             let quit_res = child_quit.clone();
-                            let (res_tx, res_rx): (
-                                Sender<(MessageHeader, Vec<u8>)>,
-                                Receiver<(MessageHeader, Vec<u8>)>,
-                            ) = channel();
+                            let (res_tx, res_rx): (MessageSender, MessageReceiver) = channel();
                             let handler = thread::spawn(move || {
                                 for r in res_rx.iter() {
                                     info!("response thread get {:?}", r);
@@ -560,70 +504,4 @@ impl Server {
             handler.join().unwrap();
         }
     }
-}
-
-#[derive(Debug)]
-pub struct TtrpcContext {
-    pub fd: RawFd,
-    pub mh: MessageHeader,
-    pub res_tx: Sender<(MessageHeader, Vec<u8>)>,
-}
-
-pub trait MethodHandler {
-    fn handler(&self, ctx: TtrpcContext, req: Request) -> Result<()>;
-}
-
-pub fn response_to_channel(
-    stream_id: u32,
-    res: Response,
-    tx: Sender<(MessageHeader, Vec<u8>)>,
-) -> Result<()> {
-    let mut buf = Vec::with_capacity(res.compute_size() as usize);
-    let mut s = CodedOutputStream::vec(&mut buf);
-    res.write_to(&mut s).map_err(err_to_Others!(e, ""))?;
-    s.flush().map_err(err_to_Others!(e, ""))?;
-
-    let mh = MessageHeader {
-        length: buf.len() as u32,
-        stream_id,
-        type_: MESSAGE_TYPE_RESPONSE,
-        flags: 0,
-    };
-    tx.send((mh, buf)).map_err(err_to_Others!(e, ""))?;
-
-    Ok(())
-}
-
-#[macro_export]
-macro_rules! request_handler {
-    ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
-        let mut s = CodedInputStream::from_bytes(&$req.payload);
-        let mut req = super::$server::$req_type::new();
-        req.merge_from(&mut s)
-            .map_err(::ttrpc::Err_to_Others!(e, ""))?;
-
-        let mut res = ::ttrpc::Response::new();
-        match $class.service.$req_fn(&$ctx, req) {
-            Ok(rep) => {
-                res.set_status(::ttrpc::get_status(::ttrpc::Code::OK, "".to_string()));
-                res.payload.reserve(rep.compute_size() as usize);
-                let mut s = CodedOutputStream::vec(&mut res.payload);
-                rep.write_to(&mut s)
-                    .map_err(::ttrpc::Err_to_Others!(e, ""))?;
-                s.flush().map_err(::ttrpc::Err_to_Others!(e, ""))?;
-            }
-            Err(x) => match x {
-                ::ttrpc::Error::RpcStatus(s) => {
-                    res.set_status(s);
-                }
-                _ => {
-                    res.set_status(::ttrpc::get_status(
-                        ::ttrpc::Code::UNKNOWN,
-                        format!("{:?}", x),
-                    ));
-                }
-            },
-        }
-        ::ttrpc::response_to_channel($ctx.mh.stream_id, res, $ctx.res_tx)?
-    };
 }

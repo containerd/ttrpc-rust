@@ -22,26 +22,26 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::channel::{
-    read_message, write_message, MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
-};
+use crate::common::{MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
+use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
+use crate::MessageHeader;
+
+type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
+type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 
 #[derive(Clone)]
 pub struct Client {
     fd: RawFd,
-    sender_tx: mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>,
+    sender_tx: Sender,
     client_close: Arc<ClientClose>,
 }
 
 impl Client {
     /// Initialize a new [`Client`].
     pub fn new(fd: RawFd) -> Client {
-        let (sender_tx, rx): (
-            mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>,
-            mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>,
-        ) = mpsc::channel();
+        let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
 
         let (recver_fd, close_fd) = socketpair(
             AddressFamily::Unix,
@@ -85,7 +85,6 @@ impl Client {
         });
 
         //Recver
-        let recver_map = recver_map_orig.clone();
         thread::spawn(move || {
             let bigfd = {
                 if fd > recver_fd {
@@ -123,7 +122,7 @@ impl Client {
                         }
                     },
                 };
-                let mut map = recver_map.lock().unwrap();
+                let mut map = recver_map_orig.lock().unwrap();
                 let recver_tx = match map.get(&mh.stream_id) {
                     Some(tx) => tx,
                     None => {
@@ -195,25 +194,4 @@ impl Drop for ClientClose {
         close(self.fd).unwrap();
         trace!("All client is droped");
     }
-}
-
-#[macro_export]
-macro_rules! client_request {
-    ($self: ident, $req: ident, $timeout_nano: ident, $server: expr, $method: expr, $cres: ident) => {
-        let mut creq = ::ttrpc::Request::new();
-        creq.set_service($server.to_string());
-        creq.set_method($method.to_string());
-        creq.set_timeout_nano($timeout_nano);
-        creq.payload.reserve($req.compute_size() as usize);
-        let mut s = CodedOutputStream::vec(&mut creq.payload);
-        $req.write_to(&mut s)
-            .map_err(::ttrpc::Err_to_Others!(e, ""))?;
-        s.flush().map_err(::ttrpc::Err_to_Others!(e, ""))?;
-
-        let res = $self.client.request(creq)?;
-        let mut s = CodedInputStream::from_bytes(&res.payload);
-        $cres
-            .merge_from(&mut s)
-            .map_err(::ttrpc::Err_to_Others!(e, "Unpack get error "))?;
-    };
 }

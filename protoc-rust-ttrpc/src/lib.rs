@@ -1,4 +1,4 @@
-use protobuf_codegen::Customize;
+use protobuf_codegen::Customize as ProtobufCustomize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -7,6 +7,7 @@ use std::io;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
+pub use ttrpc_compiler::Customize;
 
 mod convert;
 mod model;
@@ -24,7 +25,8 @@ pub struct Codegen {
     /// Generate rust-protobuf files along with rust-gprc
     rust_protobuf: bool,
     /// Customize rust-protobuf codegen
-    pub rust_protobuf_customize: Customize,
+    pub rust_protobuf_customize: ProtobufCustomize,
+    customize: Customize,
 }
 
 impl Codegen {
@@ -74,8 +76,13 @@ impl Codegen {
     }
 
     /// Specify rust-protobuf generated code [`Customize`] object.
-    pub fn rust_protobuf_customize(&mut self, customize: Customize) -> &mut Self {
+    pub fn rust_protobuf_customize(&mut self, customize: ProtobufCustomize) -> &mut Self {
         self.rust_protobuf_customize = customize;
+        self
+    }
+
+    pub fn customize(&mut self, customize: Customize) -> &mut Self {
+        self.customize = customize;
         self
     }
 
@@ -106,6 +113,7 @@ impl Codegen {
             &p.file_descriptors,
             &p.relative_paths,
             &self.out_dir,
+            &self.customize,
         )
     }
 }
@@ -122,7 +130,7 @@ pub struct Args<'a> {
     /// List of .proto files to compile
     pub input: &'a [&'a str],
     /// Customize code generation
-    pub customize: Customize,
+    pub customize: ProtobufCustomize,
 }
 
 /// Convert OS path to protobuf path (with slashes)

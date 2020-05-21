@@ -1,6 +1,6 @@
 [package]
 name = "ttrpc-example"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 edition = "2018"
 license = "Apache-2.0"
@@ -18,8 +18,10 @@ byteorder = "1.3.2"
 log = "0.4.6"
 simple-logging = "2.0.2"
 nix = "0.16.1"
-ttrpc = { path = "../" }
+ttrpc = { path = "../", features = ["async"] }
 ctrlc = { version = "3.0", features = ["termination"] }
+tokio = { version = "0.2", features = ["signal", "time"] }
+async-trait = "0.1.31"
 
 
 [[example]]
@@ -29,6 +31,14 @@ path = "./client.rs"
 [[example]]
 name = "server"
 path = "./server.rs"
+
+[[example]]
+name = "async-server"
+path = "./async-server.rs"
+
+[[example]]
+name = "async-client"
+path = "./async-client.rs"
 
 [build-dependencies]
 protoc-rust = "2.8.0"

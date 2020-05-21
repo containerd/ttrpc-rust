@@ -1,46 +1,48 @@
-// Copyright (c) 2019 Ant Financial
+// Copyright (c) 2020 Ant Financial
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// SPDX-License-Identifier: Apache-2.0
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 
 mod protocols;
 
 #[macro_use]
 extern crate log;
 
-use log::LevelFilter;
 use std::sync::Arc;
-use std::thread;
 
-use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc, types};
+use log::LevelFilter;
+
+use protocols::r#async::{agent, agent_ttrpc, health, health_ttrpc, types};
+use ttrpc::asynchronous::server::*;
 use ttrpc::error::{Error, Result};
-use ttrpc::server::*;
 use ttrpc::ttrpc::{Code, Status};
 
+use async_trait::async_trait;
+use tokio;
+use tokio::signal::unix::{signal, SignalKind};
+
 struct HealthService;
+
+#[async_trait]
 impl health_ttrpc::Health for HealthService {
-    fn check(
+    async fn check(
         &self,
-        _ctx: &::ttrpc::TtrpcContext,
+        _ctx: &::ttrpc::r#async::TtrpcContext,
         _req: health::CheckRequest,
     ) -> Result<health::HealthCheckResponse> {
         let mut status = Status::new();
+
         status.set_code(Code::NOT_FOUND);
         status.set_message("Just for fun".to_string());
+
+        let delay = tokio::time::delay_for(std::time::Duration::from_secs(10));
+        delay.await;
+
         Err(Error::RpcStatus(status))
     }
-    fn version(
+    async fn version(
         &self,
-        _ctx: &::ttrpc::TtrpcContext,
+        _ctx: &::ttrpc::r#async::TtrpcContext,
         req: health::CheckRequest,
     ) -> Result<health::VersionCheckResponse> {
         info!("version {:?}", req);
@@ -54,10 +56,12 @@ impl health_ttrpc::Health for HealthService {
 }
 
 struct AgentService;
+
+#[async_trait]
 impl agent_ttrpc::AgentService for AgentService {
-    fn list_interfaces(
+    async fn list_interfaces(
         &self,
-        _ctx: &::ttrpc::TtrpcContext,
+        _ctx: &::ttrpc::r#async::TtrpcContext,
         _req: agent::ListInterfacesRequest,
     ) -> ::ttrpc::Result<agent::Interfaces> {
         let mut rp = protobuf::RepeatedField::new();
@@ -73,11 +77,11 @@ impl agent_ttrpc::AgentService for AgentService {
         i.set_Interfaces(rp);
 
         Ok(i)
-        //Err(::ttrpc::Error::RpcStatus(::ttrpc::get_Status(::ttrpc::Code::NOT_FOUND, "".to_string())))
     }
 }
 
-fn main() {
+#[tokio::main(core_threads = 1)]
+async fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
 
     let h = Box::new(HealthService {}) as Box<dyn health_ttrpc::Health + Send + Sync>;
@@ -88,23 +92,19 @@ fn main() {
     let a = Arc::new(a);
     let aservice = agent_ttrpc::create_agent_service(a);
 
-    let mut server = Server::new()
+    let server = Server::new()
         .bind("unix:///tmp/1")
         .unwrap()
         .register_service(hservice)
         .register_service(aservice);
 
-    server.start().unwrap();
-
-    // Hold the main thread until receiving signal SIGTERM
-    let (tx, rx) = std::sync::mpsc::channel();
-    thread::spawn(move || {
-        ctrlc::set_handler(move || {
-            tx.send(()).unwrap();
-        })
-        .expect("Error setting Ctrl-C handler");
-        println!("Server is running, press Ctrl + C to exit");
-    });
-
-    rx.recv().unwrap();
+    let mut stream = signal(SignalKind::hangup()).unwrap();
+    tokio::select! {
+        _ = stream.recv() => {
+            println!("signal received")
+        }
+        _ = server.start() => {
+            println!("server exit")
+        }
+    };
 }

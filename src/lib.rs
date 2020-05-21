@@ -18,19 +18,25 @@ extern crate log;
 #[macro_use]
 pub mod error;
 #[macro_use]
-mod channel;
-// TODO: address this after merging linters
-#[allow(clippy::type_complexity, clippy::redundant_clone)]
-pub mod client;
-// TODO: address this after merging linters
+pub mod common;
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-pub mod server;
 pub mod ttrpc;
 
-pub use crate::channel::{
-    write_message, MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
-};
-pub use crate::client::Client;
+pub use crate::common::MessageHeader;
 pub use crate::error::{get_status, Error, Result};
-pub use crate::server::{response_to_channel, MethodHandler, Server, TtrpcContext};
 pub use crate::ttrpc::{Code, Request, Response, Status};
+
+cfg_sync! {
+    pub mod sync;
+    pub use crate::sync::channel::{write_message};
+    pub use crate::sync::utils::{response_to_channel, MethodHandler, TtrpcContext};
+    pub use crate::sync::client;
+    pub use crate::sync::client::Client;
+    pub use crate::sync::server;
+    pub use crate::sync::server::Server;
+}
+
+cfg_async! {
+    pub mod asynchronous;
+    pub use crate::asynchronous as r#async;
+}
