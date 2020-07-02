@@ -275,7 +275,7 @@ impl Server {
             ));
         }
 
-        let fd = common::do_bind(host)?;
+        let (fd, _) = common::do_bind(host)?;
         self.listeners.push(fd);
 
         Ok(self)

@@ -21,6 +21,7 @@ async-trait = "0.1.31"
 
 tokio = { version = "0.2", features = ["rt-threaded", "sync", "uds", "stream", "macros", "io-util"] }
 futures = "0.3"
+tokio-vsock = "0.2.1"
 
 [build-dependencies]
 protobuf-codegen-pure = "2.14.0"

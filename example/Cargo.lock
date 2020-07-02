@@ -315,9 +315,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.70"
+version = "0.2.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3baa92041a6fec78c687fa0cc2b3fae8884f743d672cf551bed1d6dac6988d0f"
+checksum = "9457b06509d27052635f90d6466700c65095fdf75409b3fbdd903e988b886f49"
 
 [[package]]
 name = "log"
@@ -814,8 +814,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-vsock"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49825c1a1208e813509b5256ab9c05b0b57f8c71978a85d713666a5e8255cc4b"
+dependencies = [
+ "bytes 0.4.12",
+ "futures",
+ "iovec",
+ "libc",
+ "mio",
+ "nix 0.17.0",
+ "tokio",
+ "vsock",
+]
+
+[[package]]
 name = "ttrpc"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -826,6 +842,7 @@ dependencies = [
  "protobuf",
  "protobuf-codegen-pure",
  "tokio",
+ "tokio-vsock",
 ]
 
 [[package]]
@@ -884,6 +901,16 @@ name = "void"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
+
+[[package]]
+name = "vsock"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dba063357047c0f2216c7c653879ea4e5e198d0c3cde7efa37ebfd9039b48491"
+dependencies = [
+ "libc",
+ "nix 0.17.0",
+]
 
 [[package]]
 name = "wasi"

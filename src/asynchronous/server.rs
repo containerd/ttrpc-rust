@@ -9,25 +9,29 @@ use std::os::unix::io::RawFd;
 use std::sync::Arc;
 
 use crate::asynchronous::stream::{receive, respond, respond_with_status};
-use crate::common;
-use crate::common::MESSAGE_TYPE_REQUEST;
+use crate::common::{self, Domain, MESSAGE_TYPE_REQUEST};
 use crate::error::{get_status, Error, Result};
 use crate::r#async::{MethodHandler, TtrpcContext};
 use crate::ttrpc::{Code, Request};
 use crate::MessageHeader;
 use futures::StreamExt as _;
+use std::marker::Unpin;
 use std::os::unix::io::FromRawFd;
+use std::os::unix::net::UnixListener as SysUnixListener;
 use tokio::{
     self,
     io::split,
     net::UnixListener,
     prelude::*,
+    stream::Stream,
     sync::mpsc::{channel, Receiver, Sender},
 };
+use tokio_vsock::VsockListener;
 
 pub struct Server {
     listeners: Vec<RawFd>,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
+    domain: Option<Domain>,
 }
 
 impl Default for Server {
@@ -35,6 +39,7 @@ impl Default for Server {
         Server {
             listeners: Vec::with_capacity(1),
             methods: Arc::new(HashMap::new()),
+            domain: None,
         }
     }
 }
@@ -51,9 +56,10 @@ impl Server {
             ));
         }
 
-        let fd = common::do_bind(host)?;
-        self.listeners.push(fd);
+        let (fd, domain) = common::do_bind(host)?;
+        self.domain = Some(domain);
 
+        self.listeners.push(fd);
         Ok(self)
     }
 
@@ -77,21 +83,42 @@ impl Server {
             return Err(Error::Others("ttrpc-rust not bind".to_string()));
         }
 
-        let listener = self.listeners[0];
-        common::do_listen(listener)?;
+        let listenfd = self.listeners[0];
+        common::do_listen(listenfd)?;
 
-        Ok(listener)
+        Ok(listenfd)
     }
 
     pub async fn start(&self) -> Result<()> {
-        let listener = self.listen()?;
-        let sys_unix_listener: std::os::unix::net::UnixListener;
-        unsafe {
-            sys_unix_listener = std::os::unix::net::UnixListener::from_raw_fd(listener);
-        }
-        let mut unix_listener = UnixListener::from_std(sys_unix_listener).unwrap();
-        let mut incoming = unix_listener.incoming();
+        let listenfd = self.listen()?;
 
+        match self.domain.as_ref().unwrap() {
+            Domain::Unix => {
+                let sys_unix_listener;
+                unsafe {
+                    sys_unix_listener = SysUnixListener::from_raw_fd(listenfd);
+                }
+                let mut unix_listener = UnixListener::from_std(sys_unix_listener).unwrap();
+                let incoming = unix_listener.incoming();
+
+                self.do_start(listenfd, incoming).await
+            }
+            Domain::Vsock => {
+                let incoming;
+                unsafe {
+                    incoming = VsockListener::from_raw_fd(listenfd).incoming();
+                }
+
+                self.do_start(listenfd, incoming).await
+            }
+        }
+    }
+
+    pub async fn do_start<I, S>(&self, listenfd: RawFd, mut incoming: I) -> Result<()>
+    where
+        I: Stream<Item = std::io::Result<S>> + Unpin,
+        S: AsyncRead + AsyncWrite + Send + 'static,
+    {
         while let Some(result) = incoming.next().await {
             match result {
                 Ok(stream) => {
@@ -115,7 +142,7 @@ impl Server {
                             match receive(&mut reader).await {
                                 Ok(message) => {
                                     tokio::spawn(async move {
-                                        handle_request(tx, listener, methods, message).await;
+                                        handle_request(tx, listenfd, methods, message).await;
                                     });
                                 }
                                 Err(e) => {

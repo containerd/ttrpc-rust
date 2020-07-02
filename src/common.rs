@@ -11,6 +11,12 @@ use nix::sys::socket::*;
 use std::os::unix::io::RawFd;
 use std::str::FromStr;
 
+#[derive(Debug)]
+pub enum Domain {
+    Unix,
+    Vsock,
+}
+
 #[derive(Default, Debug)]
 pub struct MessageHeader {
     pub length: u32,
@@ -30,18 +36,29 @@ pub fn do_listen(listener: RawFd) -> Result<()> {
     listen(listener, 10).map_err(|e| Error::Socket(e.to_string()))
 }
 
-pub fn do_bind(host: &str) -> Result<RawFd> {
+pub fn parse_host(host: &str) -> Result<(Domain, Vec<&str>)> {
     let hostv: Vec<&str> = host.trim().split("://").collect();
     if hostv.len() != 2 {
         return Err(Error::Others(format!("Host {} is not right", host)));
     }
-    let scheme = hostv[0].to_lowercase();
+
+    let domain = match &hostv[0].to_lowercase()[..] {
+        "unix" => Domain::Unix,
+        "vsock" => Domain::Vsock,
+        x => return Err(Error::Others(format!("Scheme {:?} is not supported", x))),
+    };
+
+    Ok((domain, hostv))
+}
+
+pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
+    let (domain, hostv) = parse_host(host)?;
 
     let sockaddr: SockAddr;
     let fd: RawFd;
 
-    match scheme.as_str() {
-        "unix" => {
+    match domain {
+        Domain::Unix => {
             fd = socket(
                 AddressFamily::Unix,
                 SockType::Stream,
@@ -54,8 +71,7 @@ pub fn do_bind(host: &str) -> Result<RawFd> {
                 UnixAddr::new_abstract(sockaddr_h.as_bytes()).map_err(err_to_Others!(e, ""))?;
             sockaddr = SockAddr::Unix(sockaddr_u);
         }
-
-        "vsock" => {
+        Domain::Vsock => {
             let host_port_v: Vec<&str> = hostv[1].split(':').collect();
             if host_port_v.len() != 2 {
                 return Err(Error::Others(format!(
@@ -75,12 +91,11 @@ pub fn do_bind(host: &str) -> Result<RawFd> {
             .map_err(|e| Error::Socket(e.to_string()))?;
             sockaddr = SockAddr::new_vsock(cid, port);
         }
-        _ => return Err(Error::Others(format!("Scheme {} is not supported", scheme))),
     };
 
     bind(fd, &sockaddr).map_err(err_to_Others!(e, ""))?;
 
-    Ok(fd)
+    Ok((fd, domain))
 }
 
 macro_rules! cfg_sync {
