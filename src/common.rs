@@ -86,7 +86,7 @@ pub fn do_bind(host: &str) -> Result<RawFd> {
 macro_rules! cfg_sync {
     ($($item:item)*) => {
         $(
-            #[cfg(feature = "async")]
+            #[cfg(feature = "sync")]
             $item
         )*
     }
