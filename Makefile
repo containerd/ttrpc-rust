@@ -1,4 +1,4 @@
-all: check debug test
+all: debug check test
 
 #
 # Build
