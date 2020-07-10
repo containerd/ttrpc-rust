@@ -20,7 +20,10 @@ pub mod error;
 #[macro_use]
 pub mod common;
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-pub mod ttrpc;
+pub mod compiled {
+    include!(concat!(env!("OUT_DIR"), "/mod.rs"));
+}
+pub use compiled::ttrpc;
 
 pub use crate::common::MessageHeader;
 pub use crate::error::{get_status, Error, Result};
