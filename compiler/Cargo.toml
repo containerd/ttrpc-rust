@@ -1,12 +1,14 @@
 [package]
 name = "ttrpc-compiler"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2018"
 authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 license = "Apache-2.0"
 keywords = ["compiler", "ttrpc", "protobuf"]
 description = "ttRPC compiler for ttrpc"
 categories = ["network-programming"]
+repository = "https://github.com/containerd/ttrpc-rust/tree/master/compiler"
+homepage = "https://github.com/containerd/ttrpc-rust/tree/master/compiler"
 
 [dependencies]
 protobuf = "2.0"
