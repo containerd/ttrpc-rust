@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Sync server of ttrpc.
+
 use nix::fcntl::OFlag;
 use nix::sys::select::{select, FdSet};
 use nix::sys::socket::{self, *};
@@ -43,6 +45,7 @@ const DEFAULT_WAIT_THREAD_COUNT_MAX: usize = 5;
 type MessageSender = Sender<(MessageHeader, Vec<u8>)>;
 type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
 
+/// A ttrpc Server (sync).
 pub struct Server {
     listeners: Vec<RawFd>,
     monitor_fd: (RawFd, RawFd),

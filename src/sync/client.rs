@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Sync client of ttrpc.
+
 use nix::sys::select::*;
 use nix::sys::socket::*;
 use nix::unistd::close;
@@ -31,6 +33,7 @@ use crate::MessageHeader;
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 
+/// A ttrpc Client (sync).
 #[derive(Clone)]
 pub struct Client {
     fd: RawFd,

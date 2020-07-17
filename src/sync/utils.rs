@@ -8,6 +8,8 @@ use crate::error::{Error, Result};
 use crate::ttrpc::{Request, Response};
 use protobuf::Message;
 
+/// Response message through a channel.
+/// Eventually  the message will sent to Client.
 pub fn response_to_channel(
     stream_id: u32,
     res: Response,
@@ -29,6 +31,7 @@ pub fn response_to_channel(
     Ok(())
 }
 
+/// Handle request in sync mode.
 #[macro_export]
 macro_rules! request_handler {
     ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
@@ -63,6 +66,7 @@ macro_rules! request_handler {
     };
 }
 
+/// Send request through sync client.
 #[macro_export]
 macro_rules! client_request {
     ($self: ident, $req: ident, $timeout_nano: ident, $server: expr, $method: expr, $cres: ident) => {
@@ -84,6 +88,7 @@ macro_rules! client_request {
     };
 }
 
+/// The context of ttrpc (sync).
 #[derive(Debug)]
 pub struct TtrpcContext {
     pub fd: std::os::unix::io::RawFd,
@@ -91,6 +96,7 @@ pub struct TtrpcContext {
     pub res_tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
 }
 
+/// Trait that implements handler which is a proxy to the desired method (sync).
 pub trait MethodHandler {
     fn handler(&self, ctx: TtrpcContext, req: Request) -> Result<()>;
 }

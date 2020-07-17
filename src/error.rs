@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Error and Result of ttrpc and relevant functions, macros.
+
 use crate::ttrpc::{Code, Status};
 use std::result;
 
+/// The error type for ttrpc.
 #[derive(Debug)]
 pub enum Error {
     Socket(String),
@@ -22,8 +25,10 @@ pub enum Error {
     Others(String),
 }
 
+/// A specialized Result type for ttrpc.
 pub type Result<T> = result::Result<T, Error>;
 
+/// Get ttrpc::Status from ttrpc::Code and a message.
 pub fn get_status(c: Code, msg: String) -> Status {
     let mut status = Status::new();
     status.set_code(c);
@@ -57,6 +62,7 @@ macro_rules! err_to_Others {
     };
 }
 
+/// Convert to ttrpc::Error::Others.
 #[macro_export]
 macro_rules! Err_to_Others {
     ($e: ident, $s: expr) => {

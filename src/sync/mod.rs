@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+//! Server and Client in sync mode.
+
 #[macro_use]
 pub mod channel;
 pub mod client;

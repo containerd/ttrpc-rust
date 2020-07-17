@@ -29,6 +29,7 @@ type RequestReceiver = Receiver<(Vec<u8>, Sender<Result<Vec<u8>>>)>;
 type ResponseSender = Sender<Result<Vec<u8>>>;
 type ResponseReceiver = Receiver<Result<Vec<u8>>>;
 
+/// A ttrpc Client (async).
 #[derive(Clone)]
 pub struct Client {
     req_tx: RequestSender,
