@@ -1,0 +1,19 @@
+[package]
+name = "ttrpc-codegen"
+version = "0.1.1"
+edition = "2018"
+authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
+license = "Apache-2.0"
+keywords = ["codegen", "ttrpc", "protobuf"]
+description = "Rust codegen for ttrpc using ttrpc-compiler crate"
+categories = ["network-programming", "development-tools::build-utils"]
+repository = "https://github.com/containerd/ttrpc-rust/tree/master/ttrpc-codegen"
+homepage = "https://github.com/containerd/ttrpc-rust/tree/master/ttrpc-codegen"
+readme = "README.md"
+
+
+[dependencies]
+protobuf = { version = "2.14.0" }
+protobuf-codegen-pure = "2.14.0"
+protobuf-codegen = "2.14.0"
+ttrpc-compiler = "0.3"

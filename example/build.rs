@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use protoc_rust_ttrpc::Customize;
 use std::fs::File;
 use std::io::{Read, Write};
+use ttrpc_codegen::Codegen;
+use ttrpc_codegen::Customize;
 
 fn main() {
     let protos = vec![
@@ -21,7 +22,7 @@ fn main() {
         .iter()
         .for_each(|p| println!("cargo:rerun-if-changed={}", &p));
 
-    protoc_rust_ttrpc::Codegen::new()
+    Codegen::new()
         .out_dir("protocols/sync")
         .inputs(&protos)
         .include("protocols/protos")
@@ -30,9 +31,9 @@ fn main() {
             ..Default::default()
         })
         .run()
-        .expect("Gen sync codes failed.");
+        .expect("Gen sync code failed.");
 
-    protoc_rust_ttrpc::Codegen::new()
+    Codegen::new()
         .out_dir("protocols/asynchronous")
         .inputs(&protos)
         .include("protocols/protos")
@@ -42,7 +43,7 @@ fn main() {
             ..Default::default()
         })
         .run()
-        .expect("Gen async codes failed.");
+        .expect("Gen async code failed.");
 
     // There is a message named 'Box' in oci.proto
     // so there is a struct named 'Box', we should replace Box<Self> to ::std::boxed::Box<Self>

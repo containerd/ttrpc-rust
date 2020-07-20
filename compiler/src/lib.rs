@@ -14,7 +14,7 @@
 //!
 //! A compiler of ttrpc-rust.
 //!
-//! *generate rust version ttrpc codes from proto files.*
+//! *generate rust version ttrpc code from proto files.*
 //!
 //!
 //! Usage
@@ -27,9 +27,13 @@ pub mod codegen;
 pub mod prost_codegen;
 mod util;
 
+/// Customize generated code.
 #[derive(Default, Debug, Clone)]
 pub struct Customize {
+    /// Indicates whether to generate async code for both server and client.
     pub async_all: bool,
+    /// Indicates whether to  generate async code for client.
     pub async_client: bool,
+    /// Indicates whether to generate async code for server.
     pub async_server: bool,
 }

@@ -13,9 +13,8 @@ To generate the sources from proto files:
 
 1. Install protoc from github.com/protocolbuffers/protobuf
 
-2. Install protobuf-codegen from github.com/pingcap/grpc-rs
+2. Install protobuf-codegen
 ```
-cd grpc-rs
 cargo install --force protobuf-codegen
 ```
 
@@ -57,10 +56,10 @@ ttrpc-rust supports async/.await. By using async/.await you can reduce the overh
 
 ## Usage
 ### 1. Generate codes in async version
-Currently we only support generating async codes by using protoc_rust_ttrpc
+Currently we only support generating async codes by using ttrpc-codegen
 
 ```
-    protoc_rust_ttrpc::Codegen::new()
+    ttrpc_codegen::Codegen::new()
         .out_dir("protocols/asynchronous")
         .inputs(&protos)
         .include("protocols/protos")

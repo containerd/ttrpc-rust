@@ -28,6 +28,7 @@ use tokio::{
 };
 use tokio_vsock::VsockListener;
 
+/// A ttrpc Server (async).
 pub struct Server {
     listeners: Vec<RawFd>,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,

@@ -11,6 +11,7 @@ use protobuf::Message;
 use std::os::unix::io::{FromRawFd, RawFd};
 use tokio::net::UnixStream;
 
+/// Handle request in async mode.
 #[macro_export]
 macro_rules! async_request_handler {
     ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
@@ -49,6 +50,7 @@ macro_rules! async_request_handler {
     };
 }
 
+/// Send request through async client.
 #[macro_export]
 macro_rules! async_client_request {
     ($self: ident, $req: ident, $timeout_nano: ident, $server: expr, $method: expr, $cres: ident) => {
@@ -74,11 +76,13 @@ macro_rules! async_client_request {
     };
 }
 
+/// Trait that implements handler which is a proxy to the desired method (async).
 #[async_trait]
 pub trait MethodHandler {
     async fn handler(&self, ctx: TtrpcContext, req: Request) -> Result<(u32, Vec<u8>)>;
 }
 
+/// The context of ttrpc (async).
 #[derive(Debug)]
 pub struct TtrpcContext {
     pub fd: std::os::unix::io::RawFd,

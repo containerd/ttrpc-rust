@@ -12,6 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! ttrpc-rust is a **non-core** subproject of containerd
+//!
+//! `ttrpc-rust` is the Rust version of [ttrpc](https://github.com/containerd/ttrpc). [ttrpc](https://github.com/containerd/ttrpc) is GRPC for low-memory environments.
+//!
+//! Example:
+//!
+//! Check [this](https://github.com/containerd/ttrpc-rust/tree/master/example)
+//!
+//! # Feature flags
+//!
+//! - `async`: Enables async server and client.
+//! - `sync`: Enables traditional sync server and client (default enabled).
+//! - `protobuf-codec`: Includes rust-protobuf (default enabled).
+
 #[macro_use]
 extern crate log;
 
@@ -20,13 +34,17 @@ pub mod error;
 #[macro_use]
 pub mod common;
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-pub mod compiled {
+mod compiled {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 }
+#[doc(inline)]
 pub use compiled::ttrpc;
 
+#[doc(inline)]
 pub use crate::common::MessageHeader;
+#[doc(inline)]
 pub use crate::error::{get_status, Error, Result};
+#[doc(inline)]
 pub use crate::ttrpc::{Code, Request, Response, Status};
 
 cfg_sync! {

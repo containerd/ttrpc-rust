@@ -1,6 +1,6 @@
 # A compiler of ttrpc-rust
 
-generate rust version ttrpc codes from proto files.
+generate rust version ttrpc code from proto files.
 
 ## Usage
 

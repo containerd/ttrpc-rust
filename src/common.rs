@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+//! Common functions and macros.
+
 #![allow(unused_macros)]
 
 use crate::error::{Error, Result};
@@ -17,6 +19,7 @@ pub enum Domain {
     Vsock,
 }
 
+/// Message header of ttrpc.
 #[derive(Default, Debug)]
 pub struct MessageHeader {
     pub length: u32,
@@ -102,6 +105,8 @@ macro_rules! cfg_sync {
     ($($item:item)*) => {
         $(
             #[cfg(feature = "sync")]
+            #[cfg_attr(docsrs, doc(cfg(feature = "sync")))]
+            #[doc(inline)]
             $item
         )*
     }
@@ -111,6 +116,8 @@ macro_rules! cfg_async {
     ($($item:item)*) => {
         $(
             #[cfg(feature = "async")]
+            #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
+            #[doc(inline)]
             $item
         )*
     }
