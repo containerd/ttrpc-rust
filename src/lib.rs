@@ -26,6 +26,8 @@
 //! - `sync`: Enables traditional sync server and client (default enabled).
 //! - `protobuf-codec`: Includes rust-protobuf (default enabled).
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 #[macro_use]
 extern crate log;
 
