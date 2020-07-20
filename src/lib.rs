@@ -59,5 +59,6 @@ cfg_sync! {
 
 cfg_async! {
     pub mod asynchronous;
+    #[doc(hidden)]
     pub use crate::asynchronous as r#async;
 }
