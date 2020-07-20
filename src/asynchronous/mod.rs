@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-//! Server and client in async mode.
+//! Server and client in async mode (alias r#async).
 
 pub mod client;
 pub mod server;
