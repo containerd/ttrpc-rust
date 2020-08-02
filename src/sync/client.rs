@@ -117,6 +117,15 @@ impl Client {
                     Err(x) => match x {
                         Error::Socket(y) => {
                             trace!("Socket error {}", y);
+                            let mut map = recver_map_orig.lock().unwrap();
+                            for (_, recver_tx) in map.iter_mut() {
+                                recver_tx
+                                    .send(Err(Error::Others(format!("socket error {}", y))))
+                                    .unwrap_or_else(|e| {
+                                        error!("The request has returned error {:?}", e)
+                                    });
+                            }
+                            map.clear();
                             break;
                         }
                         _ => {
