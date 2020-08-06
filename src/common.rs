@@ -96,6 +96,7 @@ pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
         }
     };
 
+    setsockopt(fd, sockopt::ReusePort, &true).ok();
     bind(fd, &sockaddr).map_err(err_to_Others!(e, ""))?;
 
     Ok((fd, domain))
