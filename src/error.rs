@@ -16,12 +16,18 @@
 
 use crate::ttrpc::{Code, Status};
 use std::result;
+use thiserror::Error;
 
 /// The error type for ttrpc.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
+    #[error("socket err: {0}")]
     Socket(String),
+
+    #[error("rpc status: {0:?}")]
     RpcStatus(Status),
+
+    #[error("ttrpc err: {0}")]
     Others(String),
 }
 
