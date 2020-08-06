@@ -29,6 +29,7 @@ use crate::error::{Error, Result};
 use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
 use crate::MessageHeader;
+use std::time::Duration;
 
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
@@ -167,9 +168,17 @@ impl Client {
         self.sender_tx
             .send((buf, tx))
             .map_err(err_to_Others!(e, "Send packet to sender error "))?;
-        let result = rx
-            .recv()
-            .map_err(err_to_Others!(e, "Recive packet from recver error "))?;
+
+        let result: Result<Vec<u8>>;
+        if req.timeout_nano == 0 {
+            result = rx
+                .recv()
+                .map_err(err_to_Others!(e, "Receive packet from recver error: "))?;
+        } else {
+            result = rx
+                .recv_timeout(Duration::from_nanos(req.timeout_nano as u64))
+                .map_err(err_to_Others!(e, "Receive packet from recver timeout: "))?;
+        }
 
         let buf = result?;
         let mut s = CodedInputStream::from_bytes(&buf);
