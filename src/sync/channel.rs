@@ -25,6 +25,10 @@ fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
     let mut v: Vec<u8> = vec![0; count];
     let mut len = 0;
 
+    if count == 0 {
+        return Ok(v.to_vec())
+    }
+
     loop {
         match recv(fd, &mut v[len..], MsgFlags::empty()) {
             Ok(l) => {
@@ -48,6 +52,10 @@ fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
 
 fn write_count(fd: RawFd, buf: &[u8], count: usize) -> Result<usize> {
     let mut len = 0;
+
+    if count == 0 {
+        return Ok(0)
+    }
 
     loop {
         match send(fd, &buf[len..], MsgFlags::empty()) {
