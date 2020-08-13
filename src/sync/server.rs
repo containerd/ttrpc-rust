@@ -21,7 +21,7 @@ use nix::unistd::close;
 use nix::unistd::pipe2;
 use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -279,8 +279,9 @@ impl Server {
         }
 
         let (fd, _) = common::do_bind(host)?;
-        self.listeners.push(fd);
+        common::do_listen(fd)?;
 
+        self.listeners.push(fd);
         Ok(self)
     }
 
@@ -340,8 +341,6 @@ impl Server {
         let max = self.thread_count_max;
         let service_quit = self.quit.clone();
         let monitor_fd = self.monitor_fd.0;
-
-        common::do_listen(listener)?;
 
         let handler = thread::Builder::new()
             .name("listener_loop".into())
@@ -506,5 +505,17 @@ impl Server {
         if let Some(handler) = self.handler.take() {
             handler.join().unwrap();
         }
+    }
+}
+
+impl FromRawFd for Server {
+    unsafe fn from_raw_fd(fd: RawFd) -> Self {
+        Self::default().add_listener(fd).unwrap()
+    }
+}
+
+impl AsRawFd for Server {
+    fn as_raw_fd(&self) -> RawFd {
+        self.listeners[0]
     }
 }
