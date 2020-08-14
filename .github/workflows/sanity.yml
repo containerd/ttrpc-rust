@@ -27,12 +27,3 @@ jobs:
       uses: tim-actions/dco@master
       with:
         commits: ${{ steps.get-pr-commits.outputs.commits }}
-  pr_wip_check:
-    runs-on: ubuntu-latest
-    name: WIP Check
-    steps:
-    - name: WIP Check
-      uses: tim-actions/wip-check@master
-      with:
-        labels: '["do-not-merge", "wip", "rfc"]'
-        keywords: '["WIP", "wip", "RFC", "rfc"]'
