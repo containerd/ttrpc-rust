@@ -8,6 +8,7 @@ use protobuf::{CodedInputStream, CodedOutputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::common::MESSAGE_TYPE_RESPONSE;
 use crate::error::{Error, Result};
@@ -154,10 +155,22 @@ impl Client {
             .await
             .map_err(|e| Error::Others(format!("Send packet to sender error {:?}", e)))?;
 
-        let result = rx
-            .recv()
-            .await
-            .ok_or_else(|| Error::Others("Recive packet from recver error".to_string()))?;
+        let result: Result<Vec<u8>> = if req.timeout_nano == 0 {
+            rx.recv()
+                .await
+                .ok_or_else(|| Error::Others("Recive packet from recver error".to_string()))?
+        } else {
+            let timeout = tokio::time::delay_for(Duration::from_nanos(req.timeout_nano as u64));
+
+            tokio::select! {
+                result = rx.recv() => {
+                    result.ok_or_else(|| Error::Others("Recive packet from recver error".to_string()))?
+                }
+                _ = timeout => {
+                    return Err(Error::Others("Recive packet from recver error".to_string()));
+                }
+            }
+        };
 
         let buf = result?;
         let mut s = CodedInputStream::from_bytes(&buf);
