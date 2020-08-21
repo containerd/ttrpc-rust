@@ -8,7 +8,7 @@
 #![allow(unused_macros)]
 
 use crate::error::{Error, Result};
-use nix::fcntl::{fcntl, FcntlArg, OFlag};
+use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
 use nix::sys::socket::*;
 use std::os::unix::io::RawFd;
 use std::str::FromStr;
@@ -52,6 +52,16 @@ pub fn parse_host(host: &str) -> Result<(Domain, Vec<&str>)> {
     };
 
     Ok((domain, hostv))
+}
+
+pub fn set_fd_close_exec(fd: RawFd) -> Result<RawFd> {
+    if let Err(e) = fcntl(fd, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)) {
+        return Err(Error::Others(format!(
+            "failed to set fd: {} as close-on-exec: {}",
+            fd, e
+        )));
+    }
+    Ok(fd)
 }
 
 pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {

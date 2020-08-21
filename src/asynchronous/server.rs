@@ -16,7 +16,7 @@ use crate::ttrpc::{Code, Request};
 use crate::MessageHeader;
 use futures::StreamExt as _;
 use std::marker::Unpin;
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixListener as SysUnixListener;
 use tokio::{
     self,
@@ -118,11 +118,12 @@ impl Server {
     pub async fn do_start<I, S>(&self, listenfd: RawFd, mut incoming: I) -> Result<()>
     where
         I: Stream<Item = std::io::Result<S>> + Unpin,
-        S: AsyncRead + AsyncWrite + Send + 'static,
+        S: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
     {
         while let Some(result) = incoming.next().await {
             match result {
                 Ok(stream) => {
+                    common::set_fd_close_exec(stream.as_raw_fd())?;
                     let methods = self.methods.clone();
                     tokio::spawn(async move {
                         let (mut reader, mut writer) = split(stream);
