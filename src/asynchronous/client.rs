@@ -73,7 +73,10 @@ impl Client {
                     }
 
                     let e = Error::Socket(format!("{:?}", e));
-                    resp_tx.send(Err(e)).await.unwrap();
+                    resp_tx
+                        .send(Err(e))
+                        .await
+                        .unwrap_or_else(|_e| error!("The request has returned"));
 
                     break; // The stream is dead, exit the loop.
                 }
@@ -121,11 +124,11 @@ impl Client {
                                                 header, body
                                             ))))
                                             .await
-                                            .unwrap();
+                                            .unwrap_or_else(|_e| error!("The request has returned"));
                                         return;
                                     }
 
-                                    resp_tx2.send(Ok(body)).await.unwrap();
+                                    resp_tx2.send(Ok(body)).await.unwrap_or_else(|_e| error!("The request has returned"));
                                 });
                             }
                             Err(e) => {
@@ -167,7 +170,7 @@ impl Client {
                     result.ok_or_else(|| Error::Others("Recive packet from recver error".to_string()))?
                 }
                 _ = timeout => {
-                    return Err(Error::Others("Recive packet from recver error".to_string()));
+                    return Err(Error::Others("Recive packet from recver error: timeout".to_string()));
                 }
             }
         };
