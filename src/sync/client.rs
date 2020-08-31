@@ -82,7 +82,9 @@ impl Client {
                         let mut map = recver_map.lock().unwrap();
                         map.remove(&current_stream_id);
                     }
-                    recver_tx.send(Err(e)).unwrap();
+                    recver_tx
+                        .send(Err(e))
+                        .unwrap_or_else(|_e| error!("The request has returned"));
                 }
             }
             trace!("Sender quit");
@@ -149,11 +151,13 @@ impl Client {
                             "Recver got malformed packet {:?} {:?}",
                             mh, buf
                         ))))
-                        .unwrap();
+                        .unwrap_or_else(|_e| error!("The request has returned"));
                     continue;
                 }
 
-                recver_tx.send(Ok(buf)).unwrap();
+                recver_tx
+                    .send(Ok(buf))
+                    .unwrap_or_else(|_e| error!("The request has returned"));
 
                 map.remove(&mh.stream_id);
             }
