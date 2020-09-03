@@ -20,7 +20,7 @@
 //!
 //!```
 
-use protobuf_codegen::Customize as ProtobufCustomize;
+pub use protobuf_codegen::Customize as ProtobufCustomize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -123,6 +123,7 @@ impl Codegen {
                 .out_dir(&self.out_dir)
                 .inputs(&self.inputs)
                 .includes(&self.includes)
+                .customize(self.rust_protobuf_customize.clone())
                 .run()
                 .expect("Gen rust protobuf failed.");
         }
