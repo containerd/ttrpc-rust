@@ -416,7 +416,7 @@ impl Server {
                             let (res_tx, res_rx): (MessageSender, MessageReceiver) = channel();
                             let handler = thread::spawn(move || {
                                 for r in res_rx.iter() {
-                                    info!("response thread get {:?}", r);
+                                    trace!("response thread get {:?}", r);
                                     if let Err(e) = write_message(fd, r.0, r.1) {
                                         info!("write_message got {:?}", e);
                                         quit_res.store(true, Ordering::SeqCst);
