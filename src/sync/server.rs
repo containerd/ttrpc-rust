@@ -49,10 +49,11 @@ type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
 pub struct Server {
     listeners: Vec<RawFd>,
     monitor_fd: (RawFd, RawFd),
-    quit: Arc<AtomicBool>,
+    listener_quit_flag: Arc<AtomicBool>,
     connections: Arc<Mutex<HashMap<RawFd, Connection>>>,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
     handler: Option<JoinHandle<()>>,
+    reaper: Option<(Sender<i32>, JoinHandle<()>)>,
     thread_count_default: usize,
     thread_count_min: usize,
     thread_count_max: usize,
@@ -251,14 +252,14 @@ fn check_method_handler_threads(ts: &ThreadS) {
 
 impl Default for Server {
     fn default() -> Self {
-        let (rfd, wfd) = pipe2(OFlag::O_CLOEXEC).unwrap();
         Server {
             listeners: Vec::with_capacity(1),
-            monitor_fd: (rfd, wfd),
-            quit: Arc::new(AtomicBool::new(false)),
+            monitor_fd: (-1, -1),
+            listener_quit_flag: Arc::new(AtomicBool::new(false)),
             connections: Arc::new(Mutex::new(HashMap::new())),
             methods: Arc::new(HashMap::new()),
             handler: None,
+            reaper: None,
             thread_count_default: DEFAULT_WAIT_THREAD_COUNT_DEFAULT,
             thread_count_min: DEFAULT_WAIT_THREAD_COUNT_MIN,
             thread_count_max: DEFAULT_WAIT_THREAD_COUNT_MAX,
@@ -315,23 +316,16 @@ impl Server {
         self
     }
 
-    pub fn start(&mut self) -> Result<()> {
-        if self.thread_count_default >= self.thread_count_max {
-            return Err(Error::Others(
-                "thread_count_default should smaller than thread_count_max".to_string(),
-            ));
-        }
-        if self.thread_count_default <= self.thread_count_min {
-            return Err(Error::Others(
-                "thread_count_default should biger than thread_count_min".to_string(),
-            ));
-        }
-
+    pub fn start_listener(&mut self) -> Result<()> {
         let connections = self.connections.clone();
 
         if self.listeners.is_empty() {
             return Err(Error::Others("ttrpc-rust not bind".to_string()));
         }
+
+        self.listener_quit_flag.store(false, Ordering::SeqCst);
+        let (rfd, wfd) = pipe2(OFlag::O_CLOEXEC).unwrap();
+        self.monitor_fd = (rfd, wfd);
 
         let listener = self.listeners[0];
 
@@ -339,16 +333,14 @@ impl Server {
         let default = self.thread_count_default;
         let min = self.thread_count_min;
         let max = self.thread_count_max;
-        let service_quit = self.quit.clone();
+        let listener_quit_flag = self.listener_quit_flag.clone();
         let monitor_fd = self.monitor_fd.0;
 
-        let handler = thread::Builder::new()
-            .name("listener_loop".into())
-            .spawn(move || {
-                let (reaper_tx, reaper_rx) = channel();
+        let reaper_tx = match self.reaper.take() {
+            None => {
                 let reaper_connections = connections.clone();
-
-                let reaper = thread::Builder::new()
+                let (reaper_tx, reaper_rx) = channel();
+                let reaper_handler = thread::Builder::new()
                     .name("reaper".into())
                     .spawn(move || {
                         for fd in reaper_rx.iter() {
@@ -360,11 +352,25 @@ impl Server {
                                     cn.handler.take().map(|handler| handler.join().unwrap())
                                 });
                         }
+                        info!("reaper thread exited");
                     })
                     .unwrap();
+                self.reaper = Some((reaper_tx.clone(), reaper_handler));
+                reaper_tx
+            }
+            Some(r) => {
+                let reaper_tx = r.0.clone();
+                self.reaper = Some(r);
+                reaper_tx
+            }
+        };
 
+        let handler = thread::Builder::new()
+            .name("listener_loop".into())
+            .spawn(move || {
                 loop {
-                    if service_quit.load(Ordering::SeqCst) {
+                    if listener_quit_flag.load(Ordering::SeqCst) {
+                        info!("listener shutdown for quit flag");
                         break;
                     }
 
@@ -384,6 +390,7 @@ impl Server {
                             if e == nix::Error::from(nix::errno::Errno::EINTR) {
                                 continue;
                             } else {
+                                error!("failed to select error {:?}", e);
                                 break;
                             }
                         }
@@ -393,15 +400,18 @@ impl Server {
                         continue;
                     }
 
-                    if service_quit.load(Ordering::SeqCst) {
+                    if listener_quit_flag.load(Ordering::SeqCst) {
+                        info!("listener shutdown for quit flag");
                         break;
                     }
 
                     let fd = match accept4(listener, SockFlag::SOCK_CLOEXEC) {
                         Ok(fd) => fd,
-                        Err(_e) => break,
+                        Err(e) => {
+                            error!("failed to accept error {:?}", e);
+                            break;
+                        }
                     };
-
                     let methods = methods.clone();
                     let quit = Arc::new(AtomicBool::new(false));
                     let child_quit = quit.clone();
@@ -418,7 +428,7 @@ impl Server {
                                 for r in res_rx.iter() {
                                     trace!("response thread get {:?}", r);
                                     if let Err(e) = write_message(fd, r.0, r.1) {
-                                        info!("write_message got {:?}", e);
+                                        error!("write_message got {:?}", e);
                                         quit_res.store(true, Ordering::SeqCst);
                                         break;
                                     }
@@ -449,7 +459,6 @@ impl Server {
                                     break;
                                 }
                             }
-
                             // drop the res_tx, thus the res_rx would get terminated notification.
                             drop(res_tx);
                             handler.join().unwrap_or(());
@@ -473,38 +482,68 @@ impl Server {
 
                 // notify reaper thread to exit.
                 drop(reaper_tx);
-                reaper.join().unwrap();
-                info!("ttrpc server stopped");
+                info!("ttrpc server listener stopped");
             })
             .unwrap();
 
         self.handler = Some(handler);
-
+        info!("server listen started");
         Ok(())
     }
 
-    pub fn shutdown(mut self) {
-        let connections = self.connections.lock().unwrap();
+    pub fn start(&mut self) -> Result<()> {
+        if self.thread_count_default >= self.thread_count_max {
+            return Err(Error::Others(
+                "thread_count_default should smaller than thread_count_max".to_string(),
+            ));
+        }
+        if self.thread_count_default <= self.thread_count_min {
+            return Err(Error::Others(
+                "thread_count_default should biger than thread_count_min".to_string(),
+            ));
+        }
+        self.start_listener()?;
+        info!("server started");
+        Ok(())
+    }
 
-        self.quit.store(true, Ordering::SeqCst);
+    pub fn shutdown_listen(mut self) -> Self {
+        self.listener_quit_flag.store(true, Ordering::SeqCst);
         close(self.monitor_fd.1).unwrap_or_else(|e| {
             warn!(
                 "failed to close notify fd: {} with error: {}",
                 self.monitor_fd.1, e
             )
         });
+        info!("close monitor");
+        if let Some(handler) = self.handler.take() {
+            handler.join().unwrap();
+        }
+        info!("listener thread stopped");
+        self
+    }
+
+    pub fn shutdown_connection(mut self) {
+        info!("begin to shutdown connection");
+        let connections = self.connections.lock().unwrap();
 
         for (_fd, c) in connections.iter() {
             c.close();
         }
-
         // release connections's lock, since the following handler.join()
         // would wait on the other thread's exit in which would take the lock.
         drop(connections);
+        info!("connections closed");
 
-        if let Some(handler) = self.handler.take() {
-            handler.join().unwrap();
+        if let Some(r) = self.reaper.take() {
+            drop(r.0);
+            r.1.join().unwrap();
         }
+        info!("reaper thread stopped");
+    }
+
+    pub fn shutdown(self) {
+        self.shutdown_listen().shutdown_connection();
     }
 }
 
