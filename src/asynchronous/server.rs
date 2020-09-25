@@ -127,12 +127,13 @@ impl Server {
         S: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
     {
         let methods = self.methods.clone();
+
         let (disconnect_tx, close_conn_rx) = watch::channel(0);
         self.disconnect_tx = Some(disconnect_tx);
 
         let (conn_done_tx, all_conn_done_rx) = channel::<i32>(1);
-
         self.all_conn_done_rx = Some(all_conn_done_rx);
+
         let (stop_listen_tx, mut stop_listen_rx) = channel(1);
         self.stop_listen_tx = Some(stop_listen_tx);
 
@@ -216,6 +217,8 @@ impl Server {
                     }
                     fd_tx = stop_listen_rx.recv() => {
                         if let Some(mut fd_tx) = fd_tx {
+                            // dup fd to keep the listener open
+                            // or the listener will be closed when the incoming was dropped.
                             let dup_fd = unistd::dup(incoming.as_raw_fd()).unwrap();
                             common::set_fd_close_exec(dup_fd).unwrap();
                             drop(incoming);
