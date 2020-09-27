@@ -316,7 +316,7 @@ impl Server {
         self
     }
 
-    pub fn start_listener(&mut self) -> Result<()> {
+    pub fn start_listen(&mut self) -> Result<()> {
         let connections = self.connections.clone();
 
         if self.listeners.is_empty() {
@@ -502,12 +502,12 @@ impl Server {
                 "thread_count_default should biger than thread_count_min".to_string(),
             ));
         }
-        self.start_listener()?;
+        self.start_listen()?;
         info!("server started");
         Ok(())
     }
 
-    pub fn shutdown_listen(mut self) -> Self {
+    pub fn stop_listen(mut self) -> Self {
         self.listener_quit_flag.store(true, Ordering::SeqCst);
         close(self.monitor_fd.1).unwrap_or_else(|e| {
             warn!(
@@ -523,7 +523,7 @@ impl Server {
         self
     }
 
-    pub fn shutdown_connection(mut self) {
+    pub fn disconnect(mut self) {
         info!("begin to shutdown connection");
         let connections = self.connections.lock().unwrap();
 
@@ -543,7 +543,7 @@ impl Server {
     }
 
     pub fn shutdown(self) {
-        self.shutdown_listen().shutdown_connection();
+        self.stop_listen().disconnect();
     }
 }
 
