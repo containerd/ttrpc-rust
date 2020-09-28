@@ -73,6 +73,16 @@ impl Server {
         Ok(self)
     }
 
+    pub fn set_domain_unix(mut self) -> Self {
+        self.domain = Some(Domain::Unix);
+        self
+    }
+
+    pub fn set_domain_vsock(mut self) -> Self {
+        self.domain = Some(Domain::Vsock);
+        self
+    }
+
     pub fn add_listener(mut self, fd: RawFd) -> Result<Server> {
         self.listeners.push(fd);
 
@@ -100,8 +110,8 @@ impl Server {
     pub async fn start(&mut self) -> Result<()> {
         let listenfd = self.get_listenfd()?;
 
-        match self.domain.as_ref().unwrap() {
-            Domain::Unix => {
+        match self.domain.as_ref() {
+            Some(Domain::Unix) => {
                 let sys_unix_listener;
                 unsafe {
                     sys_unix_listener = SysUnixListener::from_raw_fd(listenfd);
@@ -110,7 +120,7 @@ impl Server {
 
                 self.do_start(listenfd, unix_listener).await
             }
-            Domain::Vsock => {
+            Some(Domain::Vsock) => {
                 let incoming;
                 unsafe {
                     incoming = VsockListener::from_raw_fd(listenfd).incoming();
@@ -118,6 +128,7 @@ impl Server {
 
                 self.do_start(listenfd, incoming).await
             }
+            _ => Err(Error::Others("Domain is not set".to_string())),
         }
     }
 
@@ -310,5 +321,17 @@ async fn handle_request(
         if let Err(e) = respond_with_status(tx, header.stream_id, status).await {
             error!("respond get error {:?}", e);
         }
+    }
+}
+
+impl FromRawFd for Server {
+    unsafe fn from_raw_fd(fd: RawFd) -> Self {
+        Self::default().add_listener(fd).unwrap()
+    }
+}
+
+impl AsRawFd for Server {
+    fn as_raw_fd(&self) -> RawFd {
+        self.listeners[0]
     }
 }
