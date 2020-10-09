@@ -92,19 +92,32 @@ async fn main() {
     let a = Arc::new(a);
     let aservice = agent_ttrpc::create_agent_service(a);
 
-    let server = Server::new()
+    let mut server = Server::new()
         .bind("unix:///tmp/1")
         .unwrap()
         .register_service(hservice)
         .register_service(aservice);
 
-    let mut stream = signal(SignalKind::hangup()).unwrap();
+    let mut hangup = signal(SignalKind::hangup()).unwrap();
+    let mut interrupt = signal(SignalKind::interrupt()).unwrap();
+    server.start().await.unwrap();
+
     tokio::select! {
-        _ = stream.recv() => {
-            println!("signal received")
+        _ = hangup.recv() => {
+            // test stop_listen -> start
+            println!("stop listen");
+            server.stop_listen().await;
+            println!("start listen");
+            server.start().await.unwrap();
+
+            // hold some time for the new test connection.
+            let timeout = tokio::time::delay_for(std::time::Duration::from_secs(100));
+            timeout.await;
         }
-        _ = server.start() => {
-            println!("server exit")
+        _ = interrupt.recv() => {
+            // test graceful shutdown
+            println!("graceful shutdown");
+            server.shutdown().await.unwrap();
         }
     };
 }
