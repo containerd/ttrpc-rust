@@ -17,8 +17,8 @@ pub fn response_to_channel(
 ) -> Result<()> {
     let mut buf = Vec::with_capacity(res.compute_size() as usize);
     let mut s = protobuf::CodedOutputStream::vec(&mut buf);
-    res.write_to(&mut s).map_err(err_to_Others!(e, ""))?;
-    s.flush().map_err(err_to_Others!(e, ""))?;
+    res.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
+    s.flush().map_err(err_to_others_err!(e, ""))?;
 
     let mh = MessageHeader {
         length: buf.len() as u32,
@@ -26,7 +26,7 @@ pub fn response_to_channel(
         type_: MESSAGE_TYPE_RESPONSE,
         flags: 0,
     };
-    tx.send((mh, buf)).map_err(err_to_Others!(e, ""))?;
+    tx.send((mh, buf)).map_err(err_to_others_err!(e, ""))?;
 
     Ok(())
 }

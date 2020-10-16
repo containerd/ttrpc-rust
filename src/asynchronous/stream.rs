@@ -41,10 +41,10 @@ where
     let mut mh = MessageHeader::default();
     let mut covbuf: &[u8] = &buf[..4];
     mh.length = byteorder::ReadBytesExt::read_u32::<BigEndian>(&mut covbuf)
-        .map_err(err_to_RpcStatus!(Code::INVALID_ARGUMENT, e, ""))?;
+        .map_err(err_to_rpc_err!(Code::INVALID_ARGUMENT, e, ""))?;
     let mut covbuf: &[u8] = &buf[4..8];
     mh.stream_id = byteorder::ReadBytesExt::read_u32::<BigEndian>(&mut covbuf)
-        .map_err(err_to_RpcStatus!(Code::INVALID_ARGUMENT, e, ""))?;
+        .map_err(err_to_rpc_err!(Code::INVALID_ARGUMENT, e, ""))?;
     mh.type_ = buf[8];
     mh.flags = buf[9];
 
@@ -113,8 +113,8 @@ pub fn to_res_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
 fn get_response_body(res: &Response) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(res.compute_size() as usize);
     let mut s = protobuf::CodedOutputStream::vec(&mut buf);
-    res.write_to(&mut s).map_err(err_to_Others!(e, ""))?;
-    s.flush().map_err(err_to_Others!(e, ""))?;
+    res.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
+    s.flush().map_err(err_to_others_err!(e, ""))?;
 
     Ok(buf)
 }
@@ -128,7 +128,7 @@ pub async fn respond(
 
     tx.send(buf)
         .await
-        .map_err(err_to_Others!(e, "Send packet to sender error "))
+        .map_err(err_to_others_err!(e, "Send packet to sender error "))
 }
 
 pub async fn respond_with_status(
@@ -152,5 +152,5 @@ pub async fn respond_with_status(
 
     tx.send(buf)
         .await
-        .map_err(err_to_Others!(e, "Send packet to sender error "))
+        .map_err(err_to_others_err!(e, "Send packet to sender error "))
 }

@@ -148,8 +148,8 @@ impl Client {
         let mut buf = Vec::with_capacity(req.compute_size() as usize);
         {
             let mut s = CodedOutputStream::vec(&mut buf);
-            req.write_to(&mut s).map_err(err_to_Others!(e, ""))?;
-            s.flush().map_err(err_to_Others!(e, ""))?;
+            req.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
+            s.flush().map_err(err_to_others_err!(e, ""))?;
         }
 
         let (tx, mut rx): (ResponseSender, ResponseReceiver) = channel(100);
@@ -179,7 +179,7 @@ impl Client {
         let mut s = CodedInputStream::from_bytes(&buf);
         let mut res = Response::new();
         res.merge_from(&mut s)
-            .map_err(err_to_Others!(e, "Unpack response error "))?;
+            .map_err(err_to_others_err!(e, "Unpack response error "))?;
 
         let status = res.get_status();
         if status.get_code() != Code::OK {
