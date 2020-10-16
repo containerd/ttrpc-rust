@@ -45,7 +45,7 @@ pub use compiled::ttrpc;
 #[doc(inline)]
 pub use crate::common::MessageHeader;
 #[doc(inline)]
-pub use crate::error::{get_status, Error, Result};
+pub use crate::error::{get_rpc_status as get_rpc_error, get_status, Error, Result};
 #[doc(inline)]
 pub use crate::ttrpc::{Code, Request, Response, Status};
 
