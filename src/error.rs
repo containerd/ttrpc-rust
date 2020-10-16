@@ -35,15 +35,15 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 /// Get ttrpc::Status from ttrpc::Code and a message.
-pub fn get_status(c: Code, msg: String) -> Status {
+pub fn get_status(c: Code, msg: impl ToString) -> Status {
     let mut status = Status::new();
     status.set_code(c);
-    status.set_message(msg);
+    status.set_message(msg.to_string());
 
     status
 }
 
-pub fn get_rpc_status(c: Code, msg: String) -> Error {
+pub fn get_rpc_status(c: Code, msg: impl ToString) -> Error {
     Error::RpcStatus(get_status(c, msg))
 }
 
