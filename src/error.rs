@@ -56,13 +56,13 @@ pub fn sock_error_msg(size: usize, msg: String) -> Error {
     get_rpc_status(Code::INVALID_ARGUMENT, msg)
 }
 
-macro_rules! err_to_RpcStatus {
+macro_rules! err_to_rpc_err {
     ($c: expr, $e: ident, $s: expr) => {
         |$e| get_rpc_status($c, $s.to_string() + &$e.to_string())
     };
 }
 
-macro_rules! err_to_Others {
+macro_rules! err_to_others_err {
     ($e: ident, $s: expr) => {
         |$e| Error::Others($s.to_string() + &$e.to_string())
     };

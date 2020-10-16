@@ -26,7 +26,7 @@ fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
     let mut len = 0;
 
     if count == 0 {
-        return Ok(v.to_vec())
+        return Ok(v.to_vec());
     }
 
     loop {
@@ -54,7 +54,7 @@ fn write_count(fd: RawFd, buf: &[u8], count: usize) -> Result<usize> {
     let mut len = 0;
 
     if count == 0 {
-        return Ok(0)
+        return Ok(0);
     }
 
     loop {
@@ -92,12 +92,12 @@ fn read_message_header(fd: RawFd) -> Result<MessageHeader> {
     mh.length =
         covbuf
             .read_u32::<BigEndian>()
-            .map_err(err_to_RpcStatus!(Code::INVALID_ARGUMENT, e, ""))?;
+            .map_err(err_to_rpc_err!(Code::INVALID_ARGUMENT, e, ""))?;
     let mut covbuf: &[u8] = &buf[4..8];
     mh.stream_id =
         covbuf
             .read_u32::<BigEndian>()
-            .map_err(err_to_RpcStatus!(Code::INVALID_ARGUMENT, e, ""))?;
+            .map_err(err_to_rpc_err!(Code::INVALID_ARGUMENT, e, ""))?;
     mh.type_ = buf[8];
     mh.flags = buf[9];
 
