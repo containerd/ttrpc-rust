@@ -35,15 +35,15 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 /// Get ttrpc::Status from ttrpc::Code and a message.
-pub fn get_status(c: Code, msg: String) -> Status {
+pub fn get_status(c: Code, msg: impl ToString) -> Status {
     let mut status = Status::new();
     status.set_code(c);
-    status.set_message(msg);
+    status.set_message(msg.to_string());
 
     status
 }
 
-pub fn get_rpc_status(c: Code, msg: String) -> Error {
+pub fn get_rpc_status(c: Code, msg: impl ToString) -> Error {
     Error::RpcStatus(get_status(c, msg))
 }
 
@@ -56,13 +56,13 @@ pub fn sock_error_msg(size: usize, msg: String) -> Error {
     get_rpc_status(Code::INVALID_ARGUMENT, msg)
 }
 
-macro_rules! err_to_RpcStatus {
+macro_rules! err_to_rpc_err {
     ($c: expr, $e: ident, $s: expr) => {
         |$e| get_rpc_status($c, $s.to_string() + &$e.to_string())
     };
 }
 
-macro_rules! err_to_Others {
+macro_rules! err_to_others_err {
     ($e: ident, $s: expr) => {
         |$e| Error::Others($s.to_string() + &$e.to_string())
     };

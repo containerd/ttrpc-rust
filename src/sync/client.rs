@@ -173,31 +173,34 @@ impl Client {
     pub fn request(&self, req: Request) -> Result<Response> {
         let mut buf = Vec::with_capacity(req.compute_size() as usize);
         let mut s = CodedOutputStream::vec(&mut buf);
-        req.write_to(&mut s).map_err(err_to_Others!(e, ""))?;
-        s.flush().map_err(err_to_Others!(e, ""))?;
+        req.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
+        s.flush().map_err(err_to_others_err!(e, ""))?;
 
         let (tx, rx) = mpsc::sync_channel(0);
 
         self.sender_tx
             .send((buf, tx))
-            .map_err(err_to_Others!(e, "Send packet to sender error "))?;
+            .map_err(err_to_others_err!(e, "Send packet to sender error "))?;
 
         let result: Result<Vec<u8>>;
         if req.timeout_nano == 0 {
             result = rx
                 .recv()
-                .map_err(err_to_Others!(e, "Receive packet from recver error: "))?;
+                .map_err(err_to_others_err!(e, "Receive packet from recver error: "))?;
         } else {
             result = rx
                 .recv_timeout(Duration::from_nanos(req.timeout_nano as u64))
-                .map_err(err_to_Others!(e, "Receive packet from recver timeout: "))?;
+                .map_err(err_to_others_err!(
+                    e,
+                    "Receive packet from recver timeout: "
+                ))?;
         }
 
         let buf = result?;
         let mut s = CodedInputStream::from_bytes(&buf);
         let mut res = Response::new();
         res.merge_from(&mut s)
-            .map_err(err_to_Others!(e, "Unpack response error "))?;
+            .map_err(err_to_others_err!(e, "Unpack response error "))?;
 
         let status = res.get_status();
         if status.get_code() != Code::OK {
