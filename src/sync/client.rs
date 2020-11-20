@@ -14,7 +14,6 @@
 
 //! Sync client of ttrpc.
 
-use nix::sys::select::*;
 use nix::sys::socket::*;
 use nix::unistd::close;
 use protobuf::{CodedInputStream, CodedOutputStream, Message};
@@ -22,7 +21,7 @@ use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::{io, thread};
 
 use crate::common::{MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
@@ -92,21 +91,46 @@ impl Client {
 
         //Recver
         thread::spawn(move || {
-            let bigfd = {
-                if fd > recver_fd {
-                    fd + 1
-                } else {
-                    recver_fd + 1
-                }
-            };
+            let mut pollers = vec![
+                libc::pollfd {
+                    fd: recver_fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ];
+
             loop {
-                let mut rs = FdSet::new();
-                rs.insert(recver_fd);
-                rs.insert(fd);
-                select(bigfd, Some(&mut rs), None, None, None).unwrap();
-                if rs.contains(recver_fd) {
+                let returned = unsafe {
+                    let pollers: &mut [libc::pollfd] = &mut pollers;
+                    libc::poll(
+                        pollers as *mut _ as *mut libc::pollfd,
+                        pollers.len() as u64,
+                        -1,
+                    )
+                };
+
+                if returned == -1 {
+                    let err = io::Error::last_os_error();
+                    if err.raw_os_error() == Some(libc::EINTR) {
+                        continue;
+                    }
+
+                    error!("fatal error in process reaper:{}", err);
                     break;
-                } else if !rs.contains(fd) {
+                } else if returned < 1 {
+                    continue;
+                }
+
+                if pollers[0].revents != 0 {
+                    break;
+                }
+
+                if pollers[pollers.len() - 1].revents == 0 {
                     continue;
                 }
 
