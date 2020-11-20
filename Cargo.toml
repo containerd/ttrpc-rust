@@ -1,6 +1,6 @@
 [package]
 name = "ttrpc"
-version = "0.4.9"
+version = "0.4.10"
 authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 edition = "2018"
 license = "Apache-2.0"
