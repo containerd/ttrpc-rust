@@ -15,7 +15,6 @@
 //! Sync server of ttrpc.
 
 use nix::fcntl::OFlag;
-use nix::sys::select::{select, FdSet};
 use nix::sys::socket::{self, *};
 use nix::unistd::close;
 use nix::unistd::pipe2;
@@ -25,8 +24,8 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::thread::JoinHandle;
+use std::{io, thread};
 
 use crate::common::{self, MESSAGE_TYPE_REQUEST};
 use crate::error::{get_status, Error, Result};
@@ -368,35 +367,47 @@ impl Server {
         let handler = thread::Builder::new()
             .name("listener_loop".into())
             .spawn(move || {
+                let mut pollers = vec![
+                    libc::pollfd {
+                        fd: monitor_fd,
+                        events: libc::POLLIN,
+                        revents: 0,
+                    },
+                    libc::pollfd {
+                        fd: listener,
+                        events: libc::POLLIN,
+                        revents: 0,
+                    },
+                ];
+
                 loop {
                     if listener_quit_flag.load(Ordering::SeqCst) {
                         info!("listener shutdown for quit flag");
                         break;
                     }
 
-                    let mut fd_set = FdSet::new();
-                    fd_set.insert(listener);
-                    fd_set.insert(monitor_fd);
+                    let returned = unsafe {
+                        let pollers: &mut [libc::pollfd] = &mut pollers;
+                        libc::poll(
+                            pollers as *mut _ as *mut libc::pollfd,
+                            pollers.len() as u64,
+                            -1,
+                        )
+                    };
 
-                    match select(
-                        Some(fd_set.highest().unwrap() + 1),
-                        &mut fd_set,
-                        None,
-                        None,
-                        None,
-                    ) {
-                        Ok(_) => (),
-                        Err(e) => {
-                            if e == nix::Error::from(nix::errno::Errno::EINTR) {
-                                continue;
-                            } else {
-                                error!("failed to select error {:?}", e);
-                                break;
-                            }
+                    if returned == -1 {
+                        let err = io::Error::last_os_error();
+                        if err.raw_os_error() == Some(libc::EINTR) {
+                            continue;
                         }
+
+                        error!("fatal error in listener_loop:{:?}", err);
+                        break;
+                    } else if returned < 1 {
+                        continue;
                     }
 
-                    if fd_set.contains(monitor_fd) || !fd_set.contains(listener) {
+                    if pollers[0].revents != 0 || pollers[pollers.len() - 1].revents == 0 {
                         continue;
                     }
 
