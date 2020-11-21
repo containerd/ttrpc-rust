@@ -50,7 +50,7 @@ impl Client {
             AddressFamily::Unix,
             SockType::Stream,
             None,
-            SockFlag::empty(),
+            SockFlag::SOCK_CLOEXEC,
         )
         .unwrap();
         let client_close = Arc::new(ClientClose { fd, close_fd });
@@ -185,6 +185,9 @@ impl Client {
 
                 map.remove(&mh.stream_id);
             }
+
+            close(recver_fd).unwrap();
+
             trace!("Recver quit");
         });
 
