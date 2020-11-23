@@ -186,7 +186,12 @@ impl Client {
                 map.remove(&mh.stream_id);
             }
 
-            close(recver_fd).unwrap();
+            let _ = close(recver_fd).map_err(|e| {
+                warn!(
+                    "failed to close recver_fd: {} with error: {:?}",
+                    recver_fd, e
+                )
+            });
 
             trace!("Recver quit");
         });
