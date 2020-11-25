@@ -111,7 +111,7 @@ fn start_method_handler_thread(
                     // notify the connection dealing main thread to stop.
                     control_tx
                         .try_send(())
-                        .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
+                        .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                     break;
                 }
                 result = read_message(fd);
@@ -121,7 +121,7 @@ fn start_method_handler_thread(
                 // notify the connection dealing main thread to stop.
                 control_tx
                     .try_send(())
-                    .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
+                    .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                 break;
             }
 
@@ -129,7 +129,7 @@ fn start_method_handler_thread(
             if c < min {
                 control_tx
                     .try_send(())
-                    .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
+                    .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
             }
 
             let mh;
@@ -148,7 +148,7 @@ fn start_method_handler_thread(
                         // have exited.
                         control_tx
                             .try_send(())
-                            .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
+                            .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                         break;
                     }
                     _ => {
@@ -175,7 +175,7 @@ fn start_method_handler_thread(
                     // exited.
                     control_tx
                         .try_send(())
-                        .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
+                        .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                     break;
                 }
                 continue;
@@ -198,7 +198,7 @@ fn start_method_handler_thread(
                     // exited.
                     control_tx
                         .try_send(())
-                        .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
+                        .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                     break;
                 }
                 continue;
@@ -216,7 +216,7 @@ fn start_method_handler_thread(
                 // exited.
                 control_tx
                     .try_send(())
-                    .unwrap_or_else(|err| warn!("Failed to try send {:?}", err));
+                    .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                 break;
             }
         }
@@ -476,7 +476,7 @@ impl Server {
                             close(fd).unwrap_or(());
                             reaper_tx_child.send(fd).unwrap();
 
-                            info!("client thread quit");
+                            debug!("client thread quit");
                         })
                         .unwrap();
 
