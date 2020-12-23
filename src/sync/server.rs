@@ -110,7 +110,7 @@ fn start_method_handler_thread(
                 if quit.load(Ordering::SeqCst) {
                     // notify the connection dealing main thread to stop.
                     control_tx
-                        .try_send(())
+                        .send(())
                         .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                     break;
                 }
@@ -120,15 +120,16 @@ fn start_method_handler_thread(
             if quit.load(Ordering::SeqCst) {
                 // notify the connection dealing main thread to stop.
                 control_tx
-                    .try_send(())
+                    .send(())
                     .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                 break;
             }
 
             let c = wtc.fetch_sub(1, Ordering::SeqCst) - 1;
             if c < min {
+                trace!("notify client handler to create much more worker threads!");
                 control_tx
-                    .try_send(())
+                    .send(())
                     .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
             }
 
@@ -147,7 +148,7 @@ fn start_method_handler_thread(
                         // the connection dealing main thread would
                         // have exited.
                         control_tx
-                            .try_send(())
+                            .send(())
                             .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                         break;
                     }
@@ -174,7 +175,7 @@ fn start_method_handler_thread(
                     // the connection dealing main thread would have
                     // exited.
                     control_tx
-                        .try_send(())
+                        .send(())
                         .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                     break;
                 }
@@ -197,7 +198,7 @@ fn start_method_handler_thread(
                     // the connection dealing main thread would have
                     // exited.
                     control_tx
-                        .try_send(())
+                        .send(())
                         .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                     break;
                 }
@@ -215,7 +216,7 @@ fn start_method_handler_thread(
                 // the connection dealing main thread would have
                 // exited.
                 control_tx
-                    .try_send(())
+                    .send(())
                     .unwrap_or_else(|err| debug!("Failed to try send {:?}", err));
                 break;
             }
