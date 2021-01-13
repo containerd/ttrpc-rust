@@ -121,5 +121,8 @@ pub fn new_unix_stream_from_raw_fd(fd: RawFd) -> UnixStream {
     unsafe {
         std_stream = std::os::unix::net::UnixStream::from_raw_fd(fd);
     }
+    // Notice: There is a big change between tokio 1.0 and 0.2
+    // we must set nonblocking by ourselves in tokio 1.0
+    std_stream.set_nonblocking(true).unwrap();
     UnixStream::from_std(std_stream).unwrap()
 }

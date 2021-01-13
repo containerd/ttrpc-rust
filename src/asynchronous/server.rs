@@ -10,21 +10,21 @@ use std::os::unix::io::RawFd;
 use std::sync::Arc;
 
 use crate::asynchronous::stream::{receive, respond, respond_with_status};
+use crate::asynchronous::unix_incoming::UnixIncoming;
 use crate::common::{self, Domain, MESSAGE_TYPE_REQUEST};
 use crate::error::{get_status, Error, Result};
 use crate::r#async::{MethodHandler, TtrpcContext};
 use crate::ttrpc::{Code, Request};
 use crate::MessageHeader;
+use futures::stream::Stream;
 use futures::StreamExt as _;
 use std::marker::Unpin;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixListener as SysUnixListener;
 use tokio::{
     self,
-    io::split,
+    io::{split, AsyncRead, AsyncWrite, AsyncWriteExt},
     net::UnixListener,
-    prelude::*,
-    stream::Stream,
     sync::mpsc::{channel, Receiver, Sender},
     sync::watch,
 };
@@ -116,9 +116,15 @@ impl Server {
                 unsafe {
                     sys_unix_listener = SysUnixListener::from_raw_fd(listenfd);
                 }
-                let unix_listener = UnixListener::from_std(sys_unix_listener).unwrap();
+                sys_unix_listener
+                    .set_nonblocking(true)
+                    .map_err(err_to_others_err!(e, "set_nonblocking error "))?;
+                let unix_listener = UnixListener::from_std(sys_unix_listener)
+                    .map_err(err_to_others_err!(e, "from_std error "))?;
 
-                self.do_start(listenfd, unix_listener).await
+                let incoming = UnixIncoming::new(unix_listener);
+
+                self.do_start(listenfd, incoming).await
             }
             Some(Domain::Vsock) => {
                 let incoming;
@@ -201,10 +207,10 @@ impl Server {
                                                         }
                                                     }
                                                 }
-                                                v = close_conn_rx.recv() => {
+                                                v = close_conn_rx.changed() => {
                                                     // 0 is the init value of this watch, not a valid signal
-                                                    // is_none means the tx was dropped.
-                                                    if v.is_none() || v.unwrap() != 0 {
+                                                    // is_err means the tx was dropped.
+                                                    if v.is_err() || *close_conn_rx.borrow() != 0 {
                                                         info!("Stop accepting new connections.");
                                                         break;
                                                     }
@@ -227,7 +233,7 @@ impl Server {
                         }
                     }
                     fd_tx = stop_listen_rx.recv() => {
-                        if let Some(mut fd_tx) = fd_tx {
+                        if let Some(fd_tx) = fd_tx {
                             // dup fd to keep the listener open
                             // or the listener will be closed when the incoming was dropped.
                             let dup_fd = unistd::dup(incoming.as_raw_fd()).unwrap();
@@ -254,7 +260,7 @@ impl Server {
 
     pub async fn disconnect(&mut self) {
         if let Some(tx) = self.disconnect_tx.take() {
-            tx.broadcast(1).ok();
+            tx.send(1).ok();
         }
 
         if let Some(mut rx) = self.all_conn_done_rx.take() {
@@ -263,7 +269,7 @@ impl Server {
     }
 
     pub async fn stop_listen(&mut self) {
-        if let Some(mut tx) = self.stop_listen_tx.take() {
+        if let Some(tx) = self.stop_listen_tx.take() {
             let (fd_tx, mut fd_rx) = channel(1);
             tx.send(fd_tx).await.unwrap();
 
