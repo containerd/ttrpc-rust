@@ -7,10 +7,9 @@ mod protocols;
 
 use nix::sys::socket::*;
 use protocols::r#async::{agent, agent_ttrpc, health, health_ttrpc};
-use tokio;
 use ttrpc::r#async::Client;
 
-#[tokio::main(core_threads = 1)]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let path = "/tmp/1";
 
