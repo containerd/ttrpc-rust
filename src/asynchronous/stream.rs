@@ -120,7 +120,7 @@ fn get_response_body(res: &Response) -> Result<Vec<u8>> {
 }
 
 pub async fn respond(
-    mut tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     stream_id: u32,
     body: Vec<u8>,
 ) -> Result<()> {
@@ -132,7 +132,7 @@ pub async fn respond(
 }
 
 pub async fn respond_with_status(
-    mut tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     stream_id: u32,
     status: Status,
 ) -> Result<()> {

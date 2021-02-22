@@ -13,15 +13,15 @@ description = "An example of ttrpc."
 [dev-dependencies]
 protobuf = "2.8.0"
 bytes = "0.4.11"
-libc = "0.2.59"
+libc = "0.2.79"
 byteorder = "1.3.2"
 log = "0.4.6"
 simple-logging = "2.0.2"
 nix = "0.16.1"
 ttrpc = { path = "../", features = ["async"] }
 ctrlc = { version = "3.0", features = ["termination"] }
-tokio = { version = "0.2", features = ["signal", "time"] }
-async-trait = "0.1.31"
+tokio = { version = "1.0.1", features = ["signal", "time"] }
+async-trait = "0.1.42"
 
 
 [[example]]

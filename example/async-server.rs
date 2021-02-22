@@ -18,8 +18,8 @@ use ttrpc::error::{Error, Result};
 use ttrpc::ttrpc::{Code, Status};
 
 use async_trait::async_trait;
-use tokio;
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::time::sleep;
 
 struct HealthService;
 
@@ -35,8 +35,7 @@ impl health_ttrpc::Health for HealthService {
         status.set_code(Code::NOT_FOUND);
         status.set_message("Just for fun".to_string());
 
-        let delay = tokio::time::delay_for(std::time::Duration::from_secs(10));
-        delay.await;
+        sleep(std::time::Duration::from_secs(10)).await;
 
         Err(Error::RpcStatus(status))
     }
@@ -80,7 +79,7 @@ impl agent_ttrpc::AgentService for AgentService {
     }
 }
 
-#[tokio::main(core_threads = 1)]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
 
@@ -111,8 +110,7 @@ async fn main() {
             server.start().await.unwrap();
 
             // hold some time for the new test connection.
-            let timeout = tokio::time::delay_for(std::time::Duration::from_secs(100));
-            timeout.await;
+            sleep(std::time::Duration::from_secs(100)).await;
         }
         _ = interrupt.recv() => {
             // test graceful shutdown

@@ -18,10 +18,10 @@ use crate::asynchronous::stream::{receive, to_req_buf};
 use crate::r#async::utils;
 use tokio::{
     self,
-    io::split,
-    prelude::*,
+    io::{split, AsyncWriteExt},
     sync::mpsc::{channel, Receiver, Sender},
     sync::Notify,
+    time::timeout,
 };
 
 type RequestSender = Sender<(Vec<u8>, Sender<Result<Vec<u8>>>)>;
@@ -54,7 +54,7 @@ impl Client {
         tokio::spawn(async move {
             let mut stream_id: u32 = 1;
 
-            while let Some((body, mut resp_tx)) = rx.recv().await {
+            while let Some((body, resp_tx)) = rx.recv().await {
                 let current_stream_id = stream_id;
                 stream_id += 2;
 
@@ -84,7 +84,7 @@ impl Client {
 
             // rx.recv will abort when client.req_tx and client is dropped.
             // notify the response-receiver to quit at this time.
-            notify.notify();
+            notify.notify_one();
         });
 
         // Response receiver
@@ -99,7 +99,7 @@ impl Client {
                         match res {
                             Ok((header, body)) => {
                                 tokio::spawn(async move {
-                                    let mut resp_tx2;
+                                    let resp_tx2;
                                     {
                                         let mut map = req_map.lock().unwrap();
                                         let resp_tx = match map.get(&header.stream_id) {
@@ -163,14 +163,13 @@ impl Client {
                 .await
                 .ok_or_else(|| Error::Others("Recive packet from recver error".to_string()))?
         } else {
-            let timeout = tokio::time::delay_for(Duration::from_nanos(req.timeout_nano as u64));
-
-            tokio::select! {
-                result = rx.recv() => {
-                    result.ok_or_else(|| Error::Others("Recive packet from recver error".to_string()))?
-                }
-                _ = timeout => {
-                    return Err(Error::Others("Recive packet from recver error: timeout".to_string()));
+            match timeout(Duration::from_nanos(req.timeout_nano as u64), rx.recv()).await {
+                Ok(result) => result
+                    .ok_or_else(|| Error::Others("Recive packet from recver error".to_string()))?,
+                Err(_) => {
+                    return Err(Error::Others(
+                        "Recive packet from recver error: timeout".to_string(),
+                    ))
                 }
             }
         };

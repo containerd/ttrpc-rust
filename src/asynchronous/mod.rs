@@ -10,6 +10,7 @@ pub mod server;
 pub mod stream;
 #[macro_use]
 pub mod utils;
+mod unix_incoming;
 
 #[doc(inline)]
 pub use crate::r#async::client::Client;
