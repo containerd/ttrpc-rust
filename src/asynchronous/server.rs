@@ -310,7 +310,7 @@ async fn handle_request(
     let path = format!("/{}/{}", req.service, req.method);
     if let Some(x) = methods.get(&path) {
         let method = x;
-        let ctx = TtrpcContext { fd, mh: header };
+        let ctx = TtrpcContext { fd, mh: header, metadata: common::parse_metadata(&req.metadata) };
 
         match method.handler(ctx, req).await {
             Ok((stream_id, body)) => {

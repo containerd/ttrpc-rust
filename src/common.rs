@@ -8,8 +8,10 @@
 #![allow(unused_macros)]
 
 use crate::error::{Error, Result};
+use crate::ttrpc::KeyValue;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
 use nix::sys::socket::*;
+use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::str::FromStr;
 
@@ -139,3 +141,46 @@ pub const MESSAGE_LENGTH_MAX: usize = 4 << 20;
 
 pub const MESSAGE_TYPE_REQUEST: u8 = 0x1;
 pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
+
+pub fn parse_metadata(kvs: &protobuf::RepeatedField<KeyValue>) -> HashMap<String, Vec<String>> {
+    let mut meta: HashMap<String, Vec<String>> = HashMap::new();
+    for kv in kvs {
+        if let Some(ref mut vl) = meta.get_mut(&kv.key) {
+            vl.push(kv.value.clone());
+        } else {
+            meta.insert(kv.key.clone(), vec![kv.value.clone()]);
+        }
+    }
+    meta
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_metadata;
+    use crate::ttrpc::KeyValue;
+
+    #[test]
+    fn test_parse_metadata() {
+        let mut src: protobuf::RepeatedField<KeyValue> = protobuf::RepeatedField::default();
+        for i in &[
+            ("key1", "value1-1"),
+            ("key1", "value1-2"),
+            ("key2", "value2"),
+        ] {
+            let mut key = KeyValue::default();
+            key.key = i.0.to_string();
+            key.value = i.1.to_string();
+            src.push(key);
+        }
+
+        let dst = parse_metadata(&src);
+        assert_eq!(dst.len(), 2);
+
+        assert_eq!(
+            dst.get("key1"),
+            Some(&vec!["value1-1".to_string(), "value1-2".to_string()])
+        );
+        assert_eq!(dst.get("key2"), Some(&vec!["value2".to_string()]));
+        assert_eq!(dst.get("key3"), None);
+    }
+}

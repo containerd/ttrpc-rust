@@ -7,6 +7,7 @@ use crate::common::{MessageHeader, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
 use crate::ttrpc::{Request, Response};
 use protobuf::Message;
+use std::collections::HashMap;
 
 /// Response message through a channel.
 /// Eventually  the message will sent to Client.
@@ -94,6 +95,7 @@ pub struct TtrpcContext {
     pub fd: std::os::unix::io::RawFd,
     pub mh: MessageHeader,
     pub res_tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+    pub metadata: HashMap<String, Vec<String>>,
 }
 
 /// Trait that implements handler which is a proxy to the desired method (sync).

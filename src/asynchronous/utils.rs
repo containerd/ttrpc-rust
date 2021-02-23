@@ -8,6 +8,7 @@ use crate::error::{Error, Result};
 use crate::ttrpc::{Request, Response};
 use async_trait::async_trait;
 use protobuf::Message;
+use std::collections::HashMap;
 use std::os::unix::io::{FromRawFd, RawFd};
 use tokio::net::UnixStream;
 
@@ -87,6 +88,7 @@ pub trait MethodHandler {
 pub struct TtrpcContext {
     pub fd: std::os::unix::io::RawFd,
     pub mh: MessageHeader,
+    pub metadata: HashMap<String, Vec<String>>,
 }
 
 pub fn convert_response_to_buf(res: Response) -> Result<Vec<u8>> {

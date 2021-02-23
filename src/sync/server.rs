@@ -209,6 +209,7 @@ fn start_method_handler_thread(
                 fd,
                 mh,
                 res_tx: res_tx.clone(),
+                metadata: common::parse_metadata(&req.metadata),
             };
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);
