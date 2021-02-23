@@ -28,6 +28,7 @@ use std::thread::JoinHandle;
 use std::{io, thread};
 
 use crate::common::{self, MESSAGE_TYPE_REQUEST};
+use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
@@ -209,7 +210,7 @@ fn start_method_handler_thread(
                 fd,
                 mh,
                 res_tx: res_tx.clone(),
-                metadata: common::parse_metadata(&req.metadata),
+                metadata: context::from_pb(&req.metadata),
             };
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);

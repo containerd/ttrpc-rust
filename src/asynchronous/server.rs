@@ -12,6 +12,7 @@ use std::sync::Arc;
 use crate::asynchronous::stream::{receive, respond, respond_with_status};
 use crate::asynchronous::unix_incoming::UnixIncoming;
 use crate::common::{self, Domain, MESSAGE_TYPE_REQUEST};
+use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::r#async::{MethodHandler, TtrpcContext};
 use crate::ttrpc::{Code, Request};
@@ -310,7 +311,7 @@ async fn handle_request(
     let path = format!("/{}/{}", req.service, req.method);
     if let Some(x) = methods.get(&path) {
         let method = x;
-        let ctx = TtrpcContext { fd, mh: header, metadata: common::parse_metadata(&req.metadata) };
+        let ctx = TtrpcContext { fd, mh: header, metadata: context::from_pb(&req.metadata) };
 
         match method.handler(ctx, req).await {
             Ok((stream_id, body)) => {

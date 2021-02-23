@@ -43,6 +43,9 @@ mod compiled {
 pub use compiled::ttrpc;
 
 #[doc(inline)]
+pub mod context;
+
+#[doc(inline)]
 pub use crate::common::MessageHeader;
 #[doc(inline)]
 pub use crate::error::{get_status, Error, Result};

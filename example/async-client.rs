@@ -7,7 +7,7 @@ mod protocols;
 
 use nix::sys::socket::*;
 use protocols::r#async::{agent, agent_ttrpc, health, health_ttrpc};
-use std::collections::HashMap;
+use ttrpc::context::{self, Context};
 use ttrpc::r#async::Client;
 
 #[tokio::main(flavor = "current_thread")]
@@ -45,7 +45,7 @@ async fn main() {
         println!(
             "Green Thread 1 - {} -> {:?} ended: {:?}",
             "health.check()",
-            thc.check(&req, default_metadata(), 0).await,
+            thc.check(default_ctx(), &req).await,
             now.elapsed(),
         );
     });
@@ -58,7 +58,7 @@ async fn main() {
         );
 
         let show = match tac
-            .list_interfaces(&agent::ListInterfacesRequest::new(), default_metadata(), 0)
+            .list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new())
             .await
         {
             Err(e) => format!("{:?}", e),
@@ -81,7 +81,7 @@ async fn main() {
         );
 
         let show = match ac
-            .online_cpu_mem(&agent::OnlineCPUMemRequest::new(), None, 0)
+            .online_cpu_mem(default_ctx(), &agent::OnlineCPUMemRequest::new())
             .await
         {
             Err(e) => format!("{:?}", e),
@@ -102,7 +102,7 @@ async fn main() {
         println!(
             "Green Thread 3 - {} -> {:?} ended: {:?}",
             "health.version()",
-            hc.version(&health::CheckRequest::new(), default_metadata(), 0)
+            hc.version(default_ctx(), &health::CheckRequest::new())
                 .await,
             now.elapsed()
         );
@@ -111,8 +111,11 @@ async fn main() {
     let _ = tokio::join!(t1, t2, t3);
 }
 
-fn default_metadata() -> Option<HashMap<String, Vec<String>>> {
-    let mut md: HashMap<String, Vec<String>> = HashMap::new();
-    md.insert("key".to_string(), vec!["v1".to_string(), "v2".to_string()]);
-    Some(md)
+fn default_ctx() -> Context {
+    let mut ctx = context::with_timeout(0);
+    ctx.add("key-1".to_string(), "value-1-1".to_string());
+    ctx.add("key-1".to_string(), "value-1-2".to_string());
+    ctx.set("key-2".to_string(), vec!["value-2".to_string()]);
+
+    ctx
 }
