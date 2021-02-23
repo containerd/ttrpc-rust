@@ -154,22 +154,47 @@ pub fn parse_metadata(kvs: &protobuf::RepeatedField<KeyValue>) -> HashMap<String
     meta
 }
 
+pub fn convert_metadata(
+    kvs: &Option<HashMap<String, Vec<String>>>,
+) -> protobuf::RepeatedField<KeyValue> {
+    let mut meta: protobuf::RepeatedField<KeyValue> = protobuf::RepeatedField::default();
+    match kvs {
+        Some(kvs) => {
+            for (k, vl) in kvs {
+                for v in vl {
+                    let key = KeyValue {
+                        key: k.clone(),
+                        value: v.clone(),
+                        ..Default::default()
+                    };
+                    meta.push(key);
+                }
+            }
+        }
+        None => {}
+    }
+    meta
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_metadata;
+    use super::{convert_metadata, parse_metadata};
     use crate::ttrpc::KeyValue;
 
     #[test]
-    fn test_parse_metadata() {
+    fn test_metadata() {
+        // RepeatedField -> HashMap, test parse_metadata()
         let mut src: protobuf::RepeatedField<KeyValue> = protobuf::RepeatedField::default();
         for i in &[
             ("key1", "value1-1"),
             ("key1", "value1-2"),
             ("key2", "value2"),
         ] {
-            let mut key = KeyValue::default();
-            key.key = i.0.to_string();
-            key.value = i.1.to_string();
+            let key = KeyValue {
+                key: i.0.to_string(),
+                value: i.1.to_string(),
+                ..Default::default()
+            };
             src.push(key);
         }
 
@@ -182,5 +207,21 @@ mod tests {
         );
         assert_eq!(dst.get("key2"), Some(&vec!["value2".to_string()]));
         assert_eq!(dst.get("key3"), None);
+
+        // HashMap -> RepeatedField , test convert_metadata()
+        let src = convert_metadata(&Some(dst));
+        let mut kvs = src.into_vec();
+        kvs.sort_by(|a, b| a.key.partial_cmp(&b.key).unwrap());
+
+        assert_eq!(kvs.len(), 3);
+
+        assert_eq!(kvs[0].key, "key1");
+        assert_eq!(kvs[0].value, "value1-1");
+
+        assert_eq!(kvs[1].key, "key1");
+        assert_eq!(kvs[1].value, "value1-2");
+
+        assert_eq!(kvs[2].key, "key2");
+        assert_eq!(kvs[2].value, "value2");
     }
 }

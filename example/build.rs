@@ -17,11 +17,6 @@ fn main() {
         "protocols/protos/oci.proto",
     ];
 
-    // Tell Cargo that if the .proto files changed, to rerun this build script.
-    protos
-        .iter()
-        .for_each(|p| println!("cargo:rerun-if-changed={}", &p));
-
     Codegen::new()
         .out_dir("protocols/sync")
         .inputs(&protos)

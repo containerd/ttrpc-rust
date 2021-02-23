@@ -212,7 +212,7 @@ impl<'a> MethodGen<'a> {
     // Method signatures
     fn unary(&self, method_name: &str) -> String {
         format!(
-            "{}(&self, req: &{}, timeout_nano: i64) -> {}<{}>",
+            "{}(&self, req: &{}, metadata: Option<HashMap<String, Vec<String>>>, timeout_nano: i64) -> {}<{}>",
             method_name,
             self.input(),
             fq_grpc("Result"),
@@ -222,7 +222,7 @@ impl<'a> MethodGen<'a> {
 
     fn unary_async(&self, method_name: &str) -> String {
         format!(
-            "{}(&mut self, req: &{}, timeout_nano: i64) -> {}<{}>",
+            "{}(&mut self, req: &{}, metadata: Option<HashMap<String, Vec<String>>>, timeout_nano: i64) -> {}<{}>",
             method_name,
             self.input(),
             fq_grpc("Result"),
@@ -314,7 +314,7 @@ impl<'a> MethodGen<'a> {
                         self.output()
                     ));
                     w.write_line(&format!(
-                        "::ttrpc::client_request!(self, req, timeout_nano, \"{}.{}\", \"{}\", cres);",
+                        "::ttrpc::client_request!(self, req, metadata, timeout_nano, \"{}.{}\", \"{}\", cres);",
                         self.package_name,
                         self.service_name,
                         &self.proto.get_name(),
@@ -335,7 +335,7 @@ impl<'a> MethodGen<'a> {
                 pub_async_fn(w, &self.unary_async(&method_name), |w| {
                     w.write_line(&format!("let mut cres = {}::new();", self.output()));
                     w.write_line(&format!(
-                        "::ttrpc::async_client_request!(self, req, timeout_nano, \"{}.{}\", \"{}\", cres);",
+                        "::ttrpc::async_client_request!(self, req, metadata, timeout_nano, \"{}.{}\", \"{}\", cres);",
                         self.package_name,
                         self.service_name,
                         &self.proto.get_name(),

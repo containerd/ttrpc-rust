@@ -7,6 +7,7 @@ mod protocols;
 
 use nix::sys::socket::*;
 use protocols::r#async::{agent, agent_ttrpc, health, health_ttrpc};
+use std::collections::HashMap;
 use ttrpc::r#async::Client;
 
 #[tokio::main(flavor = "current_thread")]
@@ -44,7 +45,7 @@ async fn main() {
         println!(
             "Green Thread 1 - {} -> {:?} ended: {:?}",
             "health.check()",
-            thc.check(&req, 0).await,
+            thc.check(&req, default_metadata(), 0).await,
             now.elapsed(),
         );
     });
@@ -57,7 +58,7 @@ async fn main() {
         );
 
         let show = match tac
-            .list_interfaces(&agent::ListInterfacesRequest::new(), 0)
+            .list_interfaces(&agent::ListInterfacesRequest::new(), default_metadata(), 0)
             .await
         {
             Err(e) => format!("{:?}", e),
@@ -80,7 +81,7 @@ async fn main() {
         );
 
         let show = match ac
-            .online_cpu_mem(&agent::OnlineCPUMemRequest::new(), 0)
+            .online_cpu_mem(&agent::OnlineCPUMemRequest::new(), None, 0)
             .await
         {
             Err(e) => format!("{:?}", e),
@@ -101,10 +102,17 @@ async fn main() {
         println!(
             "Green Thread 3 - {} -> {:?} ended: {:?}",
             "health.version()",
-            hc.version(&health::CheckRequest::new(), 0).await,
+            hc.version(&health::CheckRequest::new(), default_metadata(), 0)
+                .await,
             now.elapsed()
         );
     });
 
     let _ = tokio::join!(t1, t2, t3);
+}
+
+fn default_metadata() -> Option<HashMap<String, Vec<String>>> {
+    let mut md: HashMap<String, Vec<String>> = HashMap::new();
+    md.insert("key".to_string(), vec!["v1".to_string(), "v2".to_string()]);
+    Some(md)
 }

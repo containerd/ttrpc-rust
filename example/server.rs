@@ -38,12 +38,14 @@ impl health_ttrpc::Health for HealthService {
         status.set_message("Just for fun".to_string());
         Err(Error::RpcStatus(status))
     }
+
     fn version(
         &self,
-        _ctx: &::ttrpc::TtrpcContext,
+        ctx: &::ttrpc::TtrpcContext,
         req: health::CheckRequest,
     ) -> Result<health::VersionCheckResponse> {
         info!("version {:?}", req);
+        info!("ctx {:?}", ctx);
         let mut rep = health::VersionCheckResponse::new();
         rep.agent_version = "mock.0.1".to_string();
         rep.grpc_version = "0.0.1".to_string();
@@ -73,7 +75,6 @@ impl agent_ttrpc::AgentService for AgentService {
         i.set_Interfaces(rp);
 
         Ok(i)
-        //Err(::ttrpc::Error::RpcStatus(::ttrpc::get_Status(::ttrpc::Code::NOT_FOUND, "".to_string())))
     }
 }
 

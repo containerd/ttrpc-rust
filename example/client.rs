@@ -16,6 +16,7 @@ mod protocols;
 
 use nix::sys::socket::*;
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
+use std::collections::HashMap;
 use std::thread;
 use ttrpc::client::Client;
 
@@ -55,7 +56,7 @@ fn main() {
             "OS Thread {:?} - {} -> {:?} ended: {:?}",
             std::thread::current().id(),
             "health.check()",
-            thc.check(&req, 0),
+            thc.check(&req, default_metadata(), 0),
             now.elapsed(),
         );
     });
@@ -68,7 +69,11 @@ fn main() {
             now.elapsed(),
         );
 
-        let show = match tac.list_interfaces(&agent::ListInterfacesRequest::new(), 0) {
+        let show = match tac.list_interfaces(
+            &agent::ListInterfacesRequest::new(),
+            default_metadata(),
+            0,
+        ) {
             Err(e) => format!("{:?}", e),
             Ok(s) => format!("{:?}", s),
         };
@@ -87,7 +92,7 @@ fn main() {
         "agent.online_cpu_mem()",
         now.elapsed()
     );
-    let show = match ac.online_cpu_mem(&agent::OnlineCPUMemRequest::new(), 0) {
+    let show = match ac.online_cpu_mem(&agent::OnlineCPUMemRequest::new(), None, 0) {
         Err(e) => format!("{:?}", e),
         Ok(s) => format!("{:?}", s),
     };
@@ -108,10 +113,16 @@ fn main() {
     println!(
         "Main OS Thread - {} -> {:?} ended: {:?}",
         "health.version()",
-        hc.version(&health::CheckRequest::new(), 0),
+        hc.version(&health::CheckRequest::new(), default_metadata(), 0),
         now.elapsed()
     );
 
     t.join().unwrap();
     t2.join().unwrap();
+}
+
+fn default_metadata() -> Option<HashMap<String, Vec<String>>> {
+    let mut md: HashMap<String, Vec<String>> = HashMap::new();
+    md.insert("key".to_string(), vec!["v1".to_string(), "v2".to_string()]);
+    Some(md)
 }

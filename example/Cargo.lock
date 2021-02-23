@@ -793,9 +793,7 @@ dependencies = [
 
 [[package]]
 name = "ttrpc-compiler"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b30a7122ecdc9fb3d7db63a04e1066f5a1d77e0edc41e41e72e718df663f6404"
+version = "0.3.2"
 dependencies = [
  "derive-new",
  "prost",

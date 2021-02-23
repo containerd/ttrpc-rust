@@ -54,11 +54,13 @@ macro_rules! async_request_handler {
 /// Send request through async client.
 #[macro_export]
 macro_rules! async_client_request {
-    ($self: ident, $req: ident, $timeout_nano: ident, $server: expr, $method: expr, $cres: ident) => {
+    ($self: ident, $req: ident, $metadata: ident, $timeout_nano: ident, $server: expr, $method: expr, $cres: ident) => {
         let mut creq = ::ttrpc::Request::new();
         creq.set_service($server.to_string());
         creq.set_method($method.to_string());
         creq.set_timeout_nano($timeout_nano);
+        let md = ::ttrpc::common::convert_metadata(&$metadata);
+        creq.set_metadata(md);
         creq.payload.reserve($req.compute_size() as usize);
         {
             let mut s = CodedOutputStream::vec(&mut creq.payload);

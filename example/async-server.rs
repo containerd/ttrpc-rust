@@ -39,12 +39,14 @@ impl health_ttrpc::Health for HealthService {
 
         Err(Error::RpcStatus(status))
     }
+
     async fn version(
         &self,
-        _ctx: &::ttrpc::r#async::TtrpcContext,
+        ctx: &::ttrpc::r#async::TtrpcContext,
         req: health::CheckRequest,
     ) -> Result<health::VersionCheckResponse> {
         info!("version {:?}", req);
+        info!("ctx {:?}", ctx);
         let mut rep = health::VersionCheckResponse::new();
         rep.agent_version = "mock.0.1".to_string();
         rep.grpc_version = "0.0.1".to_string();
