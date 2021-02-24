@@ -18,6 +18,7 @@ use nix::sys::socket::*;
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
 use ttrpc::client::Client;
+use ttrpc::context::{self, Context};
 
 fn main() {
     let path = "/tmp/1";
@@ -55,7 +56,7 @@ fn main() {
             "OS Thread {:?} - {} -> {:?} ended: {:?}",
             std::thread::current().id(),
             "health.check()",
-            thc.check(&req, 0),
+            thc.check(default_ctx(), &req),
             now.elapsed(),
         );
     });
@@ -68,7 +69,7 @@ fn main() {
             now.elapsed(),
         );
 
-        let show = match tac.list_interfaces(&agent::ListInterfacesRequest::new(), 0) {
+        let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new()) {
             Err(e) => format!("{:?}", e),
             Ok(s) => format!("{:?}", s),
         };
@@ -87,7 +88,7 @@ fn main() {
         "agent.online_cpu_mem()",
         now.elapsed()
     );
-    let show = match ac.online_cpu_mem(&agent::OnlineCPUMemRequest::new(), 0) {
+    let show = match ac.online_cpu_mem(default_ctx(), &agent::OnlineCPUMemRequest::new()) {
         Err(e) => format!("{:?}", e),
         Ok(s) => format!("{:?}", s),
     };
@@ -108,10 +109,19 @@ fn main() {
     println!(
         "Main OS Thread - {} -> {:?} ended: {:?}",
         "health.version()",
-        hc.version(&health::CheckRequest::new(), 0),
+        hc.version(default_ctx(), &health::CheckRequest::new()),
         now.elapsed()
     );
 
     t.join().unwrap();
     t2.join().unwrap();
+}
+
+fn default_ctx() -> Context {
+    let mut ctx = context::with_timeout(0);
+    ctx.add("key-1".to_string(), "value-1-1".to_string());
+    ctx.add("key-1".to_string(), "value-1-2".to_string());
+    ctx.set("key-2".to_string(), vec!["value-2".to_string()]);
+
+    ctx
 }

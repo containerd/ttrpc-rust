@@ -21,6 +21,12 @@ message Request {
 	string method = 2;
 	bytes payload = 3;
 	int64 timeout_nano = 4;
+	repeated KeyValue metadata = 5;
+}
+
+message KeyValue {
+	string key = 1;
+	string value = 2;
 }
 
 // Get from github.com/gogo/protobuf/protobuf/google/protobuf/any.proto

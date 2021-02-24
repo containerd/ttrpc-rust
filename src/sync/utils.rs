@@ -7,6 +7,7 @@ use crate::common::{MessageHeader, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
 use crate::ttrpc::{Request, Response};
 use protobuf::Message;
+use std::collections::HashMap;
 
 /// Response message through a channel.
 /// Eventually  the message will sent to Client.
@@ -69,11 +70,13 @@ macro_rules! request_handler {
 /// Send request through sync client.
 #[macro_export]
 macro_rules! client_request {
-    ($self: ident, $req: ident, $timeout_nano: ident, $server: expr, $method: expr, $cres: ident) => {
+    ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr, $cres: ident) => {
         let mut creq = ::ttrpc::Request::new();
         creq.set_service($server.to_string());
         creq.set_method($method.to_string());
-        creq.set_timeout_nano($timeout_nano);
+        creq.set_timeout_nano($ctx.timeout_nano);
+        let md = ::ttrpc::context::to_pb($ctx.metadata);
+        creq.set_metadata(md);
         creq.payload.reserve($req.compute_size() as usize);
         let mut s = CodedOutputStream::vec(&mut creq.payload);
         $req.write_to(&mut s)
@@ -94,6 +97,7 @@ pub struct TtrpcContext {
     pub fd: std::os::unix::io::RawFd,
     pub mh: MessageHeader,
     pub res_tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+    pub metadata: HashMap<String, Vec<String>>,
 }
 
 /// Trait that implements handler which is a proxy to the desired method (sync).

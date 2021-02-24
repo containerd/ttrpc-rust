@@ -8,6 +8,7 @@ use crate::error::{Error, Result};
 use crate::ttrpc::{Request, Response};
 use async_trait::async_trait;
 use protobuf::Message;
+use std::collections::HashMap;
 use std::os::unix::io::{FromRawFd, RawFd};
 use tokio::net::UnixStream;
 
@@ -53,11 +54,13 @@ macro_rules! async_request_handler {
 /// Send request through async client.
 #[macro_export]
 macro_rules! async_client_request {
-    ($self: ident, $req: ident, $timeout_nano: ident, $server: expr, $method: expr, $cres: ident) => {
+    ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr, $cres: ident) => {
         let mut creq = ::ttrpc::Request::new();
         creq.set_service($server.to_string());
         creq.set_method($method.to_string());
-        creq.set_timeout_nano($timeout_nano);
+        creq.set_timeout_nano($ctx.timeout_nano);
+        let md = ::ttrpc::context::to_pb($ctx.metadata);
+        creq.set_metadata(md);
         creq.payload.reserve($req.compute_size() as usize);
         {
             let mut s = CodedOutputStream::vec(&mut creq.payload);
@@ -87,6 +90,7 @@ pub trait MethodHandler {
 pub struct TtrpcContext {
     pub fd: std::os::unix::io::RawFd,
     pub mh: MessageHeader,
+    pub metadata: HashMap<String, Vec<String>>,
 }
 
 pub fn convert_response_to_buf(res: Response) -> Result<Vec<u8>> {
