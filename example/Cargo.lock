@@ -766,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "ttrpc"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "ttrpc-codegen"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "protobuf",
  "protobuf-codegen",
@@ -793,7 +793,9 @@ dependencies = [
 
 [[package]]
 name = "ttrpc-compiler"
-version = "0.3.2"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c2f2ce8c9a6e9422d0714bc8058b705d503fc9d028e69fae2236050c4721d75"
 dependencies = [
  "derive-new",
  "prost",
