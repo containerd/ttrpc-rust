@@ -1,6 +1,5 @@
 target
 Cargo.lock
-!example/Cargo.lock
 *.rs.bk
 *.rs.fmt
 .vscode
