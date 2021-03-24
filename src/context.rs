@@ -6,7 +6,7 @@
 use crate::ttrpc::KeyValue;
 use std::collections::HashMap;
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct Context {
     pub metadata: HashMap<String, Vec<String>>,
     pub timeout_nano: i64,
