@@ -26,6 +26,7 @@ use tokio::{
     self,
     io::{split, AsyncRead, AsyncWrite, AsyncWriteExt},
     net::UnixListener,
+    select, spawn,
     sync::mpsc::{channel, Receiver, Sender},
     sync::watch,
 };
@@ -155,13 +156,12 @@ impl Server {
         let (stop_listen_tx, mut stop_listen_rx) = channel(1);
         self.stop_listen_tx = Some(stop_listen_tx);
 
-        tokio::spawn(async move {
+        spawn(async move {
             loop {
-                tokio::select! {
+                select! {
                     conn = incoming.next() => {
                         if let Some(conn) = conn {
                             // Accept a new connection
-                            let methods = methods.clone();
                             match conn {
                                 Ok(stream) => {
                                     let fd = stream.as_raw_fd();
@@ -170,59 +170,14 @@ impl Server {
                                         continue;
                                     }
 
-                                    let mut close_conn_rx = close_conn_rx.clone();
-
-                                    let (req_done_tx, mut all_req_done_rx) = channel::<i32>(1);
-                                    let conn_done_tx2 = conn_done_tx.clone();
-
-                                    // The connection handler
-                                    tokio::spawn(async move {
-                                        let (mut reader, mut writer) = split(stream);
-                                        let (tx, mut rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = channel(100);
-
-                                        tokio::spawn(async move {
-                                            while let Some(buf) = rx.recv().await {
-                                                if let Err(e) = writer.write_all(&buf).await {
-                                                    error!("write_message got error: {:?}", e);
-                                                }
-                                            }
-                                        });
-
-                                        loop {
-                                            let tx = tx.clone();
-                                            let methods = methods.clone();
-                                            let req_done_tx2 = req_done_tx.clone();
-
-                                            tokio::select! {
-                                                resp = receive(&mut reader) => {
-                                                    match resp {
-                                                        Ok(message) => {
-                                                            tokio::spawn(async move {
-                                                                handle_request(tx, listenfd, methods, message).await;
-                                                                drop(req_done_tx2);
-                                                            });
-                                                        }
-                                                        Err(e) => {
-                                                            trace!("error {:?}", e);
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                                v = close_conn_rx.changed() => {
-                                                    // 0 is the init value of this watch, not a valid signal
-                                                    // is_err means the tx was dropped.
-                                                    if v.is_err() || *close_conn_rx.borrow() != 0 {
-                                                        info!("Stop accepting new connections.");
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        drop(req_done_tx);
-                                        all_req_done_rx.recv().await;
-                                        drop(conn_done_tx2);
-                                    });
+                                    // spawn a connection handler, would not block
+                                    spawn_connection_handler(
+                                        listenfd,
+                                        stream,
+                                        methods.clone(),
+                                        close_conn_rx.clone(),
+                                        conn_done_tx.clone()
+                                    ).await;
                                 }
                                 Err(e) => {
                                     error!("{:?}", e)
@@ -281,6 +236,73 @@ impl Server {
     }
 }
 
+async fn spawn_connection_handler<S>(
+    listenfd: RawFd,
+    stream: S,
+    methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
+    mut close_conn_rx: watch::Receiver<i32>,
+    conn_done_tx: Sender<i32>,
+) where
+    S: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
+{
+    let (req_done_tx, mut all_req_done_rx) = channel::<i32>(1);
+
+    spawn(async move {
+        let (mut reader, mut writer) = split(stream);
+        let (tx, mut rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = channel(100);
+        let (client_disconnected_tx, client_disconnected_rx) = watch::channel(false);
+
+        spawn(async move {
+            while let Some(buf) = rx.recv().await {
+                if let Err(e) = writer.write_all(&buf).await {
+                    error!("write_message got error: {:?}", e);
+                }
+            }
+        });
+
+        loop {
+            let tx = tx.clone();
+            let methods = methods.clone();
+            let req_done_tx2 = req_done_tx.clone();
+            let mut client_disconnected_rx2 = client_disconnected_rx.clone();
+
+            select! {
+                resp = receive(&mut reader) => {
+                    match resp {
+                        Ok(message) => {
+                            spawn(async move {
+                                select! {
+                                    _ = handle_request(tx, listenfd, methods, message) => {}
+                                    _ = client_disconnected_rx2.changed() => {}
+                                }
+
+                                drop(req_done_tx2);
+                            });
+                        }
+                        Err(e) => {
+                            let _ = client_disconnected_tx.send(true);
+                            trace!("error {:?}", e);
+                            break;
+                        }
+                    }
+                }
+                v = close_conn_rx.changed() => {
+                    // 0 is the init value of this watch, not a valid signal
+                    // is_err means the tx was dropped.
+                    if v.is_err() || *close_conn_rx.borrow() != 0 {
+                        info!("Stop accepting new connections.");
+                        break;
+                    }
+                }
+            }
+        }
+
+        drop(req_done_tx);
+        all_req_done_rx.recv().await;
+        drop(conn_done_tx);
+    });
+}
+
 async fn handle_request(
     tx: Sender<Vec<u8>>,
     fd: RawFd,
@@ -311,7 +333,11 @@ async fn handle_request(
     let path = format!("/{}/{}", req.service, req.method);
     if let Some(x) = methods.get(&path) {
         let method = x;
-        let ctx = TtrpcContext { fd, mh: header, metadata: context::from_pb(&req.metadata) };
+        let ctx = TtrpcContext {
+            fd,
+            mh: header,
+            metadata: context::from_pb(&req.metadata),
+        };
 
         match method.handler(ctx, req).await {
             Ok((stream_id, body)) => {
