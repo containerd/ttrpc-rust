@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use crate::r#async::utils;
 use nix::unistd;
-use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
+use std::result::Result as StdResult;
 use std::sync::Arc;
 
 use crate::asynchronous::stream::{receive, respond, respond_with_status};
@@ -15,7 +16,7 @@ use crate::common::{self, Domain, MESSAGE_TYPE_REQUEST};
 use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::r#async::{MethodHandler, TtrpcContext};
-use crate::ttrpc::{Code, Request};
+use crate::ttrpc::{Code, Status};
 use crate::MessageHeader;
 use futures::stream::Stream;
 use futures::StreamExt as _;
@@ -303,6 +304,30 @@ async fn spawn_connection_handler<S>(
     });
 }
 
+async fn do_handle_request(
+    fd: RawFd,
+    methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
+    header: MessageHeader,
+    body: &[u8],
+) -> StdResult<(u32, Vec<u8>), Status> {
+    let req = utils::body_to_request(body)?;
+    let path = utils::get_path(&req.service, &req.method);
+    let method = methods
+        .get(&path)
+        .ok_or_else(|| get_status(Code::INVALID_ARGUMENT, format!("{} does not exist", &path)))?;
+
+    let ctx = TtrpcContext {
+        fd,
+        mh: header,
+        metadata: context::from_pb(&req.metadata),
+    };
+
+    method.handler(ctx, req).await.map_err(|e| {
+        error!("method handle {} got error {:?}", path, &e);
+        get_status(Code::UNKNOWN, e)
+    })
+}
+
 async fn handle_request(
     tx: Sender<Vec<u8>>,
     fd: RawFd,
@@ -310,56 +335,22 @@ async fn handle_request(
     message: (MessageHeader, Vec<u8>),
 ) {
     let (header, body) = message;
+    let stream_id = header.stream_id;
+
     if header.type_ != MESSAGE_TYPE_REQUEST {
         return;
     }
 
-    let mut req = Request::new();
-    let merge_result;
-    {
-        let mut s = CodedInputStream::from_bytes(&body);
-        merge_result = req.merge_from(&mut s);
-    }
-
-    if merge_result.is_err() {
-        let status = get_status(Code::INVALID_ARGUMENT, "".to_string());
-
-        if let Err(x) = respond_with_status(tx.clone(), header.stream_id, status).await {
-            error!("respond get error {:?}", x);
-        }
-
-        return;
-    }
-    trace!("Got Message request {:?}", req);
-
-    let stream_id = header.stream_id;
-    let path = format!("/{}/{}", req.service, req.method);
-    if let Some(x) = methods.get(&path) {
-        let method = x;
-        let ctx = TtrpcContext {
-            fd,
-            mh: header,
-            metadata: context::from_pb(&req.metadata),
-        };
-
-        match method.handler(ctx, req).await {
-            Ok((stream_id, body)) => {
-                if let Err(x) = respond(tx.clone(), stream_id, body).await {
-                    error!("respond get error {:?}", x);
-                }
-            }
-            Err(e) => {
-                error!("method handle {} get error {:?}", path, e);
-                let status = get_status(Code::UNKNOWN, e);
-                if let Err(e) = respond_with_status(tx, stream_id, status).await {
-                    error!("respond get error {:?}", e);
-                }
+    match do_handle_request(fd, methods, header, &body).await {
+        Ok((stream_id, resp_body)) => {
+            if let Err(x) = respond(tx.clone(), stream_id, resp_body).await {
+                error!("respond got error {:?}", x);
             }
         }
-    } else {
-        let status = get_status(Code::INVALID_ARGUMENT, format!("{} does not exist", path));
-        if let Err(e) = respond_with_status(tx, header.stream_id, status).await {
-            error!("respond get error {:?}", e);
+        Err(status) => {
+            if let Err(x) = respond_with_status(tx.clone(), stream_id, status).await {
+                error!("respond got error {:?}", x);
+            }
         }
     }
 }
