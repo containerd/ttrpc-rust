@@ -310,6 +310,7 @@ async fn handle_request(
     }
     trace!("Got Message request {:?}", req);
 
+    let stream_id = header.stream_id;
     let path = format!("/{}/{}", req.service, req.method);
     if let Some(x) = methods.get(&path) {
         let method = x;
@@ -327,6 +328,10 @@ async fn handle_request(
             }
             Err(e) => {
                 error!("method handle {} get error {:?}", path, e);
+                let status = get_status(Code::UNKNOWN, e);
+                if let Err(e) = respond_with_status(tx, stream_id, status).await {
+                    error!("respond get error {:?}", e);
+                }
             }
         }
     } else {
