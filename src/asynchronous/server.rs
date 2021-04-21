@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::result::Result as StdResult;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::asynchronous::stream::{receive, respond, respond_with_status};
 use crate::asynchronous::unix_incoming::UnixIncoming;
@@ -30,6 +31,7 @@ use tokio::{
     select, spawn,
     sync::mpsc::{channel, Receiver, Sender},
     sync::watch,
+    time::timeout,
 };
 use tokio_vsock::VsockListener;
 
@@ -322,10 +324,32 @@ async fn do_handle_request(
         metadata: context::from_pb(&req.metadata),
     };
 
-    method.handler(ctx, req).await.map_err(|e| {
+    let get_unknown_status_and_log_err = |e| {
         error!("method handle {} got error {:?}", path, &e);
         get_status(Code::UNKNOWN, e)
-    })
+    };
+
+    if req.timeout_nano == 0 {
+        method
+            .handler(ctx, req)
+            .await
+            .map_err(get_unknown_status_and_log_err)
+    } else {
+        timeout(
+            Duration::from_nanos(req.timeout_nano as u64),
+            method.handler(ctx, req),
+        )
+        .await
+        .map_err(|_| {
+            // Timed out
+            error!("method handle {} got error timed out", path);
+            get_status(Code::DEADLINE_EXCEEDED, "timeout")
+        })
+        .and_then(|r| {
+            // Handler finished
+            r.map_err(get_unknown_status_and_log_err)
+        })
+    }
 }
 
 async fn handle_request(
