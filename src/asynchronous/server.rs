@@ -305,13 +305,20 @@ async fn handle_request(
         if let Err(x) = respond_with_status(tx.clone(), header.stream_id, status).await {
             error!("respond get error {:?}", x);
         }
+
+        return;
     }
     trace!("Got Message request {:?}", req);
 
+    let stream_id = header.stream_id;
     let path = format!("/{}/{}", req.service, req.method);
     if let Some(x) = methods.get(&path) {
         let method = x;
-        let ctx = TtrpcContext { fd, mh: header, metadata: context::from_pb(&req.metadata) };
+        let ctx = TtrpcContext {
+            fd,
+            mh: header,
+            metadata: context::from_pb(&req.metadata),
+        };
 
         match method.handler(ctx, req).await {
             Ok((stream_id, body)) => {
@@ -321,6 +328,10 @@ async fn handle_request(
             }
             Err(e) => {
                 error!("method handle {} get error {:?}", path, e);
+                let status = get_status(Code::UNKNOWN, e);
+                if let Err(e) = respond_with_status(tx, stream_id, status).await {
+                    error!("respond get error {:?}", e);
+                }
             }
         }
     } else {
