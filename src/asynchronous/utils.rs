@@ -4,12 +4,13 @@
 //
 
 use crate::common::{MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
-use crate::error::{Error, Result};
-use crate::ttrpc::{Request, Response};
+use crate::error::{get_status, Error, Result};
+use crate::ttrpc::{Code, Request, Response, Status};
 use async_trait::async_trait;
-use protobuf::Message;
+use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::{FromRawFd, RawFd};
+use std::result::Result as StdResult;
 use tokio::net::UnixStream;
 
 /// Handle request in async mode.
@@ -129,4 +130,25 @@ pub fn new_unix_stream_from_raw_fd(fd: RawFd) -> UnixStream {
     // we must set nonblocking by ourselves in tokio 1.0
     std_stream.set_nonblocking(true).unwrap();
     UnixStream::from_std(std_stream).unwrap()
+}
+
+pub fn body_to_request(body: &[u8]) -> StdResult<Request, Status> {
+    let mut req = Request::new();
+    let merge_result;
+    {
+        let mut s = CodedInputStream::from_bytes(body);
+        merge_result = req.merge_from(&mut s);
+    }
+
+    if merge_result.is_err() {
+        return Err(get_status(Code::INVALID_ARGUMENT, "".to_string()));
+    }
+
+    trace!("Got Message request {:?}", req);
+
+    Ok(req)
+}
+
+pub fn get_path(service: &str, method: &str) -> String {
+    format!("/{}/{}", service, method)
 }
