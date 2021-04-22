@@ -45,7 +45,8 @@ async fn main() {
         println!(
             "Green Thread 1 - {} -> {:?} ended: {:?}",
             "health.check()",
-            thc.check(default_ctx(), &req).await,
+            thc.check(context::with_timeout(20 * 1000 * 1000), &req)
+                .await,
             now.elapsed(),
         );
     });
