@@ -167,12 +167,6 @@ impl Server {
                             // Accept a new connection
                             match conn {
                                 Ok(stream) => {
-                                    let fd = stream.as_raw_fd();
-                                    if let Err(e) = common::set_fd_close_exec(fd) {
-                                        error!("{:?}", e);
-                                        continue;
-                                    }
-
                                     // spawn a connection handler, would not block
                                     spawn_connection_handler(
                                         listenfd,
