@@ -27,6 +27,9 @@ pub enum Error {
     #[error("rpc status: {0:?}")]
     RpcStatus(Status),
 
+    #[error("Nix error: {0}")]
+    Nix(#[from] nix::Error),
+
     #[error("ttrpc err: {0}")]
     Others(String),
 }

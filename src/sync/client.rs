@@ -23,7 +23,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
-use crate::common::{MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
+use crate::common::{client_connect_unix, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
 use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
@@ -42,8 +42,13 @@ pub struct Client {
 }
 
 impl Client {
-    /// Initialize a new [`Client`].
-    pub fn new(fd: RawFd) -> Client {
+    pub fn connect_unix(path: &str) -> Result<Client> {
+        let fd = unsafe { client_connect_unix(path)? };
+        Self::new(fd)
+    }
+
+    /// Initialize a new [`Client`] from raw file descriptor.
+    pub fn new(fd: RawFd) -> Result<Client> {
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
 
         let (recver_fd, close_fd) = socketpair(
@@ -51,8 +56,7 @@ impl Client {
             SockType::Stream,
             None,
             SockFlag::SOCK_CLOEXEC,
-        )
-        .unwrap();
+        )?;
         let client_close = Arc::new(ClientClose { fd, close_fd });
 
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
@@ -196,11 +200,11 @@ impl Client {
             trace!("Recver quit");
         });
 
-        Client {
+        Ok(Client {
             fd,
             sender_tx,
             client_close,
-        }
+        })
     }
     pub fn request(&self, req: Request) -> Result<Response> {
         let mut buf = Vec::with_capacity(req.compute_size() as usize);

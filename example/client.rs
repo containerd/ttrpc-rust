@@ -14,28 +14,13 @@
 
 mod protocols;
 
-use nix::sys::socket::*;
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
 use ttrpc::client::Client;
 use ttrpc::context::{self, Context};
 
 fn main() {
-    let path = "/tmp/1";
-
-    let fd = socket(
-        AddressFamily::Unix,
-        SockType::Stream,
-        SockFlag::empty(),
-        None,
-    )
-    .unwrap();
-    let sockaddr = path.to_owned() + &"\x00".to_string();
-    let sockaddr = UnixAddr::new_abstract(sockaddr.as_bytes()).unwrap();
-    let sockaddr = SockAddr::Unix(sockaddr);
-    connect(fd, &sockaddr).unwrap();
-
-    let c = Client::new(fd);
+    let c = Client::connect_unix("/tmp/1").unwrap();
     let hc = health_ttrpc::HealthClient::new(c.clone());
     let ac = agent_ttrpc::AgentServiceClient::new(c);
 

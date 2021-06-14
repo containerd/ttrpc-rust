@@ -112,6 +112,23 @@ pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
     Ok((fd, domain))
 }
 
+/// Creates a unix socket for client.
+pub(crate) unsafe fn client_connect_unix(path: &str) -> Result<RawFd> {
+    let fd = socket(
+        AddressFamily::Unix,
+        SockType::Stream,
+        SockFlag::empty(),
+        None,
+    )?;
+
+    let sockaddr = path.to_owned() + &"\x00".to_string();
+    let sockaddr = UnixAddr::new_abstract(sockaddr.as_bytes()).unwrap();
+    let sockaddr = SockAddr::Unix(sockaddr);
+    connect(fd, &sockaddr)?;
+
+    Ok(fd)
+}
+
 macro_rules! cfg_sync {
     ($($item:item)*) => {
         $(
