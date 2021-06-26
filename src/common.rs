@@ -64,7 +64,7 @@ pub fn set_fd_close_exec(fd: RawFd) -> Result<RawFd> {
     Ok(fd)
 }
 
-pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
+fn make_socket(host: &str, cid: u32) -> Result<(RawFd, Domain, SockAddr)> {
     let (domain, hostv) = parse_host(host)?;
 
     let sockaddr: SockAddr;
@@ -92,7 +92,6 @@ pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
                     host
                 )));
             }
-            let cid = libc::VMADDR_CID_ANY;
             let port: u32 =
                 FromStr::from_str(host_port_v[1]).expect("the vsock port is not an number");
             fd = socket(
@@ -106,10 +105,25 @@ pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
         }
     };
 
-    setsockopt(fd, sockopt::ReusePort, &true).ok();
+    Ok((fd, domain, sockaddr))
+}
+
+pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
+    let (fd, domain, sockaddr) = make_socket(host, libc::VMADDR_CID_ANY)?;
+
+    setsockopt(fd, sockopt::ReusePort, &true)?;
     bind(fd, &sockaddr).map_err(err_to_others_err!(e, ""))?;
 
     Ok((fd, domain))
+}
+
+/// Creates a unix socket for client.
+pub(crate) unsafe fn client_connect(host: &str) -> Result<RawFd> {
+    let (fd, _, sockaddr) = make_socket(host, libc::VMADDR_CID_HOST)?;
+
+    connect(fd, &sockaddr)?;
+
+    Ok(fd)
 }
 
 macro_rules! cfg_sync {

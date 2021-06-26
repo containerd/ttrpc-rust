@@ -23,7 +23,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
-use crate::common::{MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
+use crate::common::{client_connect, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
 use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
@@ -42,7 +42,12 @@ pub struct Client {
 }
 
 impl Client {
-    /// Initialize a new [`Client`].
+    pub fn connect(path: &str) -> Result<Client> {
+        let fd = unsafe { client_connect(path)? };
+        Ok(Self::new(fd))
+    }
+
+    /// Initialize a new [`Client`] from raw file descriptor.
     pub fn new(fd: RawFd) -> Client {
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
 
