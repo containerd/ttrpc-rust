@@ -11,7 +11,7 @@ use ttrpc::r#async::Client;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let c = Client::connect_unix("/tmp/1").unwrap();
+    let c = Client::connect("unix:///tmp/1").unwrap();
     let mut hc = health_ttrpc::HealthClient::new(c.clone());
     let mut ac = agent_ttrpc::AgentServiceClient::new(c);
 

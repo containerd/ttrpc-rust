@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
 
-use crate::common::{client_connect_unix, MESSAGE_TYPE_RESPONSE};
+use crate::common::{client_connect, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
 use crate::ttrpc::{Code, Request, Response};
 
@@ -35,8 +35,8 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn connect_unix(path: &str) -> Result<Client> {
-        let fd = unsafe { client_connect_unix(path)? };
+    pub fn connect(path: &str) -> Result<Client> {
+        let fd = unsafe { client_connect(path)? };
         Ok(Self::new(fd))
     }
 

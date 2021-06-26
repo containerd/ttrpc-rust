@@ -20,7 +20,7 @@ use ttrpc::client::Client;
 use ttrpc::context::{self, Context};
 
 fn main() {
-    let c = Client::connect_unix("/tmp/1").unwrap();
+    let c = Client::connect("unix:///tmp/1").unwrap();
     let hc = health_ttrpc::HealthClient::new(c.clone());
     let ac = agent_ttrpc::AgentServiceClient::new(c);
 
