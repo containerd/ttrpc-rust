@@ -79,9 +79,8 @@ fn make_socket(host: &str, cid: u32) -> Result<(RawFd, Domain, SockAddr)> {
                 None,
             )
             .map_err(|e| Error::Socket(e.to_string()))?;
-            let sockaddr_h = hostv[1].to_owned() + &"\x00".to_string();
             let sockaddr_u =
-                UnixAddr::new_abstract(sockaddr_h.as_bytes()).map_err(err_to_others_err!(e, ""))?;
+                UnixAddr::new_abstract(hostv[1].as_bytes()).map_err(err_to_others_err!(e, ""))?;
             sockaddr = SockAddr::Unix(sockaddr_u);
         }
         Domain::Vsock => {
