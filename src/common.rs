@@ -117,7 +117,6 @@ macro_rules! cfg_sync {
         $(
             #[cfg(feature = "sync")]
             #[cfg_attr(docsrs, doc(cfg(feature = "sync")))]
-            #[doc(inline)]
             $item
         )*
     }
@@ -128,7 +127,6 @@ macro_rules! cfg_async {
         $(
             #[cfg(feature = "async")]
             #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
-            #[doc(inline)]
             $item
         )*
     }
