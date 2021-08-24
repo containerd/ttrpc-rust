@@ -239,7 +239,7 @@ fn start_method_handler_threads(num: usize, ts: &ThreadS) {
 fn check_method_handler_threads(ts: &ThreadS) {
     let c = ts.wtc.load(Ordering::SeqCst);
     if c < ts.min {
-        start_method_handler_threads(ts.default - c, &ts);
+        start_method_handler_threads(ts.default - c, ts);
     }
 }
 
