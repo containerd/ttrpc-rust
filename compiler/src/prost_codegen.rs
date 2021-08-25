@@ -61,7 +61,7 @@ where
 
     let mut buf = Vec::new();
     fs::File::open(descriptor_set)?.read_to_end(&mut buf)?;
-    let descriptor_set = FileDescriptorSet::decode(&buf)?;
+    let descriptor_set = FileDescriptorSet::decode(&*buf)?;
 
     // Get the package names from the descriptor set.
     let mut packages: Vec<_> = descriptor_set
