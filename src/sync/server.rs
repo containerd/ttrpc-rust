@@ -211,6 +211,7 @@ fn start_method_handler_thread(
                 mh,
                 res_tx: res_tx.clone(),
                 metadata: context::from_pb(&req.metadata),
+                timeout_nano: req.timeout_nano,
             };
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);

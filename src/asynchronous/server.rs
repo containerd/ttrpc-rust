@@ -316,6 +316,7 @@ async fn do_handle_request(
         fd,
         mh: header,
         metadata: context::from_pb(&req.metadata),
+        timeout_nano: req.timeout_nano,
     };
 
     let get_unknown_status_and_log_err = |e| {
