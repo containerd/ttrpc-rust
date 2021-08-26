@@ -98,6 +98,7 @@ pub struct TtrpcContext {
     pub mh: MessageHeader,
     pub res_tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
     pub metadata: HashMap<String, Vec<String>>,
+    pub timeout_nano: i64,
 }
 
 /// Trait that implements handler which is a proxy to the desired method (sync).

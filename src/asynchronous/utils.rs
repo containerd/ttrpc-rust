@@ -92,6 +92,7 @@ pub struct TtrpcContext {
     pub fd: std::os::unix::io::RawFd,
     pub mh: MessageHeader,
     pub metadata: HashMap<String, Vec<String>>,
+    pub timeout_nano: i64,
 }
 
 pub fn convert_response_to_buf(res: Response) -> Result<Vec<u8>> {
