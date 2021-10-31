@@ -353,7 +353,10 @@ impl Server {
                                 .unwrap()
                                 .remove(&fd)
                                 .map(|mut cn| {
-                                    cn.handler.take().map(|handler| handler.join().unwrap())
+                                    cn.handler.take().map(|handler| {
+                                        handler.join().unwrap();
+                                        close(fd).unwrap();
+                                    })
                                 });
                         }
                         info!("reaper thread exited");
@@ -481,7 +484,8 @@ impl Server {
                             // drop the res_tx, thus the res_rx would get terminated notification.
                             drop(res_tx);
                             handler.join().unwrap_or(());
-                            close(fd).unwrap_or(());
+                            // client_handler should not close fd before exit
+                            // , which prevent fd reuse issue.
                             reaper_tx_child.send(fd).unwrap();
 
                             debug!("client thread quit");
