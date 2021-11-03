@@ -309,10 +309,7 @@ impl<'a> MethodGen<'a> {
             // Unary
             MethodType::Unary => {
                 w.pub_fn(&self.unary(&method_name), |w| {
-                    w.write_line(&format!(
-                        "let mut cres = {}::new();",
-                        self.output()
-                    ));
+                    w.write_line(&format!("let mut cres = {}::new();", self.output()));
                     w.write_line(&format!(
                         "::ttrpc::client_request!(self, ctx, req, \"{}.{}\", \"{}\", cres);",
                         self.package_name,

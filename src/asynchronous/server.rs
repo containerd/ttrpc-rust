@@ -33,6 +33,8 @@ use tokio::{
     sync::watch,
     time::timeout,
 };
+
+#[cfg(target_os = "linux")]
 use tokio_vsock::VsockListener;
 
 /// A ttrpc Server (async).
@@ -131,15 +133,14 @@ impl Server {
 
                 self.do_start(listenfd, incoming).await
             }
+            #[cfg(target_os = "linux")]
             Some(Domain::Vsock) => {
-                let incoming;
-                unsafe {
-                    incoming = VsockListener::from_raw_fd(listenfd).incoming();
-                }
-
+                let incoming = unsafe { VsockListener::from_raw_fd(listenfd).incoming() };
                 self.do_start(listenfd, incoming).await
             }
-            _ => Err(Error::Others("Domain is not set".to_string())),
+            _ => Err(Error::Others(
+                "Domain is not set or not supported".to_string(),
+            )),
         }
     }
 

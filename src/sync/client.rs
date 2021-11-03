@@ -23,7 +23,9 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
-use crate::common::{client_connect, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
+#[cfg(target_os = "macos")]
+use crate::common::set_fd_close_exec;
+use crate::common::{client_connect, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE, SOCK_CLOEXEC};
 use crate::error::{Error, Result};
 use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
@@ -51,13 +53,17 @@ impl Client {
     pub fn new(fd: RawFd) -> Client {
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
 
-        let (recver_fd, close_fd) = socketpair(
-            AddressFamily::Unix,
-            SockType::Stream,
-            None,
-            SockFlag::SOCK_CLOEXEC,
-        )
-        .unwrap();
+        let (recver_fd, close_fd) =
+            socketpair(AddressFamily::Unix, SockType::Stream, None, SOCK_CLOEXEC).unwrap();
+
+        // MacOS doesn't support descriptor creation with SOCK_CLOEXEC automically,
+        // so there is a chance of leak if fork + exec happens in between of these calls.
+        #[cfg(target_os = "macos")]
+        {
+            set_fd_close_exec(recver_fd).unwrap();
+            set_fd_close_exec(close_fd).unwrap();
+        }
+
         let client_close = Arc::new(ClientClose { fd, close_fd });
 
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
@@ -114,7 +120,7 @@ impl Client {
                     let pollers: &mut [libc::pollfd] = &mut pollers;
                     libc::poll(
                         pollers as *mut _ as *mut libc::pollfd,
-                        pollers.len() as u64,
+                        pollers.len() as _,
                         -1,
                     )
                 };

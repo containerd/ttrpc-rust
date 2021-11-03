@@ -64,6 +64,24 @@ pub fn set_fd_close_exec(fd: RawFd) -> Result<RawFd> {
     Ok(fd)
 }
 
+// SOCK_CLOEXEC flag is Linux specific
+#[cfg(target_os = "linux")]
+pub(crate) const SOCK_CLOEXEC: SockFlag = SockFlag::SOCK_CLOEXEC;
+#[cfg(not(target_os = "linux"))]
+pub(crate) const SOCK_CLOEXEC: SockFlag = SockFlag::empty();
+
+#[cfg(target_os = "linux")]
+fn make_addr(host: &str) -> Result<UnixAddr> {
+    UnixAddr::new_abstract(host.as_bytes()).map_err(err_to_others_err!(e, ""))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn make_addr(host: &str) -> Result<UnixAddr> {
+    UnixAddr::new(host).map_err(err_to_others_err!(e, ""))
+}
+
+#[cfg_attr(target_os = "linux", allow(unreachable_patterns))]
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
 fn make_socket(host: &str, cid: u32) -> Result<(RawFd, Domain, SockAddr)> {
     let (domain, hostv) = parse_host(host)?;
 
@@ -72,17 +90,17 @@ fn make_socket(host: &str, cid: u32) -> Result<(RawFd, Domain, SockAddr)> {
 
     match domain {
         Domain::Unix => {
-            fd = socket(
-                AddressFamily::Unix,
-                SockType::Stream,
-                SockFlag::SOCK_CLOEXEC,
-                None,
-            )
-            .map_err(|e| Error::Socket(e.to_string()))?;
-            let sockaddr_u =
-                UnixAddr::new_abstract(hostv[1].as_bytes()).map_err(err_to_others_err!(e, ""))?;
-            sockaddr = SockAddr::Unix(sockaddr_u);
+            fd = socket(AddressFamily::Unix, SockType::Stream, SOCK_CLOEXEC, None)
+                .map_err(|e| Error::Socket(e.to_string()))?;
+
+            // MacOS doesn't support atomic creation of a socket descriptor with SOCK_CLOEXEC flag,
+            // so there is a chance of leak if fork + exec happens in between of these calls.
+            #[cfg(target_os = "macos")]
+            set_fd_close_exec(fd)?;
+
+            sockaddr = SockAddr::Unix(make_addr(hostv[1])?);
         }
+        #[cfg(target_os = "linux")]
         Domain::Vsock => {
             let host_port_v: Vec<&str> = hostv[1].split(':').collect();
             if host_port_v.len() != 2 {
@@ -102,13 +120,29 @@ fn make_socket(host: &str, cid: u32) -> Result<(RawFd, Domain, SockAddr)> {
             .map_err(|e| Error::Socket(e.to_string()))?;
             sockaddr = SockAddr::new_vsock(cid, port);
         }
+        _ => {
+            return Err(Error::Others(format!(
+                "Domain {:?} is not supported on this platform",
+                domain
+            )))
+        }
     };
 
     Ok((fd, domain, sockaddr))
 }
 
+// Vsock is not supported on non Linux.
+#[cfg(target_os = "linux")]
+use libc::VMADDR_CID_ANY;
+#[cfg(not(target_os = "linux"))]
+const VMADDR_CID_ANY: u32 = 0;
+#[cfg(target_os = "linux")]
+use libc::VMADDR_CID_HOST;
+#[cfg(not(target_os = "linux"))]
+const VMADDR_CID_HOST: u32 = 0;
+
 pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
-    let (fd, domain, sockaddr) = make_socket(host, libc::VMADDR_CID_ANY)?;
+    let (fd, domain, sockaddr) = make_socket(host, VMADDR_CID_ANY)?;
 
     setsockopt(fd, sockopt::ReusePort, &true)?;
     bind(fd, &sockaddr).map_err(err_to_others_err!(e, ""))?;
@@ -118,7 +152,7 @@ pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
 
 /// Creates a unix socket for client.
 pub(crate) unsafe fn client_connect(host: &str) -> Result<RawFd> {
-    let (fd, _, sockaddr) = make_socket(host, libc::VMADDR_CID_HOST)?;
+    let (fd, _, sockaddr) = make_socket(host, VMADDR_CID_HOST)?;
 
     connect(fd, &sockaddr)?;
 
