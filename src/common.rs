@@ -11,7 +11,6 @@ use crate::error::{Error, Result};
 use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
 use nix::sys::socket::*;
 use std::os::unix::io::RawFd;
-use std::str::FromStr;
 
 #[derive(Debug)]
 pub enum Domain {
@@ -109,8 +108,9 @@ fn make_socket(host: &str, cid: u32) -> Result<(RawFd, Domain, SockAddr)> {
                     host
                 )));
             }
-            let port: u32 =
-                FromStr::from_str(host_port_v[1]).expect("the vsock port is not an number");
+            let port: u32 = host_port_v[1]
+                .parse()
+                .expect("the vsock port is not an number");
             fd = socket(
                 AddressFamily::Vsock,
                 SockType::Stream,

@@ -16,8 +16,7 @@
 
 use nix::fcntl::OFlag;
 use nix::sys::socket::{self, *};
-use nix::unistd::close;
-use nix::unistd::pipe2;
+use nix::unistd::*;
 use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -330,6 +329,8 @@ impl Server {
         }
 
         self.listener_quit_flag.store(false, Ordering::SeqCst);
+
+        #[allow(deprecated)]
         let (rfd, wfd) = pipe2(OFlag::O_CLOEXEC).unwrap();
         self.monitor_fd = (rfd, wfd);
 
