@@ -2182,7 +2182,7 @@ mod test {
         "#;
 
         let err = FileDescriptor::parse(msg).err().expect("err");
-        assert_eq!(4, err.line);
+        assert_eq!(3, err.line);
     }
 
     #[test]
