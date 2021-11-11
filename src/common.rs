@@ -15,6 +15,7 @@ use std::os::unix::io::RawFd;
 #[derive(Debug)]
 pub enum Domain {
     Unix,
+    #[cfg(target_os = "linux")]
     Vsock,
 }
 
@@ -46,6 +47,7 @@ pub fn parse_host(host: &str) -> Result<(Domain, Vec<&str>)> {
 
     let domain = match &hostv[0].to_lowercase()[..] {
         "unix" => Domain::Unix,
+        #[cfg(target_os = "linux")]
         "vsock" => Domain::Vsock,
         x => return Err(Error::Others(format!("Scheme {:?} is not supported", x))),
     };
@@ -79,9 +81,8 @@ fn make_addr(host: &str) -> Result<UnixAddr> {
     UnixAddr::new(host).map_err(err_to_others_err!(e, ""))
 }
 
-#[cfg_attr(target_os = "linux", allow(unreachable_patterns))]
-#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
-fn make_socket(host: &str, cid: u32) -> Result<(RawFd, Domain, SockAddr)> {
+fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, SockAddr)> {
+    let (host, _) = addr;
     let (domain, hostv) = parse_host(host)?;
 
     let sockaddr: SockAddr;
@@ -118,13 +119,8 @@ fn make_socket(host: &str, cid: u32) -> Result<(RawFd, Domain, SockAddr)> {
                 None,
             )
             .map_err(|e| Error::Socket(e.to_string()))?;
+            let cid = addr.1;
             sockaddr = SockAddr::new_vsock(cid, port);
-        }
-        _ => {
-            return Err(Error::Others(format!(
-                "Domain {:?} is not supported on this platform",
-                domain
-            )))
         }
     };
 
@@ -142,7 +138,7 @@ use libc::VMADDR_CID_HOST;
 const VMADDR_CID_HOST: u32 = 0;
 
 pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
-    let (fd, domain, sockaddr) = make_socket(host, VMADDR_CID_ANY)?;
+    let (fd, domain, sockaddr) = make_socket((host, VMADDR_CID_ANY))?;
 
     setsockopt(fd, sockopt::ReusePort, &true)?;
     bind(fd, &sockaddr).map_err(err_to_others_err!(e, ""))?;
@@ -152,7 +148,7 @@ pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
 
 /// Creates a unix socket for client.
 pub(crate) unsafe fn client_connect(host: &str) -> Result<RawFd> {
-    let (fd, _, sockaddr) = make_socket(host, VMADDR_CID_HOST)?;
+    let (fd, _, sockaddr) = make_socket((host, VMADDR_CID_HOST))?;
 
     connect(fd, &sockaddr)?;
 

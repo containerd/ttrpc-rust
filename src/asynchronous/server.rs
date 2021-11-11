@@ -85,6 +85,7 @@ impl Server {
         self
     }
 
+    #[cfg(target_os = "linux")]
     pub fn set_domain_vsock(mut self) -> Self {
         self.domain = Some(Domain::Vsock);
         self
