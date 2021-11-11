@@ -4,8 +4,10 @@
 //!```
 //!use ttrpc_codegen::Codegen;
 //!use ttrpc_codegen::Customize;
+//!# use std::path::Path;
 //!
 //!fn main() {
+//!#   let protos: Vec<&Path> = vec![];
 //!    Codegen::new()
 //!        .out_dir("protocols/sync")
 //!        .inputs(&protos)
