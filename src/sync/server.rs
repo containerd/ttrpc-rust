@@ -16,8 +16,7 @@
 
 use nix::fcntl::OFlag;
 use nix::sys::socket::{self, *};
-use nix::unistd::close;
-use nix::unistd::pipe2;
+use nix::unistd::*;
 use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -27,6 +26,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{io, thread};
 
+#[cfg(not(target_os = "linux"))]
+use crate::common::set_fd_close_exec;
 use crate::common::{self, MESSAGE_TYPE_REQUEST};
 use crate::context;
 use crate::error::{get_status, Error, Result};
@@ -328,6 +329,8 @@ impl Server {
         }
 
         self.listener_quit_flag.store(false, Ordering::SeqCst);
+
+        #[allow(deprecated)]
         let (rfd, wfd) = pipe2(OFlag::O_CLOEXEC).unwrap();
         self.monitor_fd = (rfd, wfd);
 
@@ -398,7 +401,7 @@ impl Server {
                         let pollers: &mut [libc::pollfd] = &mut pollers;
                         libc::poll(
                             pollers as *mut _ as *mut libc::pollfd,
-                            pollers.len() as u64,
+                            pollers.len() as _,
                             -1,
                         )
                     };
@@ -424,6 +427,7 @@ impl Server {
                         break;
                     }
 
+                    #[cfg(target_os = "linux")]
                     let fd = match accept4(listener, SockFlag::SOCK_CLOEXEC) {
                         Ok(fd) => fd,
                         Err(e) => {
@@ -431,6 +435,25 @@ impl Server {
                             break;
                         }
                     };
+
+                    // Non Linux platforms do not support accept4 with SOCK_CLOEXEC flag, so instead
+                    // use accept and call fcntl separately to set SOCK_CLOEXEC.
+                    // Because of this there is chance of the descriptor leak if fork + exec happens in between.
+                    #[cfg(not(target_os = "linux"))]
+                    let fd = match accept(listener) {
+                        Ok(fd) => {
+                            if let Err(err) = set_fd_close_exec(fd) {
+                                error!("fcntl failed after accept: {:?}", err);
+                                break;
+                            };
+                            fd
+                        }
+                        Err(e) => {
+                            error!("failed to accept error {:?}", e);
+                            break;
+                        }
+                    };
+
                     let methods = methods.clone();
                     let quit = Arc::new(AtomicBool::new(false));
                     let child_quit = quit.clone();

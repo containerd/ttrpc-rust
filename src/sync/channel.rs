@@ -21,6 +21,11 @@ use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
 use crate::ttrpc::Code;
 use crate::MessageHeader;
 
+fn retryable(e: nix::Error) -> bool {
+    use ::nix::{errno::Errno, Error};
+    e == Error::from_errno(Errno::EINTR) || e == Error::from_errno(Errno::EAGAIN)
+}
+
 fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
     let mut v: Vec<u8> = vec![0; count];
     let mut len = 0;
@@ -39,10 +44,12 @@ fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
                 }
             }
 
+            Err(e) if retryable(e) => {
+                // Should retry
+            }
+
             Err(e) => {
-                if e != ::nix::Error::from_errno(::nix::errno::Errno::EINTR) {
-                    return Err(Error::Socket(e.to_string()));
-                }
+                return Err(Error::Socket(e.to_string()));
             }
         }
     }
@@ -66,10 +73,12 @@ fn write_count(fd: RawFd, buf: &[u8], count: usize) -> Result<usize> {
                 }
             }
 
+            Err(e) if retryable(e) => {
+                // Should retry
+            }
+
             Err(e) => {
-                if e != ::nix::Error::from_errno(::nix::errno::Errno::EINTR) {
-                    return Err(Error::Socket(e.to_string()));
-                }
+                return Err(Error::Socket(e.to_string()));
             }
         }
     }
