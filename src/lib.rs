@@ -51,11 +51,17 @@ pub use crate::ttrpc::{Code, Request, Response, Status};
 
 cfg_sync! {
     pub mod sync;
+    #[doc(inline)]
     pub use crate::sync::channel::{write_message};
+    #[doc(inline)]
     pub use crate::sync::utils::{response_to_channel, MethodHandler, TtrpcContext};
+    #[doc(inline)]
     pub use crate::sync::client;
+    #[doc(inline)]
     pub use crate::sync::client::Client;
+    #[doc(inline)]
     pub use crate::sync::server;
+    #[doc(inline)]
     pub use crate::sync::server::Server;
 }
 
