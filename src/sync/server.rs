@@ -14,7 +14,6 @@
 
 //! Sync server of ttrpc.
 
-use nix::fcntl::OFlag;
 use nix::sys::socket::{self, *};
 use nix::unistd::*;
 use protobuf::{CodedInputStream, Message};
@@ -330,9 +329,18 @@ impl Server {
 
         self.listener_quit_flag.store(false, Ordering::SeqCst);
 
-        #[allow(deprecated)]
-        let (rfd, wfd) = pipe2(OFlag::O_CLOEXEC).unwrap();
-        self.monitor_fd = (rfd, wfd);
+        #[cfg(target_os = "linux")]
+        let fds = pipe2(nix::fcntl::OFlag::O_CLOEXEC)?;
+
+        #[cfg(not(target_os = "linux"))]
+        let fds = {
+            let (rfd, wfd) = pipe()?;
+            set_fd_close_exec(rfd)?;
+            set_fd_close_exec(wfd)?;
+            (rfd, wfd)
+        };
+
+        self.monitor_fd = fds;
 
         let listener = self.listeners[0];
 
