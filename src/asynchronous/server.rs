@@ -132,12 +132,12 @@ impl Server {
 
                 let incoming = UnixIncoming::new(unix_listener);
 
-                self.do_start(listenfd, incoming).await
+                self.do_start(incoming).await
             }
             #[cfg(target_os = "linux")]
             Some(Domain::Vsock) => {
                 let incoming = unsafe { VsockListener::from_raw_fd(listenfd).incoming() };
-                self.do_start(listenfd, incoming).await
+                self.do_start(incoming).await
             }
             _ => Err(Error::Others(
                 "Domain is not set or not supported".to_string(),
@@ -145,7 +145,7 @@ impl Server {
         }
     }
 
-    pub async fn do_start<I, S>(&mut self, listenfd: RawFd, mut incoming: I) -> Result<()>
+    pub async fn do_start<I, S>(&mut self, mut incoming: I) -> Result<()>
     where
         I: Stream<Item = std::io::Result<S>> + Unpin + Send + 'static + AsRawFd,
         S: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
@@ -169,9 +169,10 @@ impl Server {
                             // Accept a new connection
                             match conn {
                                 Ok(stream) => {
+                                    let fd = stream.as_raw_fd();
                                     // spawn a connection handler, would not block
                                     spawn_connection_handler(
-                                        listenfd,
+                                        fd,
                                         stream,
                                         methods.clone(),
                                         close_conn_rx.clone(),
@@ -236,7 +237,7 @@ impl Server {
 }
 
 async fn spawn_connection_handler<S>(
-    listenfd: RawFd,
+    fd: RawFd,
     stream: S,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
     mut close_conn_rx: watch::Receiver<i32>,
@@ -271,7 +272,7 @@ async fn spawn_connection_handler<S>(
                         Ok(message) => {
                             spawn(async move {
                                 select! {
-                                    _ = handle_request(tx, listenfd, methods, message) => {}
+                                    _ = handle_request(tx, fd, methods, message) => {}
                                     _ = client_disconnected_rx2.changed() => {}
                                 }
 
