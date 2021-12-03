@@ -22,8 +22,8 @@ use crate::ttrpc::Code;
 use crate::MessageHeader;
 
 fn retryable(e: nix::Error) -> bool {
-    use ::nix::{errno::Errno, Error};
-    e == Error::from_errno(Errno::EINTR) || e == Error::from_errno(Errno::EAGAIN)
+    use ::nix::Error;
+    e == Error::EINTR || e == Error::EAGAIN
 }
 
 fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
