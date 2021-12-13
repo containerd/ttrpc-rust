@@ -38,9 +38,9 @@ type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 /// A ttrpc Client (sync).
 #[derive(Clone)]
 pub struct Client {
-    fd: RawFd,
+    _fd: RawFd,
     sender_tx: Sender,
-    client_close: Arc<ClientClose>,
+    _client_close: Arc<ClientClose>,
 }
 
 impl Client {
@@ -208,9 +208,9 @@ impl Client {
         });
 
         Client {
-            fd,
+            _fd: fd,
             sender_tx,
-            client_close,
+            _client_close: client_close,
         }
     }
     pub fn request(&self, req: Request) -> Result<Response> {
