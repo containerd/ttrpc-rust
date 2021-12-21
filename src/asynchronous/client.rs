@@ -147,7 +147,7 @@ impl Client {
         Client { req_tx }
     }
 
-    pub async fn request(&mut self, req: Request) -> Result<Response> {
+    pub async fn request(&self, req: Request) -> Result<Response> {
         let mut buf = Vec::with_capacity(req.compute_size() as usize);
         {
             let mut s = CodedOutputStream::vec(&mut buf);
