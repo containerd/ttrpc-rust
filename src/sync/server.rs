@@ -276,14 +276,14 @@ impl Server {
         Server::default()
     }
 
-    pub fn bind(mut self, host: &str) -> Result<Server> {
+    pub fn bind(mut self, sockaddr: &str) -> Result<Server> {
         if !self.listeners.is_empty() {
             return Err(Error::Others(
-                "ttrpc-rust just support 1 host now".to_string(),
+                "ttrpc-rust just support 1 sockaddr now".to_string(),
             ));
         }
 
-        let (fd, _) = common::do_bind(host)?;
+        let (fd, _) = common::do_bind(sockaddr)?;
         common::do_listen(fd)?;
 
         self.listeners.push(fd);

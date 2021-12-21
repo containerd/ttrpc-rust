@@ -44,8 +44,8 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn connect(path: &str) -> Result<Client> {
-        let fd = unsafe { client_connect(path)? };
+    pub fn connect(sockaddr: &str) -> Result<Client> {
+        let fd = unsafe { client_connect(sockaddr)? };
         Ok(Self::new(fd))
     }
 

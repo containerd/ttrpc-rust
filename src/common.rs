@@ -8,12 +8,14 @@
 #![allow(unused_macros)]
 
 use crate::error::{Error, Result};
-use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
+#[cfg(any(feature = "async", not(target_os = "linux")))]
+use nix::fcntl::FdFlag;
+use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::sys::socket::*;
 use std::os::unix::io::RawFd;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Domain {
+pub(crate) enum Domain {
     Unix,
     #[cfg(target_os = "linux")]
     AbstractUnix,
@@ -30,7 +32,7 @@ pub struct MessageHeader {
     pub flags: u8,
 }
 
-pub fn do_listen(listener: RawFd) -> Result<()> {
+pub(crate) fn do_listen(listener: RawFd) -> Result<()> {
     if let Err(e) = fcntl(listener, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)) {
         return Err(Error::Others(format!(
             "failed to set listener fd: {} as non block: {}",
@@ -41,18 +43,18 @@ pub fn do_listen(listener: RawFd) -> Result<()> {
     listen(listener, 10).map_err(|e| Error::Socket(e.to_string()))
 }
 
-pub fn parse_host(host: &str) -> Result<(Domain, &str)> {
-    let hostv: Vec<&str> = host.trim().split("://").collect();
-    if hostv.len() != 2 {
-        return Err(Error::Others(format!("Host {} is not right", host)));
+pub(crate) fn parse_sockaddr(sockaddr: &str) -> Result<(Domain, &str)> {
+    let sockaddrv: Vec<&str> = sockaddr.trim().split("://").collect();
+    if sockaddrv.len() != 2 {
+        return Err(Error::Others(format!("sockaddr {} is not right", sockaddr)));
     }
 
-    let addr = hostv[1];
+    let addr = sockaddrv[1];
     if addr.is_empty() {
         return Err(Error::Others(format!("address {} is empty", addr)));
     }
 
-    let domain = match &hostv[0].to_lowercase()[..] {
+    let domain = match &sockaddrv[0].to_lowercase()[..] {
         "unix" if !addr.starts_with('@') => Domain::Unix,
         #[cfg(not(target_os = "linux"))]
         "unix" if addr.starts_with('@') => {
@@ -75,7 +77,8 @@ pub fn parse_host(host: &str) -> Result<(Domain, &str)> {
     Ok((domain, addr))
 }
 
-pub fn set_fd_close_exec(fd: RawFd) -> Result<RawFd> {
+#[cfg(any(feature = "async", not(target_os = "linux")))]
+pub(crate) fn set_fd_close_exec(fd: RawFd) -> Result<RawFd> {
     if let Err(e) = fcntl(fd, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)) {
         return Err(Error::Others(format!(
             "failed to set fd: {} as close-on-exec: {}",
@@ -92,11 +95,11 @@ pub(crate) const SOCK_CLOEXEC: SockFlag = SockFlag::SOCK_CLOEXEC;
 pub(crate) const SOCK_CLOEXEC: SockFlag = SockFlag::empty();
 
 #[cfg(target_os = "linux")]
-fn make_addr(domain: Domain, host: &str) -> Result<UnixAddr> {
+fn make_addr(domain: Domain, sockaddr: &str) -> Result<UnixAddr> {
     match domain {
-        Domain::Unix => UnixAddr::new(host).map_err(err_to_others_err!(e, "")),
+        Domain::Unix => UnixAddr::new(sockaddr).map_err(err_to_others_err!(e, "")),
         Domain::AbstractUnix => {
-            UnixAddr::new_abstract(host.as_bytes()).map_err(err_to_others_err!(e, ""))
+            UnixAddr::new_abstract(sockaddr.as_bytes()).map_err(err_to_others_err!(e, ""))
         }
         Domain::Vsock => Err(Error::Others(
             "function make_addr does not support create vsock socket".to_string(),
@@ -105,15 +108,15 @@ fn make_addr(domain: Domain, host: &str) -> Result<UnixAddr> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn make_addr(_domain: Domain, host: &str) -> Result<UnixAddr> {
-    UnixAddr::new(host).map_err(err_to_others_err!(e, ""))
+fn make_addr(_domain: Domain, sockaddr: &str) -> Result<UnixAddr> {
+    UnixAddr::new(sockaddr).map_err(err_to_others_err!(e, ""))
 }
 
 fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, SockAddr)> {
-    let (host, _) = addr;
-    let (domain, hostv) = parse_host(host)?;
+    let (sockaddr, _) = addr;
+    let (domain, sockaddrv) = parse_sockaddr(sockaddr)?;
 
-    let get_sock_addr = |domain, host| -> Result<(RawFd, SockAddr)> {
+    let get_sock_addr = |domain, sockaddr| -> Result<(RawFd, SockAddr)> {
         let fd = socket(AddressFamily::Unix, SockType::Stream, SOCK_CLOEXEC, None)
             .map_err(|e| Error::Socket(e.to_string()))?;
 
@@ -122,24 +125,24 @@ fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, SockAddr)> {
         #[cfg(target_os = "macos")]
         set_fd_close_exec(fd)?;
 
-        let sockaddr = SockAddr::Unix(make_addr(domain, host)?);
+        let sockaddr = SockAddr::Unix(make_addr(domain, sockaddr)?);
         Ok((fd, sockaddr))
     };
 
     let (fd, sockaddr) = match domain {
-        Domain::Unix => get_sock_addr(domain, hostv)?,
+        Domain::Unix => get_sock_addr(domain, sockaddrv)?,
         #[cfg(target_os = "linux")]
-        Domain::AbstractUnix => get_sock_addr(domain, hostv)?,
+        Domain::AbstractUnix => get_sock_addr(domain, sockaddrv)?,
         #[cfg(target_os = "linux")]
         Domain::Vsock => {
-            let host_port_v: Vec<&str> = hostv.split(':').collect();
-            if host_port_v.len() != 2 {
+            let sockaddr_port_v: Vec<&str> = sockaddrv.split(':').collect();
+            if sockaddr_port_v.len() != 2 {
                 return Err(Error::Others(format!(
-                    "Host {} is not right for vsock",
-                    host
+                    "sockaddr {} is not right for vsock",
+                    sockaddr
                 )));
             }
-            let port: u32 = host_port_v[1]
+            let port: u32 = sockaddr_port_v[1]
                 .parse()
                 .expect("the vsock port is not an number");
             let fd = socket(
@@ -168,8 +171,8 @@ use libc::VMADDR_CID_HOST;
 #[cfg(not(target_os = "linux"))]
 const VMADDR_CID_HOST: u32 = 0;
 
-pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
-    let (fd, domain, sockaddr) = make_socket((host, VMADDR_CID_ANY))?;
+pub(crate) fn do_bind(sockaddr: &str) -> Result<(RawFd, Domain)> {
+    let (fd, domain, sockaddr) = make_socket((sockaddr, VMADDR_CID_ANY))?;
 
     setsockopt(fd, sockopt::ReusePort, &true)?;
     bind(fd, &sockaddr).map_err(err_to_others_err!(e, ""))?;
@@ -178,8 +181,8 @@ pub fn do_bind(host: &str) -> Result<(RawFd, Domain)> {
 }
 
 /// Creates a unix socket for client.
-pub(crate) unsafe fn client_connect(host: &str) -> Result<RawFd> {
-    let (fd, _, sockaddr) = make_socket((host, VMADDR_CID_HOST))?;
+pub(crate) unsafe fn client_connect(sockaddr: &str) -> Result<RawFd> {
+    let (fd, _, sockaddr) = make_socket((sockaddr, VMADDR_CID_HOST))?;
 
     connect(fd, &sockaddr)?;
 
@@ -214,12 +217,12 @@ pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
 
 #[cfg(test)]
 mod tests {
-    use super::parse_host;
+    use super::parse_sockaddr;
     use super::Domain;
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn test_parse_host() {
+    fn test_parse_sockaddr() {
         for i in &[
             (
                 "unix:///run/a.sock",
@@ -238,7 +241,7 @@ mod tests {
             ("abc:///run/c.sock", None, "", false),
         ] {
             let (input, domain, addr, success) = (i.0, i.1, i.2, i.3);
-            let r = parse_host(input);
+            let r = parse_sockaddr(input);
             if success {
                 let (rd, ra) = r.unwrap();
                 assert_eq!(rd, domain.unwrap());
@@ -251,7 +254,7 @@ mod tests {
 
     #[cfg(not(target_os = "linux"))]
     #[test]
-    fn test_parse_host() {
+    fn test_parse_sockaddr() {
         for i in &[
             (
                 "unix:///run/a.sock",
@@ -265,7 +268,7 @@ mod tests {
             ("abc:///run/c.sock", None, "", false),
         ] {
             let (input, domain, addr, success) = (i.0, i.1, i.2, i.3);
-            let r = parse_host(input);
+            let r = parse_sockaddr(input);
             if success {
                 let (rd, ra) = r.unwrap();
                 assert_eq!(rd, domain.unwrap());
