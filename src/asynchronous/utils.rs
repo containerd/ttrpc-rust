@@ -21,7 +21,7 @@ macro_rules! async_request_handler {
         {
             let mut s = CodedInputStream::from_bytes(&$req.payload);
             req.merge_from(&mut s)
-                .map_err(::ttrpc::Err_to_Others!(e, ""))?;
+                .map_err(::ttrpc::err_to_others!(e, ""))?;
         }
 
         let mut res = ::ttrpc::Response::new();
@@ -31,8 +31,8 @@ macro_rules! async_request_handler {
                 res.payload.reserve(rep.compute_size() as usize);
                 let mut s = protobuf::CodedOutputStream::vec(&mut res.payload);
                 rep.write_to(&mut s)
-                    .map_err(::ttrpc::Err_to_Others!(e, ""))?;
-                s.flush().map_err(::ttrpc::Err_to_Others!(e, ""))?;
+                    .map_err(::ttrpc::err_to_others!(e, ""))?;
+                s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
             }
             Err(x) => match x {
                 ::ttrpc::Error::RpcStatus(s) => {
@@ -66,15 +66,15 @@ macro_rules! async_client_request {
         {
             let mut s = CodedOutputStream::vec(&mut creq.payload);
             $req.write_to(&mut s)
-                .map_err(::ttrpc::Err_to_Others!(e, ""))?;
-            s.flush().map_err(::ttrpc::Err_to_Others!(e, ""))?;
+                .map_err(::ttrpc::err_to_others!(e, ""))?;
+            s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
         }
 
         let res = $self.client.request(creq).await?;
         let mut s = CodedInputStream::from_bytes(&res.payload);
         $cres
             .merge_from(&mut s)
-            .map_err(::ttrpc::Err_to_Others!(e, "Unpack get error "))?;
+            .map_err(::ttrpc::err_to_others!(e, "Unpack get error "))?;
 
         return Ok($cres);
     };
