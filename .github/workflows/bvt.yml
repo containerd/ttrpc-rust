@@ -16,6 +16,8 @@ jobs:
           make
           make -C example deps
           make -C example
+          make -C ttrpc-codegen deps
+          make -C ttrpc-codegen
 
   clippy_check:
     name: Clippy Check
