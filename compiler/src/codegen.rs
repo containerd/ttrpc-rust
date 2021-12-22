@@ -220,16 +220,6 @@ impl<'a> MethodGen<'a> {
         )
     }
 
-    fn unary_async(&self, method_name: &str) -> String {
-        format!(
-            "{}(&mut self, ctx: ttrpc::context::Context, req: &{}) -> {}<{}>",
-            method_name,
-            self.input(),
-            fq_grpc("Result"),
-            self.output()
-        )
-    }
-
     fn client_streaming(&self, method_name: &str) -> String {
         format!(
             "{}(&self) -> {}<({}<{}>, {}<{}>)>",
@@ -329,7 +319,7 @@ impl<'a> MethodGen<'a> {
         match self.method_type().0 {
             // Unary
             MethodType::Unary => {
-                pub_async_fn(w, &self.unary_async(&method_name), |w| {
+                pub_async_fn(w, &self.unary(&method_name), |w| {
                     w.write_line(&format!("let mut cres = {}::new();", self.output()));
                     w.write_line(&format!(
                         "::ttrpc::async_client_request!(self, ctx, req, \"{}.{}\", \"{}\", cres);",
