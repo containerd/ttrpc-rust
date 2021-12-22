@@ -10,5 +10,6 @@ generate rust version ttrpc code from proto files.
 ## Versions
 | ttrpc-compiler version | ttrpc version |
 | ------------- | ------------- |
-| 0.3.x | <= 0.4.x  |
-| 0.4.x  | >= 0.5.x
+| 0.3.x | <= 0.4.x |
+| 0.4.x | = 0.5.x  |
+| 0.5.x | >= 0.6.x |
