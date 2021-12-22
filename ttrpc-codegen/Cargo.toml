@@ -1,6 +1,6 @@
 [package]
 name = "ttrpc-codegen"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2018"
 authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 license = "Apache-2.0"
@@ -16,4 +16,4 @@ readme = "README.md"
 protobuf = { version = "2.14.0" }
 protobuf-codegen-pure = "2.14.0"
 protobuf-codegen = "2.14.0"
-ttrpc-compiler = "0.4.0"
+ttrpc-compiler = "0.5.0"
