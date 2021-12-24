@@ -43,38 +43,25 @@ pub(crate) fn do_listen(listener: RawFd) -> Result<()> {
     listen(listener, 10).map_err(|e| Error::Socket(e.to_string()))
 }
 
-pub(crate) fn parse_sockaddr(sockaddr: &str) -> Result<(Domain, &str)> {
-    let sockaddrv: Vec<&str> = sockaddr.trim().split("://").collect();
-    if sockaddrv.len() != 2 {
-        return Err(Error::Others(format!("sockaddr {} is not right", sockaddr)));
-    }
-
-    let addr = sockaddrv[1];
-    if addr.is_empty() {
-        return Err(Error::Others(format!("address {} is empty", addr)));
-    }
-
-    let domain = match &sockaddrv[0].to_lowercase()[..] {
-        "unix" if !addr.starts_with('@') => Domain::Unix,
-        #[cfg(not(target_os = "linux"))]
-        "unix" if addr.starts_with('@') => {
-            return Err(Error::Others(
-                "Abstract socket is not supported".to_string(),
-            ))
+pub fn parse_sockaddr(host: &str) -> Result<(Domain, &str)> {
+    if let Some(addr) = host.strip_prefix("unix://") {
+        if !addr.starts_with('@') {
+            return Ok((Domain::Unix, addr));
         }
-        #[cfg(target_os = "linux")]
-        "unix" if addr.starts_with('@') => Domain::AbstractUnix,
-        #[cfg(target_os = "linux")]
-        "vsock" => Domain::Vsock,
-        x => return Err(Error::Others(format!("Scheme {:?} is not supported", x))),
-    };
+    }
 
     #[cfg(target_os = "linux")]
-    if domain == Domain::AbstractUnix {
-        return Ok((domain, &addr[1..]));
+    {
+        if let Some(addr) = host.strip_prefix("unix://@") {
+            return Ok((Domain::AbstractUnix, addr));
+        }
+
+        if let Some(addr) = host.strip_prefix("vsock://") {
+            return Ok((Domain::Vsock, addr));
+        }
     }
 
-    Ok((domain, addr))
+    Err(Error::Others(format!("Scheme {:?} is not supported", host)))
 }
 
 #[cfg(any(feature = "async", not(target_os = "linux")))]
@@ -231,7 +218,7 @@ mod tests {
                 true,
             ),
             ("vsock://8:1024", Some(Domain::Vsock), "8:1024", true),
-            ("Vsock://8:1025", Some(Domain::Vsock), "8:1025", true),
+            ("Vsock://8:1025", Some(Domain::Vsock), "8:1025", false),
             (
                 "unix://@/run/b.sock",
                 Some(Domain::AbstractUnix),
