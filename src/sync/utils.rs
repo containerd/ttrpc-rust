@@ -39,7 +39,7 @@ macro_rules! request_handler {
         let mut s = CodedInputStream::from_bytes(&$req.payload);
         let mut req = super::$server::$req_type::new();
         req.merge_from(&mut s)
-            .map_err(::ttrpc::Err_to_Others!(e, ""))?;
+            .map_err(::ttrpc::err_to_others!(e, ""))?;
 
         let mut res = ::ttrpc::Response::new();
         match $class.service.$req_fn(&$ctx, req) {
@@ -48,8 +48,8 @@ macro_rules! request_handler {
                 res.payload.reserve(rep.compute_size() as usize);
                 let mut s = protobuf::CodedOutputStream::vec(&mut res.payload);
                 rep.write_to(&mut s)
-                    .map_err(::ttrpc::Err_to_Others!(e, ""))?;
-                s.flush().map_err(::ttrpc::Err_to_Others!(e, ""))?;
+                    .map_err(::ttrpc::err_to_others!(e, ""))?;
+                s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
             }
             Err(x) => match x {
                 ::ttrpc::Error::RpcStatus(s) => {
@@ -80,14 +80,14 @@ macro_rules! client_request {
         creq.payload.reserve($req.compute_size() as usize);
         let mut s = CodedOutputStream::vec(&mut creq.payload);
         $req.write_to(&mut s)
-            .map_err(::ttrpc::Err_to_Others!(e, ""))?;
-        s.flush().map_err(::ttrpc::Err_to_Others!(e, ""))?;
+            .map_err(::ttrpc::err_to_others!(e, ""))?;
+        s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
 
         let res = $self.client.request(creq)?;
         let mut s = CodedInputStream::from_bytes(&res.payload);
         $cres
             .merge_from(&mut s)
-            .map_err(::ttrpc::Err_to_Others!(e, "Unpack get error "))?;
+            .map_err(::ttrpc::err_to_others!(e, "Unpack get error "))?;
     };
 }
 

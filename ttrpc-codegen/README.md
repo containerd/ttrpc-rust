@@ -49,6 +49,6 @@ ttrpc-codegen = "0.2"
 
 ## Alternative
 The alternative is to use
-[protoc-rust crate](https://github.com/stepancheg/rust-protobuf/tree/master/protoc-rust),
+[protoc-rust crate](https://github.com/stepancheg/rust-protobuf),
 which relies on `protoc` command to parse descriptors. Both crates should produce the same result,
 otherwise please file a bug report.

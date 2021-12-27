@@ -73,7 +73,7 @@ macro_rules! err_to_others_err {
 
 /// Convert to ttrpc::Error::Others.
 #[macro_export]
-macro_rules! Err_to_Others {
+macro_rules! err_to_others {
     ($e: ident, $s: expr) => {
         |$e| ::ttrpc::Error::Others($s.to_string() + &$e.to_string())
     };

@@ -25,6 +25,19 @@
 //! - `async`: Enables async server and client.
 //! - `sync`: Enables traditional sync server and client (default enabled).
 //! - `protobuf-codec`: Includes rust-protobuf (default enabled).
+//!
+//! # Socket address
+//!
+//! For Linux distributions, ttrpc-rust supports three types of socket:
+//!
+//! - `unix:///run/some.sock`: Normal Unix domain socket.
+//! - `unix://@/run/some.sock`: Abstract Unix domain socket.
+//! - `vsock://vsock://8:1024`: [vsock](https://man7.org/linux/man-pages/man7/vsock.7.html).
+//!
+//! For mscOS, ttrpc-rust **only** supports normal Unix domain socket:
+//!
+//! - `unix:///run/some.sock`: Normal Unix domain socket.
+//!
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
