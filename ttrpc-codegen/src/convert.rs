@@ -6,7 +6,6 @@ use crate::model;
 
 use crate::str_lit::StrLitDecodeError;
 use protobuf::Message;
-use std::mem;
 
 #[derive(Debug)]
 pub enum ConvertError {
@@ -80,7 +79,7 @@ impl RelativePath {
     }
 
     fn new(path: String) -> RelativePath {
-        assert!(!path.starts_with("."));
+        assert!(!path.starts_with('.'));
 
         RelativePath { path }
     }
@@ -118,9 +117,7 @@ impl RelativePath {
     fn self_and_parents(&self) -> Vec<RelativePath> {
         let mut tmp = self.clone();
 
-        let mut r = Vec::new();
-
-        r.push(self.clone());
+        let mut r = vec![self.clone()];
 
         while let Some(parent) = tmp.parent() {
             r.push(parent.clone());
@@ -216,8 +213,8 @@ impl AbsolutePath {
     }
 
     fn new(path: String) -> AbsolutePath {
-        assert!(path.is_empty() || path.starts_with("."));
-        assert!(!path.ends_with("."));
+        assert!(path.is_empty() || path.starts_with('.'));
+        assert!(!path.ends_with('.'));
         AbsolutePath { path }
     }
 
@@ -225,14 +222,14 @@ impl AbsolutePath {
         if path.is_empty() {
             AbsolutePath::root()
         } else {
-            assert!(!path.starts_with("."));
-            assert!(!path.ends_with("."));
+            assert!(!path.starts_with('.'));
+            assert!(!path.ends_with('.'));
             AbsolutePath::new(format!(".{}", path))
         }
     }
 
     fn from_path_maybe_dot(path: &str) -> AbsolutePath {
-        if path.starts_with(".") {
+        if path.starts_with('.') {
             AbsolutePath::new(path.to_owned())
         } else {
             AbsolutePath::from_path_without_dot(path)
@@ -259,8 +256,8 @@ impl AbsolutePath {
             if rem.is_empty() {
                 return Some(RelativePath::empty());
             }
-            if rem.starts_with('.') {
-                return Some(RelativePath::new(rem[1..].to_owned()));
+            if let Some(stripped) = rem.strip_prefix('.') {
+                return Some(RelativePath::new(stripped.to_string()));
             }
         }
         None
@@ -314,20 +311,20 @@ enum LookupScope<'a> {
 
 impl<'a> LookupScope<'a> {
     fn messages(&self) -> &[model::Message] {
-        match self {
-            &LookupScope::File(file) => &file.messages,
-            &LookupScope::Message(messasge) => &messasge.messages,
+        match *self {
+            LookupScope::File(file) => &file.messages,
+            LookupScope::Message(messasge) => &messasge.messages,
         }
     }
 
     fn find_message(&self, simple_name: &str) -> Option<&model::Message> {
-        self.messages().into_iter().find(|m| m.name == simple_name)
+        self.messages().iter().find(|m| m.name == simple_name)
     }
 
     fn enums(&self) -> &[model::Enumeration] {
-        match self {
-            &LookupScope::File(file) => &file.enums,
-            &LookupScope::Message(messasge) => &messasge.enums,
+        match *self {
+            LookupScope::File(file) => &file.enums,
+            LookupScope::Message(messasge) => &messasge.enums,
         }
     }
 
@@ -335,12 +332,12 @@ impl<'a> LookupScope<'a> {
         let mut r = Vec::new();
         r.extend(
             self.enums()
-                .into_iter()
+                .iter()
                 .map(|e| (&e.name[..], MessageOrEnum::Enum)),
         );
         r.extend(
             self.messages()
-                .into_iter()
+                .iter()
                 .map(|e| (&e.name[..], MessageOrEnum::Message)),
         );
         r
@@ -370,16 +367,16 @@ impl<'a> LookupScope<'a> {
         };
 
         if rem.is_empty() {
-            match self.find_member(&first) {
+            match self.find_member(first) {
                 Some(message_or_enum) => {
                     let mut result_path = current_path.clone();
-                    result_path.push_simple(&first);
+                    result_path.push_simple(first);
                     Some((result_path, message_or_enum))
                 }
                 None => None,
             }
         } else {
-            match self.find_message(&first) {
+            match self.find_message(first) {
                 Some(message) => {
                     let mut message_path = current_path.clone();
                     message_path.push_simple(&message.name);
@@ -542,7 +539,7 @@ impl<'a> Resolver<'a> {
     fn service(
         &self,
         input: &model::Service,
-        package: &String,
+        package: &str,
     ) -> ConvertResult<protobuf::descriptor::ServiceDescriptorProto> {
         let mut output = protobuf::descriptor::ServiceDescriptorProto::new();
         output.set_name(input.name.clone());
@@ -552,8 +549,8 @@ impl<'a> Resolver<'a> {
             let mut mm = protobuf::descriptor::MethodDescriptorProto::new();
             mm.set_name(m.name.clone());
 
-            mm.set_input_type(to_protobuf_absolute_path(&package, m.input_type.clone()));
-            mm.set_output_type(to_protobuf_absolute_path(&package, m.output_type.clone()));
+            mm.set_input_type(to_protobuf_absolute_path(package, m.input_type.clone()));
+            mm.set_output_type(to_protobuf_absolute_path(package, m.output_type.clone()));
 
             mm.set_client_streaming(m.client_streaming);
             mm.set_server_streaming(m.server_streaming);
@@ -653,14 +650,14 @@ impl<'a> Resolver<'a> {
         if let Some(default) = input.options.as_slice().by_name("default") {
             let default = match output.get_field_type() {
                 protobuf::descriptor::FieldDescriptorProto_Type::TYPE_STRING => {
-                    if let &model::ProtobufConstant::String(ref s) = default {
+                    if let model::ProtobufConstant::String(ref s) = *default {
                         s.decode_utf8()?
                     } else {
                         return Err(ConvertError::DefaultValueIsNotStringLiteral);
                     }
                 }
                 protobuf::descriptor::FieldDescriptorProto_Type::TYPE_BYTES => {
-                    if let &model::ProtobufConstant::String(ref s) = default {
+                    if let model::ProtobufConstant::String(ref s) = *default {
                         s.escaped.clone()
                     } else {
                         return Err(ConvertError::DefaultValueIsNotStringLiteral);
@@ -701,7 +698,7 @@ impl<'a> Resolver<'a> {
         path_in_file: &RelativePath,
     ) -> (AbsolutePath, MessageOrEnum) {
         // find message or enum in current package
-        if !name.starts_with(".") {
+        if !name.starts_with('.') {
             for p in path_in_file.self_and_parents() {
                 let relative_path_with_name = p.clone();
                 let relative_path_with_name = relative_path_with_name.append(name);
@@ -808,7 +805,7 @@ impl<'a> Resolver<'a> {
                 None,
             ),
             model::FieldType::MessageOrEnum(ref name) => {
-                let (name, me) = self.resolve_message_or_enum(&name, path_in_file);
+                let (name, me) = self.resolve_message_or_enum(name, path_in_file);
                 (me.descriptor_type(), Some(name))
             }
             model::FieldType::Map(..) => {
@@ -906,8 +903,8 @@ impl<'a> Resolver<'a> {
         field_type: &model::FieldType,
         option_name: &str,
     ) -> ConvertResult<protobuf::UnknownValue> {
-        let v = match value {
-            &model::ProtobufConstant::Bool(b) => {
+        let v = match *value {
+            model::ProtobufConstant::Bool(b) => {
                 if field_type != &model::FieldType::Bool {
                     Err(())
                 } else {
@@ -915,48 +912,46 @@ impl<'a> Resolver<'a> {
                 }
             }
             // TODO: check overflow
-            &model::ProtobufConstant::U64(v) => match field_type {
-                &model::FieldType::Fixed64 | &model::FieldType::Sfixed64 => {
+            model::ProtobufConstant::U64(v) => match *field_type {
+                model::FieldType::Fixed64 | model::FieldType::Sfixed64 => {
                     Ok(protobuf::UnknownValue::Fixed64(v))
                 }
-                &model::FieldType::Fixed32 | &model::FieldType::Sfixed32 => {
+                model::FieldType::Fixed32 | model::FieldType::Sfixed32 => {
                     Ok(protobuf::UnknownValue::Fixed32(v as u32))
                 }
-                &model::FieldType::Int64
-                | &model::FieldType::Int32
-                | &model::FieldType::Uint64
-                | &model::FieldType::Uint32 => Ok(protobuf::UnknownValue::Varint(v)),
-                &model::FieldType::Sint64 => Ok(protobuf::UnknownValue::sint64(v as i64)),
-                &model::FieldType::Sint32 => Ok(protobuf::UnknownValue::sint32(v as i32)),
+                model::FieldType::Int64
+                | model::FieldType::Int32
+                | model::FieldType::Uint64
+                | model::FieldType::Uint32 => Ok(protobuf::UnknownValue::Varint(v)),
+                model::FieldType::Sint64 => Ok(protobuf::UnknownValue::sint64(v as i64)),
+                model::FieldType::Sint32 => Ok(protobuf::UnknownValue::sint32(v as i32)),
                 _ => Err(()),
             },
-            &model::ProtobufConstant::I64(v) => match field_type {
-                &model::FieldType::Fixed64 | &model::FieldType::Sfixed64 => {
+            model::ProtobufConstant::I64(v) => match *field_type {
+                model::FieldType::Fixed64 | model::FieldType::Sfixed64 => {
                     Ok(protobuf::UnknownValue::Fixed64(v as u64))
                 }
-                &model::FieldType::Fixed32 | &model::FieldType::Sfixed32 => {
+                model::FieldType::Fixed32 | model::FieldType::Sfixed32 => {
                     Ok(protobuf::UnknownValue::Fixed32(v as u32))
                 }
-                &model::FieldType::Int64
-                | &model::FieldType::Int32
-                | &model::FieldType::Uint64
-                | &model::FieldType::Uint32 => Ok(protobuf::UnknownValue::Varint(v as u64)),
-                &model::FieldType::Sint64 => Ok(protobuf::UnknownValue::sint64(v as i64)),
-                &model::FieldType::Sint32 => Ok(protobuf::UnknownValue::sint32(v as i32)),
+                model::FieldType::Int64
+                | model::FieldType::Int32
+                | model::FieldType::Uint64
+                | model::FieldType::Uint32 => Ok(protobuf::UnknownValue::Varint(v as u64)),
+                model::FieldType::Sint64 => Ok(protobuf::UnknownValue::sint64(v as i64)),
+                model::FieldType::Sint32 => Ok(protobuf::UnknownValue::sint32(v as i32)),
                 _ => Err(()),
             },
-            &model::ProtobufConstant::F64(f) => match field_type {
-                &model::FieldType::Float => Ok(protobuf::UnknownValue::Fixed32(unsafe {
-                    mem::transmute::<f32, u32>(f as f32)
-                })),
-                &model::FieldType::Double => Ok(protobuf::UnknownValue::Fixed64(unsafe {
-                    mem::transmute::<f64, u64>(f)
-                })),
+            model::ProtobufConstant::F64(f) => match *field_type {
+                model::FieldType::Float => {
+                    Ok(protobuf::UnknownValue::Fixed32((f as f32).to_bits()))
+                }
+                model::FieldType::Double => Ok(protobuf::UnknownValue::Fixed64(f.to_bits())),
                 _ => Err(()),
             },
-            &model::ProtobufConstant::String(ref s) => {
-                match field_type {
-                    &model::FieldType::String => Ok(protobuf::UnknownValue::LengthDelimited(
+            model::ProtobufConstant::String(ref s) => {
+                match *field_type {
+                    model::FieldType::String => Ok(protobuf::UnknownValue::LengthDelimited(
                         s.decode_utf8()?.into_bytes(),
                     )),
                     // TODO: bytes
@@ -998,9 +993,9 @@ impl<'a> Resolver<'a> {
     }
 }
 
-fn to_protobuf_absolute_path(package: &String, path: String) -> String {
-    if !path.starts_with(".") {
-        if path.contains(".") {
+fn to_protobuf_absolute_path(package: &str, path: String) -> String {
+    if !path.starts_with('.') {
+        if path.contains('.') {
             return format!(".{}", &path);
         } else {
             return format!(".{}.{}", package, &path);
@@ -1031,7 +1026,7 @@ pub fn file_descriptor(
     deps: &[model::FileDescriptor],
 ) -> ConvertResult<protobuf::descriptor::FileDescriptorProto> {
     let resolver = Resolver {
-        current_file: &input,
+        current_file: input,
         deps,
     };
 
@@ -1042,14 +1037,14 @@ pub fn file_descriptor(
 
     let mut messages = protobuf::RepeatedField::new();
     for m in &input.messages {
-        messages.push(resolver.message(&m, &RelativePath::empty())?);
+        messages.push(resolver.message(m, &RelativePath::empty())?);
     }
 
     output.set_message_type(messages);
 
     let mut services = protobuf::RepeatedField::new();
     for s in &input.services {
-        services.push(resolver.service(&s, &input.package)?);
+        services.push(resolver.service(s, &input.package)?);
     }
 
     output.set_service(services);

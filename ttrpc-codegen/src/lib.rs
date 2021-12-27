@@ -183,7 +183,11 @@ struct WithFileError {
 
 impl fmt::Display for WithFileError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "WithFileError")
+        write!(
+            f,
+            "WithFileError(file: {:?}, error: {:?})",
+            &self.file, &self.error
+        )
     }
 }
 
@@ -204,7 +208,7 @@ impl<'a> Run<'a> {
         protobuf_path: &str,
         result: &mut HashMap<String, FileDescriptorPair>,
     ) {
-        if let Some(_) = result.get(protobuf_path) {
+        if result.get(protobuf_path).is_some() {
             return;
         }
 
@@ -228,7 +232,7 @@ impl<'a> Run<'a> {
     }
 
     fn add_file(&mut self, protobuf_path: &str, fs_path: &Path) -> io::Result<()> {
-        if let Some(_) = self.parsed_files.get(protobuf_path) {
+        if self.parsed_files.get(protobuf_path).is_some() {
             return Ok(());
         }
 
@@ -329,13 +333,13 @@ pub fn parse_and_typecheck(
 ) -> io::Result<ParsedAndTypechecked> {
     let mut run = Run {
         parsed_files: HashMap::new(),
-        includes: includes,
+        includes,
     };
 
     let mut relative_paths = Vec::new();
 
     for input in input {
-        relative_paths.push(run.add_fs_file(&Path::new(input))?);
+        relative_paths.push(run.add_fs_file(Path::new(input))?);
     }
 
     let file_descriptors: Vec<_> = run
@@ -359,7 +363,7 @@ mod test {
     fn test_relative_path_to_protobuf_path_windows() {
         assert_eq!(
             "foo/bar.proto",
-            relative_path_to_protobuf_path(&Path::new("foo\\bar.proto"))
+            relative_path_to_protobuf_path(Path::new("foo\\bar.proto"))
         );
     }
 
@@ -367,7 +371,7 @@ mod test {
     fn test_relative_path_to_protobuf_path() {
         assert_eq!(
             "foo/bar.proto",
-            relative_path_to_protobuf_path(&Path::new("foo/bar.proto"))
+            relative_path_to_protobuf_path(Path::new("foo/bar.proto"))
         );
     }
 }

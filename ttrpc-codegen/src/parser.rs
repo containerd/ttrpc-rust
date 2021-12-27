@@ -183,19 +183,19 @@ enum Token {
 impl Token {
     /// Back to original
     fn format(&self) -> String {
-        match self {
-            &Token::Ident(ref s) => s.clone(),
-            &Token::Symbol(c) => c.to_string(),
-            &Token::IntLit(ref i) => i.to_string(),
-            &Token::StrLit(ref s) => s.quoted(),
-            &Token::FloatLit(ref f) => f.to_string(),
+        match *self {
+            Token::Ident(ref s) => s.clone(),
+            Token::Symbol(c) => c.to_string(),
+            Token::IntLit(ref i) => i.to_string(),
+            Token::StrLit(ref s) => s.quoted(),
+            Token::FloatLit(ref f) => f.to_string(),
         }
     }
 
     fn to_num_lit(&self) -> ParserResult<NumLit> {
-        match self {
-            &Token::IntLit(i) => Ok(NumLit::U64(i)),
-            &Token::FloatLit(f) => Ok(NumLit::F64(f)),
+        match *self {
+            Token::IntLit(i) => Ok(NumLit::U64(i)),
+            Token::FloatLit(f) => Ok(NumLit::F64(f)),
             _ => Err(ParserError::IncorrectInput),
         }
     }
@@ -336,7 +336,7 @@ impl<'a> Lexer<'a> {
     where
         P: FnOnce(char) -> bool,
     {
-        let mut clone = self.clone();
+        let mut clone = *self;
         match clone.next_char_opt() {
             Some(c) if p(c) => {
                 *self = clone;
@@ -392,11 +392,11 @@ impl<'a> Lexer<'a> {
 
     // capitalLetter =  "A" … "Z"
     fn _next_capital_letter_opt(&mut self) -> Option<char> {
-        self.next_char_if(|c| c >= 'A' && c <= 'Z')
+        self.next_char_if(|c| ('A'..='Z').contains(&c))
     }
 
     fn is_ascii_alphanumeric(c: char) -> bool {
-        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+        ('a'..='z').contains(&c) || ('A'..='Z').contains(&c) || ('0'..='9').contains(&c)
     }
 
     fn next_ident_part(&mut self) -> Option<char> {
@@ -422,7 +422,7 @@ impl<'a> Lexer<'a> {
     // Integer literals
 
     fn is_ascii_hexdigit(c: char) -> bool {
-        (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+        ('0'..='9').contains(&c) || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
     }
 
     // hexLit     = "0" ( "x" | "X" ) hexDigit { hexDigit }
@@ -438,14 +438,14 @@ impl<'a> Lexer<'a> {
     }
 
     fn is_ascii_digit(c: char) -> bool {
-        c >= '0' && c <= '9'
+        ('0'..='9').contains(&c)
     }
 
     // decimalLit = ( "1" … "9" ) { decimalDigit }
     // octalLit   = "0" { octalDigit }
     fn next_decimal_octal_lit(&mut self) -> ParserResult<Option<u64>> {
         // do not advance on number parse error
-        let mut clone = self.clone();
+        let mut clone = *self;
 
         let pos = clone.pos;
 
@@ -461,11 +461,11 @@ impl<'a> Lexer<'a> {
 
     // hexDigit     = "0" … "9" | "A" … "F" | "a" … "f"
     fn next_hex_digit(&mut self) -> ParserResult<u32> {
-        let mut clone = self.clone();
+        let mut clone = *self;
         let r = match clone.next_char()? {
-            c if c >= '0' && c <= '9' => c as u32 - b'0' as u32,
-            c if c >= 'A' && c <= 'F' => c as u32 - b'A' as u32 + 10,
-            c if c >= 'a' && c <= 'f' => c as u32 - b'a' as u32 + 10,
+            c if ('0'..='9').contains(&c) => c as u32 - b'0' as u32,
+            c if ('A'..='F').contains(&c) => c as u32 - b'A' as u32 + 10,
+            c if ('a'..='f').contains(&c) => c as u32 - b'a' as u32 + 10,
             _ => return Err(ParserError::ExpectHexDigit),
         };
         *self = clone;
@@ -474,9 +474,9 @@ impl<'a> Lexer<'a> {
 
     // octalDigit   = "0" … "7"
     fn next_octal_digit(&mut self) -> ParserResult<u32> {
-        let mut clone = self.clone();
+        let mut clone = *self;
         let r = match clone.next_char()? {
-            c if c >= '0' && c <= '7' => c as u32 - b'0' as u32,
+            c if ('0'..='7').contains(&c) => c as u32 - b'0' as u32,
             _ => return Err(ParserError::ExpectOctDigit),
         };
         *self = clone;
@@ -485,9 +485,9 @@ impl<'a> Lexer<'a> {
 
     // decimalDigit = "0" … "9"
     fn next_decimal_digit(&mut self) -> ParserResult<u32> {
-        let mut clone = self.clone();
+        let mut clone = *self;
         let r = match clone.next_char()? {
-            c if c >= '0' && c <= '9' => c as u32 - '0' as u32,
+            c if ('0'..='9').contains(&c) => c as u32 - '0' as u32,
             _ => return Err(ParserError::ExpectDecDigit),
         };
         *self = clone;
@@ -497,7 +497,7 @@ impl<'a> Lexer<'a> {
     // decimals  = decimalDigit { decimalDigit }
     fn next_decimal_digits(&mut self) -> ParserResult<()> {
         self.next_decimal_digit()?;
-        self.take_while(|c| c >= '0' && c <= '9');
+        self.take_while(|c| ('0'..='9').contains(&c));
         Ok(())
     }
 
@@ -537,10 +537,8 @@ impl<'a> Lexer<'a> {
             if self.next_char_if_eq('.') {
                 self.next_decimal_digits()?;
                 self.next_exponent_opt()?;
-            } else {
-                if self.next_exponent_opt()? == None {
-                    return Err(ParserError::IncorrectFloatLit);
-                }
+            } else if self.next_exponent_opt()? == None {
+                return Err(ParserError::IncorrectFloatLit);
             }
         }
         Ok(())
@@ -574,7 +572,7 @@ impl<'a> Lexer<'a> {
                         // TODO: do not decode as char if > 0x80
                         Ok(((d1 << 4) | d2) as char)
                     }
-                    d if d >= '0' && d <= '7' => {
+                    d if ('0'..='7').contains(&d) => {
                         let mut r = d as u8 - b'0';
                         for _ in 0..2 {
                             match self.next_octal_digit() {
@@ -632,11 +630,27 @@ impl<'a> Lexer<'a> {
     }
 
     fn is_ascii_punctuation(c: char) -> bool {
-        match c {
-            '.' | ',' | ':' | ';' | '/' | '\\' | '=' | '%' | '+' | '-' | '*' | '<' | '>' | '('
-            | ')' | '{' | '}' | '[' | ']' => true,
-            _ => false,
-        }
+        matches!(
+            c,
+            '.' | ','
+                | ':'
+                | ';'
+                | '/'
+                | '\\'
+                | '='
+                | '%'
+                | '+'
+                | '-'
+                | '*'
+                | '<'
+                | '>'
+                | '('
+                | ')'
+                | '{'
+                | '}'
+                | '['
+                | ']'
+        )
     }
 
     fn next_token_inner(&mut self) -> ParserResult<Token> {
@@ -646,14 +660,14 @@ impl<'a> Lexer<'a> {
             } else if ident == float::PROTOBUF_INF {
                 Token::FloatLit(f64::INFINITY)
             } else {
-                Token::Ident(ident.to_owned())
+                Token::Ident(ident)
             };
             return Ok(token);
         }
 
-        let mut clone = self.clone();
+        let mut clone = *self;
         let pos = clone.pos;
-        if let Ok(_) = clone.next_float_lit() {
+        if clone.next_float_lit().is_ok() {
             let f = float::parse_protobuf_float(&self.input[pos..clone.pos])?;
             *self = clone;
             return Ok(Token::FloatLit(f));
@@ -786,8 +800,8 @@ enum NumLit {
 }
 
 impl NumLit {
-    fn to_option_value(&self, sign_is_plus: bool) -> ParserResult<ProtobufConstant> {
-        Ok(match (*self, sign_is_plus) {
+    fn to_option_value(self, sign_is_plus: bool) -> ParserResult<ProtobufConstant> {
+        Ok(match (self, sign_is_plus) {
             (NumLit::U64(u), true) => ProtobufConstant::U64(u),
             (NumLit::F64(f), true) => ProtobufConstant::F64(f),
             (NumLit::U64(u), false) => ProtobufConstant::I64(u.neg()?),
@@ -900,7 +914,7 @@ impl<'a> Parser<'a> {
     fn next_ident_if_in(&mut self, idents: &[&str]) -> ParserResult<Option<String>> {
         let v = match self.lookahead()? {
             Some(&Token::Ident(ref next)) => {
-                if idents.into_iter().find(|&i| i == next).is_some() {
+                if idents.iter().any(|i| i == next) {
                     next.clone()
                 } else {
                     return Ok(None);
@@ -932,10 +946,7 @@ impl<'a> Parser<'a> {
     }
 
     fn next_symbol_if_eq(&mut self, symbol: char) -> ParserResult<bool> {
-        Ok(self.next_token_if(|token| match token {
-            &Token::Symbol(c) if c == symbol => true,
-            _ => false,
-        })? != None)
+        Ok(self.next_token_if(|token| matches!(*token, Token::Symbol(c) if c == symbol))? != None)
     }
 
     fn next_symbol_expect_eq(&mut self, symbol: char) -> ParserResult<()> {
@@ -961,15 +972,15 @@ impl<'a> Parser<'a> {
     // Protobuf grammar
 
     fn next_ident(&mut self) -> ParserResult<String> {
-        self.next_token_check_map(|token| match token {
-            &Token::Ident(ref ident) => Ok(ident.clone()),
+        self.next_token_check_map(|token| match *token {
+            Token::Ident(ref ident) => Ok(ident.clone()),
             _ => Err(ParserError::ExpectIdent),
         })
     }
 
     fn next_str_lit(&mut self) -> ParserResult<StrLit> {
-        self.next_token_check_map(|token| match token {
-            &Token::StrLit(ref str_lit) => Ok(str_lit.clone()),
+        self.next_token_check_map(|token| match *token {
+            Token::StrLit(ref str_lit) => Ok(str_lit.clone()),
             _ => Err(ParserError::IncorrectInput),
         })
     }
@@ -1016,7 +1027,7 @@ impl<'a> Parser<'a> {
     }
 
     fn is_ascii_uppercase(c: char) -> bool {
-        c >= 'A' && c <= 'Z'
+        ('A'..='Z').contains(&c)
     }
 
     // groupName = capitalLetter { letter | decimalDigit | "_" }
@@ -1062,16 +1073,16 @@ impl<'a> Parser<'a> {
             return Ok(ProtobufConstant::Bool(b));
         }
 
-        if let &Token::Symbol(c) = self.lookahead_some()? {
+        if let Token::Symbol(c) = *(self.lookahead_some()?) {
             if c == '+' || c == '-' {
                 self.advance()?;
                 let sign = c == '+';
-                return Ok(self.next_num_lit()?.to_option_value(sign)?);
+                return self.next_num_lit()?.to_option_value(sign);
             }
         }
 
-        if let Some(r) = self.next_token_if_map(|token| match token {
-            &Token::StrLit(ref s) => Some(ProtobufConstant::String(s.clone())),
+        if let Some(r) = self.next_token_if_map(|token| match *token {
+            Token::StrLit(ref s) => Some(ProtobufConstant::String(s.clone())),
             _ => None,
         })? {
             return Ok(r);
@@ -1091,8 +1102,8 @@ impl<'a> Parser<'a> {
     }
 
     fn next_int_lit(&mut self) -> ParserResult<u64> {
-        self.next_token_check_map(|token| match token {
-            &Token::IntLit(i) => Ok(i),
+        self.next_token_check_map(|token| match *token {
+            Token::IntLit(i) => Ok(i),
             _ => Err(ParserError::IncorrectInput),
         })
     }
@@ -1232,7 +1243,7 @@ impl<'a> Parser<'a> {
             ("float", FieldType::Float),
             ("double", FieldType::Double),
         ];
-        for &(ref n, ref t) in simple {
+        for &(n, ref t) in simple {
             if self.next_ident_if_eq(n)? {
                 return Ok(t.clone());
             }
@@ -1247,8 +1258,8 @@ impl<'a> Parser<'a> {
     }
 
     fn next_field_number(&mut self) -> ParserResult<i32> {
-        self.next_token_check_map(|token| match token {
-            &Token::IntLit(i) => i.to_i32(),
+        self.next_token_check_map(|token| match *token {
+            Token::IntLit(i) => i.to_i32(),
             _ => Err(ParserError::IncorrectInput),
         })
     }
@@ -1263,9 +1274,7 @@ impl<'a> Parser<'a> {
 
     // fieldOptions = fieldOption { ","  fieldOption }
     fn next_field_options(&mut self) -> ParserResult<Vec<ProtobufOption>> {
-        let mut options = Vec::new();
-
-        options.push(self.next_field_option()?);
+        let mut options = vec![self.next_field_option()?];
 
         while self.next_symbol_if_eq(',')? {
             options.push(self.next_field_option()?);
@@ -1286,7 +1295,7 @@ impl<'a> Parser<'a> {
             self.next_label(mode)?
         };
         if self.next_ident_if_eq("group")? {
-            let name = self.next_group_name()?.to_owned();
+            let name = self.next_group_name()?;
             self.next_symbol_expect_eq('=')?;
             let number = self.next_field_number()?;
 
@@ -1306,7 +1315,7 @@ impl<'a> Parser<'a> {
             })
         } else {
             let typ = self.next_field_type()?;
-            let name = self.next_ident()?.to_owned();
+            let name = self.next_ident()?;
             self.next_symbol_expect_eq('=')?;
             let number = self.next_field_number()?;
 
@@ -1333,7 +1342,7 @@ impl<'a> Parser<'a> {
     // oneofField = type fieldName "=" fieldNumber [ "[" fieldOptions "]" ] ";"
     fn next_oneof_opt(&mut self) -> ParserResult<Option<OneOf>> {
         if self.next_ident_if_eq("oneof")? {
-            let name = self.next_ident()?.to_owned();
+            let name = self.next_ident()?;
             let MessageBody { fields, .. } = self.next_message_body(MessageBodyParseMode::Oneof)?;
             Ok(Some(OneOf { name, fields }))
         } else {
@@ -1379,8 +1388,7 @@ impl<'a> Parser<'a> {
 
     // ranges = range { "," range }
     fn next_ranges(&mut self) -> ParserResult<Vec<FieldNumberRange>> {
-        let mut ranges = Vec::new();
-        ranges.push(self.next_range()?);
+        let mut ranges = vec![self.next_range()?];
         while self.next_symbol_if_eq(',')? {
             ranges.push(self.next_range()?);
         }
@@ -1403,9 +1411,8 @@ impl<'a> Parser<'a> {
     // fieldNames = fieldName { "," fieldName }
     fn next_reserved_opt(&mut self) -> ParserResult<Option<(Vec<FieldNumberRange>, Vec<String>)>> {
         if self.next_ident_if_eq("reserved")? {
-            let (ranges, names) = if let &Token::StrLit(..) = self.lookahead_some()? {
-                let mut names = Vec::new();
-                names.push(self.next_str_lit()?.decode_utf8()?);
+            let (ranges, names) = if let Token::StrLit(..) = *(self.lookahead_some()?) {
+                let mut names = vec![self.next_str_lit()?.decode_utf8()?];
                 while self.next_symbol_if_eq(',')? {
                     names.push(self.next_str_lit()?.decode_utf8()?);
                 }
@@ -1451,7 +1458,7 @@ impl<'a> Parser<'a> {
 
     // enumField = ident "=" intLit [ "[" enumValueOption { ","  enumValueOption } "]" ]";"
     fn next_enum_field(&mut self) -> ParserResult<EnumValue> {
-        let name = self.next_ident()?.to_owned();
+        let name = self.next_ident()?;
         self.next_symbol_expect_eq('=')?;
         let number = self.next_enum_value()?;
         if self.next_symbol_if_eq('[')? {
@@ -1469,7 +1476,7 @@ impl<'a> Parser<'a> {
     // enumBody = "{" { option | enumField | emptyStatement } "}"
     fn next_enum_opt(&mut self) -> ParserResult<Option<Enumeration>> {
         if self.next_ident_if_eq("enum")? {
-            let name = self.next_ident()?.to_owned();
+            let name = self.next_ident()?;
 
             let mut values = Vec::new();
             let mut options = Vec::new();
@@ -1572,7 +1579,7 @@ impl<'a> Parser<'a> {
     // message = "message" messageName messageBody
     fn next_message_opt(&mut self) -> ParserResult<Option<Message>> {
         if self.next_ident_if_eq("message")? {
-            let name = self.next_ident()?.to_owned();
+            let name = self.next_ident()?;
 
             let mode = match self.syntax {
                 Syntax::Proto2 => MessageBodyParseMode::MessageProto2,
@@ -1866,7 +1873,7 @@ mod test {
             pos: 0,
             loc: Loc::start(),
         };
-        let r = parse_what(&mut lexer).expect(&format!("lexer failed at {}", lexer.loc));
+        let r = parse_what(&mut lexer).unwrap_or_else(|_| panic!("lexer failed at {}", lexer.loc));
         assert!(lexer.eof(), "check eof failed at {}", lexer.loc);
         r
     }
@@ -1880,8 +1887,8 @@ mod test {
             pos: 0,
             loc: Loc::start(),
         };
-        let o = parse_what(&mut lexer).expect(&format!("lexer failed at {}", lexer.loc));
-        let r = o.expect(&format!("lexer returned none at {}", lexer.loc));
+        let o = parse_what(&mut lexer).unwrap_or_else(|_| panic!("lexer failed at {}", lexer.loc));
+        let r = o.unwrap_or_else(|| panic!("lexer returned none at {}", lexer.loc));
         assert!(lexer.eof(), "check eof failed at {}", lexer.loc);
         r
     }
@@ -1891,10 +1898,11 @@ mod test {
         P: FnOnce(&mut Parser) -> ParserResult<R>,
     {
         let mut parser = Parser::new(input);
-        let r = parse_what(&mut parser).expect(&format!("parse failed at {}", parser.loc()));
+        let r =
+            parse_what(&mut parser).unwrap_or_else(|_| panic!("parse failed at {}", parser.loc()));
         let eof = parser
             .syntax_eof()
-            .expect(&format!("check eof failed at {}", parser.loc()));
+            .unwrap_or_else(|_| panic!("check eof failed at {}", parser.loc()));
         assert!(eof, "{}", parser.loc());
         r
     }
@@ -1904,8 +1912,9 @@ mod test {
         P: FnOnce(&mut Parser) -> ParserResult<Option<R>>,
     {
         let mut parser = Parser::new(input);
-        let o = parse_what(&mut parser).expect(&format!("parse failed at {}", parser.loc()));
-        let r = o.expect(&format!("parser returned none at {}", parser.loc()));
+        let o =
+            parse_what(&mut parser).unwrap_or_else(|_| panic!("parse failed at {}", parser.loc()));
+        let r = o.unwrap_or_else(|| panic!("parser returned none at {}", parser.loc()));
         assert!(parser.syntax_eof().unwrap());
         r
     }
@@ -1927,7 +1936,7 @@ mod test {
     #[test]
     fn test_ident() {
         let msg = r#"  aabb_c  "#;
-        let mess = parse(msg, |p| p.next_ident().map(|s| s.to_owned()));
+        let mess = parse(msg, |p| p.next_ident());
         assert_eq!("aabb_c", mess);
     }
 
