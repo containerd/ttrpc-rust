@@ -13,7 +13,7 @@ use std::sync::Arc;
 use log::LevelFilter;
 
 use protocols::r#async::{agent, agent_ttrpc, health, health_ttrpc, types};
-use ttrpc::asynchronous::server::*;
+use ttrpc::asynchronous::Server;
 use ttrpc::error::{Error, Result};
 use ttrpc::ttrpc::{Code, Status};
 

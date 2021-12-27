@@ -5,12 +5,16 @@
 
 //! Server and Client in sync mode.
 
-#[macro_use]
-pub mod channel;
-pub mod client;
-// TODO: address this after merging linters
-#[allow(clippy::too_many_arguments)]
-pub mod server;
+mod channel;
+mod client;
+mod server;
 
 #[macro_use]
-pub mod utils;
+mod utils;
+
+pub use client::Client;
+pub use server::Server;
+
+#[doc(hidden)]
+pub use utils::response_to_channel;
+pub use utils::{MethodHandler, TtrpcContext};

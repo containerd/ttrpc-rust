@@ -16,8 +16,8 @@ mod protocols;
 
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
-use ttrpc::client::Client;
 use ttrpc::context::{self, Context};
+use ttrpc::Client;
 
 fn main() {
     let c = Client::connect("unix://@/tmp/1").unwrap();

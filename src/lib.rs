@@ -52,7 +52,6 @@ mod common;
 mod compiled {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 }
-#[doc(inline)]
 pub use compiled::ttrpc;
 
 pub mod context;
@@ -66,22 +65,17 @@ pub use crate::ttrpc::{Code, Request, Response, Status};
 
 cfg_sync! {
     pub mod sync;
+    #[doc(hidden)]
+    pub use sync::response_to_channel;
     #[doc(inline)]
-    pub use crate::sync::channel::{write_message};
+    pub use sync::{MethodHandler, TtrpcContext};
+    pub use sync::Client;
     #[doc(inline)]
-    pub use crate::sync::utils::{response_to_channel, MethodHandler, TtrpcContext};
-    #[doc(inline)]
-    pub use crate::sync::client;
-    #[doc(inline)]
-    pub use crate::sync::client::Client;
-    #[doc(inline)]
-    pub use crate::sync::server;
-    #[doc(inline)]
-    pub use crate::sync::server::Server;
+    pub use sync::Server;
 }
 
 cfg_async! {
     pub mod asynchronous;
     #[doc(hidden)]
-    pub use crate::asynchronous as r#async;
+    pub use asynchronous as r#async;
 }
