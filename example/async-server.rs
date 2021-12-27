@@ -94,7 +94,7 @@ async fn main() {
     let aservice = agent_ttrpc::create_agent_service(a);
 
     let mut server = Server::new()
-        .bind("unix:///tmp/1")
+        .bind("unix://@/tmp/1")
         .unwrap()
         .register_service(hservice)
         .register_service(aservice);
