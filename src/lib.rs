@@ -52,7 +52,7 @@ mod common;
 mod compiled {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 }
-pub use compiled::ttrpc;
+pub use compiled::ttrpc as proto;
 
 pub mod context;
 
@@ -61,7 +61,7 @@ pub use crate::common::MessageHeader;
 #[doc(inline)]
 pub use crate::error::{get_status, Error, Result};
 #[doc(inline)]
-pub use crate::ttrpc::{Code, Request, Response, Status};
+pub use proto::{Code, Request, Response, Status};
 
 cfg_sync! {
     pub mod sync;

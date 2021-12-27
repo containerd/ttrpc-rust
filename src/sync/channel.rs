@@ -18,7 +18,7 @@ use std::os::unix::io::RawFd;
 
 use crate::common::{MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX};
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
-use crate::ttrpc::Code;
+use crate::proto::Code;
 use crate::MessageHeader;
 
 fn retryable(e: nix::Error) -> bool {

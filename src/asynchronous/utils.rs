@@ -5,7 +5,7 @@
 
 use crate::common::{MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
 use crate::error::{get_status, Result};
-use crate::ttrpc::{Code, Request, Status};
+use crate::proto::{Code, Request, Status};
 use async_trait::async_trait;
 use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;

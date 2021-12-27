@@ -31,8 +31,8 @@ use crate::common::set_fd_close_exec;
 use crate::common::{self, MESSAGE_TYPE_REQUEST};
 use crate::context;
 use crate::error::{get_status, Error, Result};
+use crate::proto::{Code, Request, Response};
 use crate::sync::channel::{read_message, write_message};
-use crate::ttrpc::{Code, Request, Response};
 use crate::MessageHeader;
 use crate::{MethodHandler, TtrpcContext};
 

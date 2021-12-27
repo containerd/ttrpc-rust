@@ -7,8 +7,8 @@ use byteorder::{BigEndian, ByteOrder};
 
 use crate::common::{MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX, MESSAGE_TYPE_RESPONSE};
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
+use crate::proto::{Code, Response, Status};
 use crate::r#async::utils;
-use crate::ttrpc::{Code, Response, Status};
 use crate::MessageHeader;
 use protobuf::Message;
 use tokio::io::AsyncReadExt;

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::ttrpc::KeyValue;
+use crate::proto::KeyValue;
 use std::collections::HashMap;
 
 #[derive(Clone, Default, Debug)]
@@ -78,7 +78,7 @@ pub fn to_pb(kvs: HashMap<String, Vec<String>>) -> protobuf::RepeatedField<KeyVa
 #[cfg(test)]
 mod tests {
     use crate::context;
-    use crate::ttrpc::KeyValue;
+    use crate::proto::KeyValue;
 
     #[test]
     fn test_metadata() {
