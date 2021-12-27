@@ -145,7 +145,7 @@ impl Server {
         }
     }
 
-    pub async fn do_start<I, S>(&mut self, mut incoming: I) -> Result<()>
+    async fn do_start<I, S>(&mut self, mut incoming: I) -> Result<()>
     where
         I: Stream<Item = std::io::Result<S>> + Unpin + Send + 'static + AsRawFd,
         S: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
