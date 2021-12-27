@@ -18,8 +18,6 @@ use std::os::unix::io::RawFd;
 pub(crate) enum Domain {
     Unix,
     #[cfg(target_os = "linux")]
-    AbstractUnix,
-    #[cfg(target_os = "linux")]
     Vsock,
 }
 
@@ -43,38 +41,31 @@ pub(crate) fn do_listen(listener: RawFd) -> Result<()> {
     listen(listener, 10).map_err(|e| Error::Socket(e.to_string()))
 }
 
-pub(crate) fn parse_sockaddr(sockaddr: &str) -> Result<(Domain, &str)> {
-    let sockaddrv: Vec<&str> = sockaddr.trim().split("://").collect();
-    if sockaddrv.len() != 2 {
-        return Err(Error::Others(format!("sockaddr {} is not right", sockaddr)));
+#[cfg(target_os = "linux")]
+fn parse_sockaddr(addr: &str) -> Result<(Domain, &str)> {
+    if let Some(addr) = addr.strip_prefix("unix://") {
+        return Ok((Domain::Unix, addr));
     }
 
-    let addr = sockaddrv[1];
-    if addr.is_empty() {
-        return Err(Error::Others(format!("address {} is empty", addr)));
+    if let Some(addr) = addr.strip_prefix("vsock://") {
+        return Ok((Domain::Vsock, addr));
     }
 
-    let domain = match &sockaddrv[0].to_lowercase()[..] {
-        "unix" if !addr.starts_with('@') => Domain::Unix,
-        #[cfg(not(target_os = "linux"))]
-        "unix" if addr.starts_with('@') => {
+    Err(Error::Others(format!("Scheme {:?} is not supported", addr)))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn parse_sockaddr(addr: &str) -> Result<(Domain, &str)> {
+    if let Some(addr) = addr.strip_prefix("unix://") {
+        if addr.starts_with('@') {
             return Err(Error::Others(
-                "Abstract socket is not supported".to_string(),
-            ))
+                "Abstract unix domain socket is not support on this platform".to_string(),
+            ));
         }
-        #[cfg(target_os = "linux")]
-        "unix" if addr.starts_with('@') => Domain::AbstractUnix,
-        #[cfg(target_os = "linux")]
-        "vsock" => Domain::Vsock,
-        x => return Err(Error::Others(format!("Scheme {:?} is not supported", x))),
-    };
-
-    #[cfg(target_os = "linux")]
-    if domain == Domain::AbstractUnix {
-        return Ok((domain, &addr[1..]));
+        return Ok((Domain::Unix, addr));
     }
 
-    Ok((domain, addr))
+    Err(Error::Others(format!("Scheme {:?} is not supported", addr)))
 }
 
 #[cfg(any(feature = "async", not(target_os = "linux")))]
@@ -97,9 +88,12 @@ pub(crate) const SOCK_CLOEXEC: SockFlag = SockFlag::empty();
 #[cfg(target_os = "linux")]
 fn make_addr(domain: Domain, sockaddr: &str) -> Result<UnixAddr> {
     match domain {
-        Domain::Unix => UnixAddr::new(sockaddr).map_err(err_to_others_err!(e, "")),
-        Domain::AbstractUnix => {
-            UnixAddr::new_abstract(sockaddr.as_bytes()).map_err(err_to_others_err!(e, ""))
+        Domain::Unix => {
+            if let Some(sockaddr) = sockaddr.strip_prefix('@') {
+                UnixAddr::new_abstract(sockaddr.as_bytes()).map_err(err_to_others_err!(e, ""))
+            } else {
+                UnixAddr::new(sockaddr).map_err(err_to_others_err!(e, ""))
+            }
         }
         Domain::Vsock => Err(Error::Others(
             "function make_addr does not support create vsock socket".to_string(),
@@ -131,8 +125,6 @@ fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, SockAddr)> {
 
     let (fd, sockaddr) = match domain {
         Domain::Unix => get_sock_addr(domain, sockaddrv)?,
-        #[cfg(target_os = "linux")]
-        Domain::AbstractUnix => get_sock_addr(domain, sockaddrv)?,
         #[cfg(target_os = "linux")]
         Domain::Vsock => {
             let sockaddr_port_v: Vec<&str> = sockaddrv.split(':').collect();
@@ -231,11 +223,11 @@ mod tests {
                 true,
             ),
             ("vsock://8:1024", Some(Domain::Vsock), "8:1024", true),
-            ("Vsock://8:1025", Some(Domain::Vsock), "8:1025", true),
+            ("Vsock://8:1025", Some(Domain::Vsock), "8:1025", false),
             (
                 "unix://@/run/b.sock",
-                Some(Domain::AbstractUnix),
-                "/run/b.sock",
+                Some(Domain::Unix),
+                "@/run/b.sock",
                 true,
             ),
             ("abc:///run/c.sock", None, "", false),
