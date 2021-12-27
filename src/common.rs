@@ -5,8 +5,6 @@
 
 //! Common functions and macros.
 
-#![allow(unused_macros)]
-
 use crate::error::{Error, Result};
 #[cfg(any(feature = "async", not(target_os = "linux")))]
 use nix::fcntl::FdFlag;

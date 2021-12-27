@@ -47,7 +47,7 @@ extern crate log;
 #[macro_use]
 pub mod error;
 #[macro_use]
-pub mod common;
+mod common;
 #[allow(soft_unstable, clippy::type_complexity, clippy::too_many_arguments)]
 mod compiled {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
