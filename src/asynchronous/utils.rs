@@ -4,8 +4,8 @@
 //
 
 use crate::common::{MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
-use crate::error::{get_status, Error, Result};
-use crate::ttrpc::{Code, Request, Response, Status};
+use crate::error::{get_status, Result};
+use crate::proto::{Code, Request, Status};
 use async_trait::async_trait;
 use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
@@ -47,7 +47,11 @@ macro_rules! async_request_handler {
             },
         }
 
-        let buf = ::ttrpc::r#async::convert_response_to_buf(res)?;
+        let mut buf = Vec::with_capacity(res.compute_size() as usize);
+        let mut s = protobuf::CodedOutputStream::vec(&mut buf);
+        res.write_to(&mut s).map_err(ttrpc::err_to_others!(e, ""))?;
+        s.flush().map_err(ttrpc::err_to_others!(e, ""))?;
+
         return Ok(($ctx.mh.stream_id, buf));
     };
 }
@@ -95,16 +99,7 @@ pub struct TtrpcContext {
     pub timeout_nano: i64,
 }
 
-pub fn convert_response_to_buf(res: Response) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(res.compute_size() as usize);
-    let mut s = protobuf::CodedOutputStream::vec(&mut buf);
-    res.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-    s.flush().map_err(err_to_others_err!(e, ""))?;
-
-    Ok(buf)
-}
-
-pub fn get_response_header_from_body(stream_id: u32, body: &[u8]) -> MessageHeader {
+pub(crate) fn get_response_header_from_body(stream_id: u32, body: &[u8]) -> MessageHeader {
     MessageHeader {
         length: body.len() as u32,
         stream_id,
@@ -113,7 +108,7 @@ pub fn get_response_header_from_body(stream_id: u32, body: &[u8]) -> MessageHead
     }
 }
 
-pub fn get_request_header_from_body(stream_id: u32, body: &[u8]) -> MessageHeader {
+pub(crate) fn get_request_header_from_body(stream_id: u32, body: &[u8]) -> MessageHeader {
     MessageHeader {
         length: body.len() as u32,
         stream_id,
@@ -122,7 +117,7 @@ pub fn get_request_header_from_body(stream_id: u32, body: &[u8]) -> MessageHeade
     }
 }
 
-pub fn new_unix_stream_from_raw_fd(fd: RawFd) -> UnixStream {
+pub(crate) fn new_unix_stream_from_raw_fd(fd: RawFd) -> UnixStream {
     let std_stream: std::os::unix::net::UnixStream;
     unsafe {
         std_stream = std::os::unix::net::UnixStream::from_raw_fd(fd);
@@ -133,7 +128,7 @@ pub fn new_unix_stream_from_raw_fd(fd: RawFd) -> UnixStream {
     UnixStream::from_std(std_stream).unwrap()
 }
 
-pub fn body_to_request(body: &[u8]) -> StdResult<Request, Status> {
+pub(crate) fn body_to_request(body: &[u8]) -> StdResult<Request, Status> {
     let mut req = Request::new();
     let merge_result;
     {
@@ -150,6 +145,6 @@ pub fn body_to_request(body: &[u8]) -> StdResult<Request, Status> {
     Ok(req)
 }
 
-pub fn get_path(service: &str, method: &str) -> String {
+pub(crate) fn get_path(service: &str, method: &str) -> String {
     format!("/{}/{}", service, method)
 }

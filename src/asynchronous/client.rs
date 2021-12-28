@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::common::{client_connect, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
-use crate::ttrpc::{Code, Request, Response};
+use crate::proto::{Code, Request, Response};
 
 use crate::asynchronous::stream::{receive, to_req_buf};
 use crate::r#async::utils;

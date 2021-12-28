@@ -7,8 +7,8 @@ use byteorder::{BigEndian, ByteOrder};
 
 use crate::common::{MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX, MESSAGE_TYPE_RESPONSE};
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
+use crate::proto::{Code, Response, Status};
 use crate::r#async::utils;
-use crate::ttrpc::{Code, Response, Status};
 use crate::MessageHeader;
 use protobuf::Message;
 use tokio::io::AsyncReadExt;
@@ -51,7 +51,7 @@ where
     Ok(mh)
 }
 
-pub async fn receive<T>(reader: &mut T) -> Result<(MessageHeader, Vec<u8>)>
+pub(crate) async fn receive<T>(reader: &mut T) -> Result<(MessageHeader, Vec<u8>)>
 where
     T: AsyncReadExt + std::marker::Unpin,
 {
@@ -94,7 +94,7 @@ fn header_to_buf(mh: MessageHeader) -> Vec<u8> {
     buf
 }
 
-pub fn to_req_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
+pub(crate) fn to_req_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
     let header = utils::get_request_header_from_body(stream_id, &body);
     let mut buf = header_to_buf(header);
     buf.append(&mut body);
@@ -102,7 +102,7 @@ pub fn to_req_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
     buf
 }
 
-pub fn to_res_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
+pub(crate) fn to_res_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
     let header = utils::get_response_header_from_body(stream_id, &body);
     let mut buf = header_to_buf(header);
     buf.append(&mut body);
@@ -119,7 +119,7 @@ fn get_response_body(res: &Response) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-pub async fn respond(
+pub(crate) async fn respond(
     tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     stream_id: u32,
     body: Vec<u8>,
@@ -131,7 +131,7 @@ pub async fn respond(
         .map_err(err_to_others_err!(e, "Send packet to sender error "))
 }
 
-pub async fn respond_with_status(
+pub(crate) async fn respond_with_status(
     tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     stream_id: u32,
     status: Status,

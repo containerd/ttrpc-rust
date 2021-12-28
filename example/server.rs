@@ -23,8 +23,8 @@ use std::thread;
 
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc, types};
 use ttrpc::error::{Error, Result};
-use ttrpc::server::*;
-use ttrpc::ttrpc::{Code, Status};
+use ttrpc::proto::{Code, Status};
+use ttrpc::Server;
 
 struct HealthService;
 impl health_ttrpc::Health for HealthService {

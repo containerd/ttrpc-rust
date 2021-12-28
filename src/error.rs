@@ -14,7 +14,7 @@
 
 //! Error and Result of ttrpc and relevant functions, macros.
 
-use crate::ttrpc::{Code, Status};
+use crate::proto::{Code, Status};
 use std::result;
 use thiserror::Error;
 

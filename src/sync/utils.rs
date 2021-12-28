@@ -5,7 +5,7 @@
 
 use crate::common::{MessageHeader, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
-use crate::ttrpc::{Request, Response};
+use crate::proto::{Request, Response};
 use protobuf::Message;
 use std::collections::HashMap;
 
