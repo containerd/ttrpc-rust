@@ -4,6 +4,7 @@
 //
 
 mod protocols;
+mod utils;
 
 use protocols::r#async::{agent, agent_ttrpc, health, health_ttrpc};
 use ttrpc::context::{self, Context};
@@ -11,7 +12,7 @@ use ttrpc::r#async::Client;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let c = Client::connect("unix://@/tmp/1").unwrap();
+    let c = Client::connect(utils::SOCK_ADDR).unwrap();
     let hc = health_ttrpc::HealthClient::new(c.clone());
     let ac = agent_ttrpc::AgentServiceClient::new(c);
 

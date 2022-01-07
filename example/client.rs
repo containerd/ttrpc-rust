@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod protocols;
+mod utils;
 
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
@@ -20,7 +21,7 @@ use ttrpc::context::{self, Context};
 use ttrpc::Client;
 
 fn main() {
-    let c = Client::connect("unix://@/tmp/1").unwrap();
+    let c = Client::connect(utils::SOCK_ADDR).unwrap();
     let hc = health_ttrpc::HealthClient::new(c.clone());
     let ac = agent_ttrpc::AgentServiceClient::new(c);
 
