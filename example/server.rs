@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod protocols;
+mod utils;
 
 #[macro_use]
 extern crate log;
@@ -89,8 +90,9 @@ fn main() {
     let a = Arc::new(a);
     let aservice = agent_ttrpc::create_agent_service(a);
 
+    utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
     let mut server = Server::new()
-        .bind("unix://@/tmp/1")
+        .bind(utils::SOCK_ADDR)
         .unwrap()
         .register_service(hservice)
         .register_service(aservice);
