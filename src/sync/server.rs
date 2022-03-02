@@ -188,9 +188,8 @@ fn start_method_handler_thread(
             trace!("Got Message request {:?}", req);
 
             let path = format!("/{}/{}", req.service, req.method);
-            let method;
-            if let Some(x) = methods.get(&path) {
-                method = x;
+            let method = if let Some(x) = methods.get(&path) {
+                x
             } else {
                 let status = get_status(Code::INVALID_ARGUMENT, format!("{} does not exist", path));
                 let mut res = Response::new();
@@ -207,7 +206,7 @@ fn start_method_handler_thread(
                     break;
                 }
                 continue;
-            }
+            };
             let ctx = TtrpcContext {
                 fd,
                 mh,
