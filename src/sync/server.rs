@@ -114,7 +114,7 @@ fn start_method_handler_thread(
                     // notify the connection dealing main thread to stop.
                     control_tx
                         .send(())
-                        .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                        .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
                 result = read_message(fd);
@@ -124,7 +124,7 @@ fn start_method_handler_thread(
                 // notify the connection dealing main thread to stop.
                 control_tx
                     .send(())
-                    .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                    .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                 break;
             }
 
@@ -133,7 +133,7 @@ fn start_method_handler_thread(
                 trace!("notify client handler to create much more worker threads!");
                 control_tx
                     .send(())
-                    .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                    .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
             }
 
             let mh;
@@ -152,7 +152,7 @@ fn start_method_handler_thread(
                         // have exited.
                         control_tx
                             .send(())
-                            .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                            .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                         trace!("Socket error send control_tx");
                         break;
                     }
@@ -180,7 +180,7 @@ fn start_method_handler_thread(
                     // exited.
                     control_tx
                         .send(())
-                        .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                        .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
                 continue;
@@ -203,7 +203,7 @@ fn start_method_handler_thread(
                     // exited.
                     control_tx
                         .send(())
-                        .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                        .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
                 continue;
@@ -223,7 +223,7 @@ fn start_method_handler_thread(
                 // exited.
                 control_tx
                     .send(())
-                    .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                    .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                 break;
             }
         }
