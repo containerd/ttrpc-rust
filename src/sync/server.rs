@@ -114,7 +114,7 @@ fn start_method_handler_thread(
                     // notify the connection dealing main thread to stop.
                     control_tx
                         .send(())
-                        .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                        .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
                 result = read_message(fd);
@@ -124,7 +124,7 @@ fn start_method_handler_thread(
                 // notify the connection dealing main thread to stop.
                 control_tx
                     .send(())
-                    .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                    .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                 break;
             }
 
@@ -133,7 +133,7 @@ fn start_method_handler_thread(
                 trace!("notify client handler to create much more worker threads!");
                 control_tx
                     .send(())
-                    .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                    .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
             }
 
             let mh;
@@ -152,7 +152,7 @@ fn start_method_handler_thread(
                         // have exited.
                         control_tx
                             .send(())
-                            .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                            .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                         trace!("Socket error send control_tx");
                         break;
                     }
@@ -180,7 +180,7 @@ fn start_method_handler_thread(
                     // exited.
                     control_tx
                         .send(())
-                        .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                        .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
                 continue;
@@ -188,9 +188,8 @@ fn start_method_handler_thread(
             trace!("Got Message request {:?}", req);
 
             let path = format!("/{}/{}", req.service, req.method);
-            let method;
-            if let Some(x) = methods.get(&path) {
-                method = x;
+            let method = if let Some(x) = methods.get(&path) {
+                x
             } else {
                 let status = get_status(Code::INVALID_ARGUMENT, format!("{} does not exist", path));
                 let mut res = Response::new();
@@ -203,11 +202,11 @@ fn start_method_handler_thread(
                     // exited.
                     control_tx
                         .send(())
-                        .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                        .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
                 continue;
-            }
+            };
             let ctx = TtrpcContext {
                 fd,
                 mh,
@@ -223,7 +222,7 @@ fn start_method_handler_thread(
                 // exited.
                 control_tx
                     .send(())
-                    .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                    .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                 break;
             }
         }

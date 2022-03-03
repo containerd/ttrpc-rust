@@ -225,19 +225,16 @@ impl Client {
             .send((buf, tx))
             .map_err(err_to_others_err!(e, "Send packet to sender error "))?;
 
-        let result: Result<Vec<u8>>;
-        if req.timeout_nano == 0 {
-            result = rx
-                .recv()
-                .map_err(err_to_others_err!(e, "Receive packet from recver error: "))?;
+        let result = if req.timeout_nano == 0 {
+            rx.recv()
+                .map_err(err_to_others_err!(e, "Receive packet from recver error: "))?
         } else {
-            result = rx
-                .recv_timeout(Duration::from_nanos(req.timeout_nano as u64))
+            rx.recv_timeout(Duration::from_nanos(req.timeout_nano as u64))
                 .map_err(err_to_others_err!(
                     e,
                     "Receive packet from recver timeout: "
-                ))?;
-        }
+                ))?
+        };
 
         let buf = result?;
         let mut s = CodedInputStream::from_bytes(&buf);
