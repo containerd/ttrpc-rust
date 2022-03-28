@@ -54,7 +54,7 @@ impl Client {
         let notify2 = notify.clone();
 
         // Request sender
-        tokio::spawn(async move {
+        let request_sender = tokio::spawn(async move {
             let mut stream_id: u32 = 1;
 
             while let Some((body, resp_tx)) = rx.recv().await {
@@ -93,7 +93,6 @@ impl Client {
         // Response receiver
         tokio::spawn(async move {
             loop {
-                let req_map = req_map.clone();
                 tokio::select! {
                     _ = notify2.notified() => {
                         break;
@@ -101,6 +100,7 @@ impl Client {
                     res = receive(&mut reader) => {
                         match res {
                             Ok((header, body)) => {
+                                let req_map = req_map.clone();
                                 tokio::spawn(async move {
                                     let resp_tx2;
                                     {
@@ -135,7 +135,23 @@ impl Client {
                                 });
                             }
                             Err(e) => {
-                                trace!("error {:?}", e);
+                                debug!("Connection closed by the ttRPC server: {}", e);
+
+                                // Abort the request sender task to prevent incoming RPC requests
+                                // from being processed.
+                                request_sender.abort();
+                                let _ = request_sender.await;
+
+                                // Take all items out of `req_map`.
+                                let mut map = std::mem::take(&mut *req_map.lock().unwrap());
+                                // Terminate outstanding RPC requests with the error.
+                                for (_stream_id, resp_tx) in map.drain() {
+                                    if let Err(_e) = resp_tx.send(Err(e.clone())).await {
+                                        warn!("Failed to terminate pending RPC: \
+                                               the request has returned");
+                                    }
+                                }
+
                                 break;
                             }
                         }
