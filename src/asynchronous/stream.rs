@@ -3,8 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use byteorder::{BigEndian, ByteOrder};
-
 use crate::common::{MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX, MESSAGE_TYPE_RESPONSE};
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
 use crate::proto::{Code, Response, Status};
@@ -38,15 +36,7 @@ where
         ));
     }
 
-    let mut mh = MessageHeader::default();
-    let mut covbuf: &[u8] = &buf[..4];
-    mh.length = byteorder::ReadBytesExt::read_u32::<BigEndian>(&mut covbuf)
-        .map_err(err_to_rpc_err!(Code::INVALID_ARGUMENT, e, ""))?;
-    let mut covbuf: &[u8] = &buf[4..8];
-    mh.stream_id = byteorder::ReadBytesExt::read_u32::<BigEndian>(&mut covbuf)
-        .map_err(err_to_rpc_err!(Code::INVALID_ARGUMENT, e, ""))?;
-    mh.type_ = buf[8];
-    mh.flags = buf[9];
+    let mh = MessageHeader::from(&buf);
 
     Ok(mh)
 }
@@ -82,16 +72,7 @@ where
 }
 
 fn header_to_buf(mh: MessageHeader) -> Vec<u8> {
-    let mut buf = vec![0u8; MESSAGE_HEADER_LENGTH];
-
-    let covbuf: &mut [u8] = &mut buf[..4];
-    BigEndian::write_u32(covbuf, mh.length);
-    let covbuf: &mut [u8] = &mut buf[4..8];
-    BigEndian::write_u32(covbuf, mh.stream_id);
-    buf[8] = mh.type_;
-    buf[9] = mh.flags;
-
-    buf
+    mh.into()
 }
 
 pub(crate) fn to_req_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
