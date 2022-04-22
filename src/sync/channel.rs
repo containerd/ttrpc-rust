@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use nix::sys::socket::*;
 use std::os::unix::io::RawFd;
 
@@ -96,19 +95,7 @@ fn read_message_header(fd: RawFd) -> Result<MessageHeader> {
         ));
     }
 
-    let mut mh = MessageHeader::default();
-    let mut covbuf: &[u8] = &buf[..4];
-    mh.length =
-        covbuf
-            .read_u32::<BigEndian>()
-            .map_err(err_to_rpc_err!(Code::INVALID_ARGUMENT, e, ""))?;
-    let mut covbuf: &[u8] = &buf[4..8];
-    mh.stream_id =
-        covbuf
-            .read_u32::<BigEndian>()
-            .map_err(err_to_rpc_err!(Code::INVALID_ARGUMENT, e, ""))?;
-    mh.type_ = buf[8];
-    mh.flags = buf[9];
+    let mh = MessageHeader::from(&buf);
 
     Ok(mh)
 }
@@ -141,14 +128,7 @@ pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
 }
 
 fn write_message_header(fd: RawFd, mh: MessageHeader) -> Result<()> {
-    let mut buf = [0u8; MESSAGE_HEADER_LENGTH];
-
-    let covbuf: &mut [u8] = &mut buf[..4];
-    BigEndian::write_u32(covbuf, mh.length);
-    let covbuf: &mut [u8] = &mut buf[4..8];
-    BigEndian::write_u32(covbuf, mh.stream_id);
-    buf[8] = mh.type_;
-    buf[9] = mh.flags;
+    let buf: Vec<u8> = mh.into();
 
     let size = write_count(fd, &buf, MESSAGE_HEADER_LENGTH)?;
     if size != MESSAGE_HEADER_LENGTH {
