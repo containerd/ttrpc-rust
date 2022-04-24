@@ -25,11 +25,12 @@ use std::{io, thread};
 
 #[cfg(target_os = "macos")]
 use crate::common::set_fd_close_exec;
-use crate::common::{client_connect, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE, SOCK_CLOEXEC};
+use crate::common::{client_connect, SOCK_CLOEXEC};
 use crate::error::{Error, Result};
-use crate::proto::{Code, Request, Response};
+use crate::proto::{
+    Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
+};
 use crate::sync::channel::{read_message, write_message};
-use crate::MessageHeader;
 use std::time::Duration;
 
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;

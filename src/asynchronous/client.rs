@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
 
-use crate::common::{client_connect, MESSAGE_TYPE_RESPONSE};
+use crate::common::client_connect;
 use crate::error::{Error, Result};
-use crate::proto::{Code, Request, Response};
+use crate::proto::{Code, Request, Response, MESSAGE_TYPE_RESPONSE};
 
 use crate::asynchronous::stream::{receive, to_req_buf};
 use crate::r#async::utils;
@@ -163,6 +163,7 @@ impl Client {
         Client { req_tx }
     }
 
+    /// Requsts a unary request and returns with response.
     pub async fn request(&self, req: Request) -> Result<Response> {
         let mut buf = Vec::with_capacity(req.compute_size() as usize);
         {

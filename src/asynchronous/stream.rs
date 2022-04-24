@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::common::{MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX, MESSAGE_TYPE_RESPONSE};
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
-use crate::proto::{Code, Response, Status};
+use crate::proto::{
+    Code, Response, Status, MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX, MESSAGE_TYPE_RESPONSE,
+};
 use crate::r#async::utils;
 use crate::MessageHeader;
 use protobuf::Message;

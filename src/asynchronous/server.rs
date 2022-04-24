@@ -13,12 +13,11 @@ use std::time::Duration;
 
 use crate::asynchronous::stream::{receive, respond, respond_with_status};
 use crate::asynchronous::unix_incoming::UnixIncoming;
-use crate::common::{self, Domain, MESSAGE_TYPE_REQUEST};
+use crate::common::{self, Domain};
 use crate::context;
 use crate::error::{get_status, Error, Result};
-use crate::proto::{Code, Status};
+use crate::proto::{Code, MessageHeader, Status, MESSAGE_TYPE_REQUEST};
 use crate::r#async::{MethodHandler, TtrpcContext};
-use crate::MessageHeader;
 use futures::stream::Stream;
 use futures::StreamExt as _;
 use std::marker::Unpin;

@@ -3,9 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::common::{MessageHeader, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
-use crate::proto::{Request, Response};
+use crate::proto::{MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 use protobuf::Message;
 use std::collections::HashMap;
 

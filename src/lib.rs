@@ -48,20 +48,15 @@ extern crate log;
 pub mod error;
 #[macro_use]
 mod common;
-#[allow(soft_unstable, clippy::type_complexity, clippy::too_many_arguments)]
-mod compiled {
-    include!(concat!(env!("OUT_DIR"), "/mod.rs"));
-}
-pub use compiled::ttrpc as proto;
 
 pub mod context;
 
+pub mod proto;
 #[doc(inline)]
-pub use crate::common::MessageHeader;
+pub use self::proto::{Code, MessageHeader, Request, Response, Status};
+
 #[doc(inline)]
 pub use crate::error::{get_status, Error, Result};
-#[doc(inline)]
-pub use proto::{Code, Request, Response, Status};
 
 cfg_sync! {
     pub mod sync;
