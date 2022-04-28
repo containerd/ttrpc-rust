@@ -5,7 +5,7 @@
 
 use crate::error::{get_status, Result};
 use crate::proto::{
-    Code, MessageHeader, Request, Status, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
+    Code, MessageHeader, Request, Status, MESSAGE_TYPE_RESPONSE,
 };
 use async_trait::async_trait;
 use protobuf::{CodedInputStream, Message};
@@ -105,15 +105,6 @@ pub(crate) fn get_response_header_from_body(stream_id: u32, body: &[u8]) -> Mess
         length: body.len() as u32,
         stream_id,
         type_: MESSAGE_TYPE_RESPONSE,
-        flags: 0,
-    }
-}
-
-pub(crate) fn get_request_header_from_body(stream_id: u32, body: &[u8]) -> MessageHeader {
-    MessageHeader {
-        length: body.len() as u32,
-        stream_id,
-        type_: MESSAGE_TYPE_REQUEST,
         flags: 0,
     }
 }

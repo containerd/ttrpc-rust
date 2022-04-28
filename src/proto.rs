@@ -11,6 +11,10 @@ mod compiled {
 pub use compiled::ttrpc::*;
 
 use byteorder::{BigEndian, ByteOrder};
+use protobuf::{CodedInputStream, CodedOutputStream};
+
+#[cfg(feature = "async")]
+use crate::error::{get_rpc_status, Error, Result as TtResult};
 
 pub const MESSAGE_HEADER_LENGTH: usize = 10;
 pub const MESSAGE_LENGTH_MAX: usize = 4 << 20;
@@ -19,7 +23,7 @@ pub const MESSAGE_TYPE_REQUEST: u8 = 0x1;
 pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
 
 /// Message header of ttrpc.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct MessageHeader {
     pub length: u32,
     pub stream_id: u32,
@@ -64,7 +68,7 @@ impl MessageHeader {
     }
 
     /// Creates a response MessageHeader from stream_id and len.
-    /// Use the default message type MESSAGE_TYPE_REQUEST, and default flags 0.
+    /// Use the default message type MESSAGE_TYPE_RESPONSE, and default flags 0.
     pub fn new_response(stream_id: u32, len: u32) -> Self {
         Self {
             length: len,
@@ -72,6 +76,11 @@ impl MessageHeader {
             type_: MESSAGE_TYPE_RESPONSE,
             flags: 0,
         }
+    }
+
+    /// Set the stream_id of message using the given value.
+    pub fn set_stream_id(&mut self, stream_id: u32) {
+        self.stream_id = stream_id;
     }
 
     /// Set the flags of message using the given flags.
@@ -97,26 +106,207 @@ impl MessageHeader {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[cfg(feature = "async")]
+impl MessageHeader {
+    /// Encodes a MessageHeader to writer.
+    pub async fn write_to(
+        &self,
+        mut writer: impl tokio::io::AsyncWriteExt + Unpin,
+    ) -> std::io::Result<()> {
+        writer.write_u32(self.length).await?;
+        writer.write_u32(self.stream_id).await?;
+        writer.write_u8(self.type_).await?;
+        writer.write_u8(self.flags).await?;
+        writer.flush().await
+    }
 
-    #[test]
-    fn message_header() {
-        let buf = vec![
-            0x10, 0x0, 0x0, 0x0, // length
-            0x0, 0x0, 0x0, 0x03, // stream_id
-            0x2,  // type_
-            0xef, // flags
-        ];
-        let mh = MessageHeader::from(&buf);
-        assert_eq!(mh.length, 0x1000_0000);
-        assert_eq!(mh.stream_id, 0x3);
-        assert_eq!(mh.type_, MESSAGE_TYPE_RESPONSE);
-        assert_eq!(mh.flags, 0xef);
+    /// Decodes a MessageHeader from reader.
+    pub async fn read_from(
+        mut reader: impl tokio::io::AsyncReadExt + Unpin,
+    ) -> std::io::Result<MessageHeader> {
+        let mut content = vec![0; MESSAGE_HEADER_LENGTH];
+        reader.read_exact(&mut content).await?;
+        Ok(MessageHeader::from(&content))
+    }
+}
 
-        let mut buf2 = vec![0; MESSAGE_HEADER_LENGTH];
-        mh.into_buf(&mut buf2);
-        assert_eq!(&buf, &buf2);
+/// Generic message of ttrpc.
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct GenMessage {
+    pub header: MessageHeader,
+    pub payload: Vec<u8>,
+}
+
+#[cfg(feature = "async")]
+impl GenMessage {
+    /// Encodes a MessageHeader to writer.
+    pub async fn write_to(
+        &self,
+        mut writer: impl tokio::io::AsyncWriteExt + Unpin,
+    ) -> TtResult<()> {
+        self.header
+            .write_to(&mut writer)
+            .await
+            .map_err(|e| Error::Socket(e.to_string()))?;
+        writer
+            .write_all(&self.payload)
+            .await
+            .map_err(|e| Error::Socket(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Decodes a MessageHeader from reader.
+    pub async fn read_from(mut reader: impl tokio::io::AsyncReadExt + Unpin) -> TtResult<Self> {
+        let header = MessageHeader::read_from(&mut reader)
+            .await
+            .map_err(|e| Error::Socket(e.to_string()))?;
+
+        if header.length > MESSAGE_LENGTH_MAX as u32 {
+            return Err(get_rpc_status(
+                Code::INVALID_ARGUMENT,
+                format!(
+                    "message length {} exceed maximum message size of {}",
+                    header.length, MESSAGE_LENGTH_MAX
+                ),
+            ));
+        }
+
+        let mut content = vec![0; header.length as usize];
+        reader
+            .read_exact(&mut content)
+            .await
+            .map_err(|e| Error::Socket(e.to_string()))?;
+
+        Ok(Self {
+            header,
+            payload: content,
+        })
+    }
+}
+
+/// TTRPC codec, only protobuf is supported.
+pub trait Codec {
+    type E;
+
+    fn size(&self) -> u32;
+    fn encode(&self) -> Result<Vec<u8>, Self::E>;
+    fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E>
+    where
+        Self: Sized;
+}
+
+impl<M: protobuf::Message> Codec for M {
+    type E = protobuf::error::ProtobufError;
+
+    fn size(&self) -> u32 {
+        self.compute_size()
+    }
+
+    fn encode(&self) -> Result<Vec<u8>, Self::E> {
+        let mut buf = vec![0; self.compute_size() as usize];
+        let mut s = CodedOutputStream::bytes(&mut buf);
+        self.write_to(&mut s)?;
+        s.flush()?;
+        Ok(buf)
+    }
+
+    fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E> {
+        let mut s = CodedInputStream::from_bytes(buf.as_ref());
+        M::parse_from(&mut s)
+    }
+}
+
+/// Message of ttrpc.
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct Message<C> {
+    pub header: MessageHeader,
+    pub payload: C,
+}
+
+impl<C> std::convert::TryFrom<GenMessage> for Message<C>
+where
+    C: Codec,
+{
+    type Error = C::E;
+    fn try_from(gen: GenMessage) -> Result<Self, Self::Error> {
+        Ok(Self {
+            header: gen.header,
+            payload: C::decode(&gen.payload)?,
+        })
+    }
+}
+
+impl<C> std::convert::TryFrom<Message<C>> for GenMessage
+where
+    C: Codec,
+{
+    type Error = C::E;
+    fn try_from(msg: Message<C>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            header: msg.header,
+            payload: msg.payload.encode()?,
+        })
+    }
+}
+
+impl<C: Codec> Message<C> {
+    pub fn new_request(stream_id: u32, message: C) -> Self {
+        Self {
+            header: MessageHeader::new_request(stream_id, message.size()),
+            payload: message,
+        }
+    }
+}
+
+#[cfg(feature = "async")]
+impl<C> Message<C>
+where
+    C: Codec,
+    C::E: std::fmt::Display,
+{
+    /// Encodes a MessageHeader to writer.
+    pub async fn write_to(
+        &self,
+        mut writer: impl tokio::io::AsyncWriteExt + Unpin,
+    ) -> TtResult<()> {
+        self.header
+            .write_to(&mut writer)
+            .await
+            .map_err(|e| Error::Socket(e.to_string()))?;
+        let content = self
+            .payload
+            .encode()
+            .map_err(err_to_others_err!(e, "Encode payload failed."))?;
+        writer
+            .write_all(&content)
+            .await
+            .map_err(|e| Error::Socket(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Decodes a MessageHeader from reader.
+    pub async fn read_from(mut reader: impl tokio::io::AsyncReadExt + Unpin) -> TtResult<Self> {
+        let header = MessageHeader::read_from(&mut reader)
+            .await
+            .map_err(|e| Error::Socket(e.to_string()))?;
+
+        if header.length > MESSAGE_LENGTH_MAX as u32 {
+            return Err(get_rpc_status(
+                Code::INVALID_ARGUMENT,
+                format!(
+                    "message length {} exceed maximum message size of {}",
+                    header.length, MESSAGE_LENGTH_MAX
+                ),
+            ));
+        }
+
+        let mut content = vec![0; header.length as usize];
+        reader
+            .read_exact(&mut content)
+            .await
+            .map_err(|e| Error::Socket(e.to_string()))?;
+        let payload =
+            C::decode(content).map_err(err_to_others_err!(e, "Decode payload failed."))?;
+        Ok(Self { header, payload })
     }
 }

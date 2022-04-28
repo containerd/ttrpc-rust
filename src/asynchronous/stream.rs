@@ -76,14 +76,6 @@ fn header_to_buf(mh: MessageHeader) -> Vec<u8> {
     mh.into()
 }
 
-pub(crate) fn to_req_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
-    let header = utils::get_request_header_from_body(stream_id, &body);
-    let mut buf = header_to_buf(header);
-    buf.append(&mut body);
-
-    buf
-}
-
 pub(crate) fn to_res_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
     let header = utils::get_response_header_from_body(stream_id, &body);
     let mut buf = header_to_buf(header);

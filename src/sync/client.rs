@@ -16,7 +16,6 @@
 
 use nix::sys::socket::*;
 use nix::unistd::close;
-use protobuf::{CodedInputStream, CodedOutputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::mpsc;
@@ -27,9 +26,7 @@ use std::{io, thread};
 use crate::common::set_fd_close_exec;
 use crate::common::{client_connect, SOCK_CLOEXEC};
 use crate::error::{Error, Result};
-use crate::proto::{
-    Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
-};
+use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 use crate::sync::channel::{read_message, write_message};
 use std::time::Duration;
 
@@ -81,12 +78,8 @@ impl Client {
                     let mut map = recver_map.lock().unwrap();
                     map.insert(current_stream_id, recver_tx.clone());
                 }
-                let mh = MessageHeader {
-                    length: buf.len() as u32,
-                    stream_id: current_stream_id,
-                    type_: MESSAGE_TYPE_REQUEST,
-                    flags: 0,
-                };
+                let mut mh = MessageHeader::new_request(0, buf.len() as u32);
+                mh.set_stream_id(current_stream_id);
                 if let Err(e) = write_message(fd, mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
@@ -215,10 +208,7 @@ impl Client {
         }
     }
     pub fn request(&self, req: Request) -> Result<Response> {
-        let mut buf = Vec::with_capacity(req.compute_size() as usize);
-        let mut s = CodedOutputStream::vec(&mut buf);
-        req.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-        s.flush().map_err(err_to_others_err!(e, ""))?;
+        let buf = req.encode().map_err(err_to_others_err!(e, ""))?;
 
         let (tx, rx) = mpsc::sync_channel(0);
 
@@ -238,10 +228,8 @@ impl Client {
         };
 
         let buf = result?;
-        let mut s = CodedInputStream::from_bytes(&buf);
-        let mut res = Response::new();
-        res.merge_from(&mut s)
-            .map_err(err_to_others_err!(e, "Unpack response error "))?;
+        let res =
+            Response::decode(&buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
 
         let status = res.get_status();
         if status.get_code() != Code::OK {

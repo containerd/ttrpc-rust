@@ -4,26 +4,25 @@
 //
 
 use nix::unistd::close;
-use protobuf::{CodedInputStream, CodedOutputStream, Message};
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
 
 use crate::common::client_connect;
 use crate::error::{Error, Result};
-use crate::proto::{Code, Request, Response, MESSAGE_TYPE_RESPONSE};
+use crate::proto::{Code, Codec, GenMessage, Message, Request, Response, MESSAGE_TYPE_RESPONSE};
 
-use crate::asynchronous::stream::{receive, to_req_buf};
 use crate::r#async::utils;
 use tokio::{
     self,
-    io::{split, AsyncWriteExt},
+    io::split,
     sync::mpsc::{channel, Receiver, Sender},
     sync::Notify,
 };
 
-type RequestSender = Sender<(Vec<u8>, Sender<Result<Vec<u8>>>)>;
-type RequestReceiver = Receiver<(Vec<u8>, Sender<Result<Vec<u8>>>)>;
+type RequestSender = Sender<(GenMessage, Sender<Result<Vec<u8>>>)>;
+type RequestReceiver = Receiver<(GenMessage, Sender<Result<Vec<u8>>>)>;
 
 type ResponseSender = Sender<Result<Vec<u8>>>;
 type ResponseReceiver = Receiver<Result<Vec<u8>>>;
@@ -57,8 +56,9 @@ impl Client {
         let request_sender = tokio::spawn(async move {
             let mut stream_id: u32 = 1;
 
-            while let Some((body, resp_tx)) = rx.recv().await {
+            while let Some((mut msg, resp_tx)) = rx.recv().await {
                 let current_stream_id = stream_id;
+                msg.header.set_stream_id(current_stream_id);
                 stream_id += 2;
 
                 {
@@ -66,8 +66,7 @@ impl Client {
                     map.insert(current_stream_id, resp_tx.clone());
                 }
 
-                let buf = to_req_buf(current_stream_id, body);
-                if let Err(e) = writer.write_all(&buf).await {
+                if let Err(e) = msg.write_to(&mut writer).await {
                     error!("write_message got error: {:?}", e);
 
                     {
@@ -97,41 +96,42 @@ impl Client {
                     _ = notify2.notified() => {
                         break;
                     }
-                    res = receive(&mut reader) => {
+                    res = GenMessage::read_from(&mut reader) => {
                         match res {
-                            Ok((header, body)) => {
+                            Ok(msg) => {
+                                trace!("Got Message body {:?}", msg.payload);
                                 let req_map = req_map.clone();
                                 tokio::spawn(async move {
                                     let resp_tx2;
                                     {
                                         let mut map = req_map.lock().unwrap();
-                                        let resp_tx = match map.get(&header.stream_id) {
+                                        let resp_tx = match map.get(&msg.header.stream_id) {
                                             Some(tx) => tx,
                                             None => {
                                                 debug!(
-                                                    "Receiver got unknown packet {:?} {:?}",
-                                                    header, body
+                                                    "Receiver got unknown packet {:?}",
+                                                    msg
                                                 );
                                                 return;
                                             }
                                         };
 
                                         resp_tx2 = resp_tx.clone();
-                                        map.remove(&header.stream_id); // Forget the result, just remove.
+                                        map.remove(&msg.header.stream_id); // Forget the result, just remove.
                                     }
 
-                                    if header.type_ != MESSAGE_TYPE_RESPONSE {
+                                    if msg.header.type_ != MESSAGE_TYPE_RESPONSE {
                                         resp_tx2
                                             .send(Err(Error::Others(format!(
-                                                "Recver got malformed packet {:?} {:?}",
-                                                header, body
+                                                "Recver got malformed packet {:?}",
+                                                msg
                                             ))))
                                             .await
                                             .unwrap_or_else(|_e| error!("The request has returned"));
                                         return;
                                     }
 
-                                    resp_tx2.send(Ok(body)).await.unwrap_or_else(|_e| error!("The request has returned"));
+                                    resp_tx2.send(Ok(msg.payload)).await.unwrap_or_else(|_e| error!("The request has returned"));
                                 });
                             }
                             Err(e) => {
@@ -165,26 +165,24 @@ impl Client {
 
     /// Requsts a unary request and returns with response.
     pub async fn request(&self, req: Request) -> Result<Response> {
-        let mut buf = Vec::with_capacity(req.compute_size() as usize);
-        {
-            let mut s = CodedOutputStream::vec(&mut buf);
-            req.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-            s.flush().map_err(err_to_others_err!(e, ""))?;
-        }
+        let timeout_nano = req.timeout_nano;
+        let msg: GenMessage = Message::new_request(0, req)
+            .try_into()
+            .map_err(|e: protobuf::error::ProtobufError| Error::Others(e.to_string()))?;
 
         let (tx, mut rx): (ResponseSender, ResponseReceiver) = channel(100);
         self.req_tx
-            .send((buf, tx))
+            .send((msg, tx))
             .await
             .map_err(|e| Error::Others(format!("Send packet to sender error {:?}", e)))?;
 
-        let result = if req.timeout_nano == 0 {
+        let result = if timeout_nano == 0 {
             rx.recv()
                 .await
                 .ok_or_else(|| Error::Others("Receive packet from receiver error".to_string()))?
         } else {
             tokio::time::timeout(
-                std::time::Duration::from_nanos(req.timeout_nano as u64),
+                std::time::Duration::from_nanos(timeout_nano as u64),
                 rx.recv(),
             )
             .await
@@ -193,10 +191,8 @@ impl Client {
         };
 
         let buf = result?;
-        let mut s = CodedInputStream::from_bytes(&buf);
-        let mut res = Response::new();
-        res.merge_from(&mut s)
-            .map_err(err_to_others_err!(e, "Unpack response error "))?;
+        let res =
+            Response::decode(&buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
 
         let status = res.get_status();
         if status.get_code() != Code::OK {
