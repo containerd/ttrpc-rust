@@ -38,9 +38,9 @@ type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 /// A ttrpc Client (sync).
 #[derive(Clone)]
 pub struct Client {
-    fd: RawFd,
+    _fd: RawFd,
     sender_tx: Sender,
-    client_close: Arc<ClientClose>,
+    _client_close: Arc<ClientClose>,
 }
 
 impl Client {
@@ -208,9 +208,9 @@ impl Client {
         });
 
         Client {
-            fd,
+            _fd: fd,
             sender_tx,
-            client_close,
+            _client_close: client_close,
         }
     }
     pub fn request(&self, req: Request) -> Result<Response> {
@@ -225,19 +225,16 @@ impl Client {
             .send((buf, tx))
             .map_err(err_to_others_err!(e, "Send packet to sender error "))?;
 
-        let result: Result<Vec<u8>>;
-        if req.timeout_nano == 0 {
-            result = rx
-                .recv()
-                .map_err(err_to_others_err!(e, "Receive packet from recver error: "))?;
+        let result = if req.timeout_nano == 0 {
+            rx.recv()
+                .map_err(err_to_others_err!(e, "Receive packet from recver error: "))?
         } else {
-            result = rx
-                .recv_timeout(Duration::from_nanos(req.timeout_nano as u64))
+            rx.recv_timeout(Duration::from_nanos(req.timeout_nano as u64))
                 .map_err(err_to_others_err!(
                     e,
                     "Receive packet from recver timeout: "
-                ))?;
-        }
+                ))?
+        };
 
         let buf = result?;
         let mut s = CodedInputStream::from_bytes(&buf);

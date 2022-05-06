@@ -143,10 +143,10 @@ pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
 fn write_message_header(fd: RawFd, mh: MessageHeader) -> Result<()> {
     let mut buf = [0u8; MESSAGE_HEADER_LENGTH];
 
-    let mut covbuf: &mut [u8] = &mut buf[..4];
-    BigEndian::write_u32(&mut covbuf, mh.length);
-    let mut covbuf: &mut [u8] = &mut buf[4..8];
-    BigEndian::write_u32(&mut covbuf, mh.stream_id);
+    let covbuf: &mut [u8] = &mut buf[..4];
+    BigEndian::write_u32(covbuf, mh.length);
+    let covbuf: &mut [u8] = &mut buf[4..8];
+    BigEndian::write_u32(covbuf, mh.stream_id);
     buf[8] = mh.type_;
     buf[9] = mh.flags;
 
