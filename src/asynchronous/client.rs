@@ -177,10 +177,19 @@ impl Client {
             .await
             .map_err(|e| Error::Others(format!("Send packet to sender error {:?}", e)))?;
 
-        let result = rx
-            .recv()
+        let result = if req.timeout_nano == 0 {
+            rx.recv()
+                .await
+                .ok_or_else(|| Error::Others("Receive packet from receiver error".to_string()))?
+        } else {
+            tokio::time::timeout(
+                std::time::Duration::from_nanos(req.timeout_nano as u64),
+                rx.recv(),
+            )
             .await
-            .ok_or_else(|| Error::Others("Recive packet from recver error".to_string()))?;
+            .map_err(|e| Error::Others(format!("Receive packet timeout {:?}", e)))?
+            .ok_or_else(|| Error::Others("Receive packet from receiver error".to_string()))?
+        };
 
         let buf = result?;
         let mut s = CodedInputStream::from_bytes(&buf);
