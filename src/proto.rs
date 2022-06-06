@@ -310,3 +310,170 @@ where
         Ok(Self { header, payload })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::convert::{TryFrom, TryInto};
+
+    use super::*;
+
+    static MESSAGE_HEADER: [u8; MESSAGE_HEADER_LENGTH] = [
+        0x10, 0x0, 0x0, 0x0, // length
+        0x0, 0x0, 0x0, 0x03, // stream_id
+        0x2,  // type_
+        0xef, // flags
+    ];
+
+    #[test]
+    fn message_header() {
+        let mh = MessageHeader::from(&MESSAGE_HEADER);
+        assert_eq!(mh.length, 0x1000_0000);
+        assert_eq!(mh.stream_id, 0x3);
+        assert_eq!(mh.type_, MESSAGE_TYPE_RESPONSE);
+        assert_eq!(mh.flags, 0xef);
+
+        let mut buf2 = vec![0; MESSAGE_HEADER_LENGTH];
+        mh.into_buf(&mut buf2);
+        assert_eq!(&MESSAGE_HEADER, &buf2[..]);
+
+        let mh = MessageHeader::from(&PROTOBUF_MESSAGE_HEADER);
+        assert_eq!(mh.length as usize, TEST_PAYLOAD_LEN);
+    }
+
+    #[rustfmt::skip]
+    static PROTOBUF_MESSAGE_HEADER: [u8; MESSAGE_HEADER_LENGTH] = [
+        0x00, 0x0, 0x0, TEST_PAYLOAD_LEN as u8, // length
+        0x0, 0x12, 0x34, 0x56, // stream_id
+        0x1,  // type_
+        0xef, // flags
+    ];
+
+    const TEST_PAYLOAD_LEN: usize = 67;
+    static PROTOBUF_REQUEST: [u8; TEST_PAYLOAD_LEN] = [
+        10, 17, 103, 114, 112, 99, 46, 84, 101, 115, 116, 83, 101, 114, 118, 105, 99, 101, 115, 18,
+        4, 84, 101, 115, 116, 26, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9, 32, 128, 218, 196, 9, 42, 24, 10,
+        9, 116, 101, 115, 116, 95, 107, 101, 121, 49, 18, 11, 116, 101, 115, 116, 95, 118, 97, 108,
+        117, 101, 49,
+    ];
+
+    fn new_protobuf_request() -> Request {
+        let mut creq = Request::new();
+        creq.set_service("grpc.TestServices".to_string());
+        creq.set_method("Test".to_string());
+        creq.set_timeout_nano(20 * 1000 * 1000);
+        let mut meta: protobuf::RepeatedField<KeyValue> = protobuf::RepeatedField::default();
+        meta.push(KeyValue {
+            key: "test_key1".to_string(),
+            value: "test_value1".to_string(),
+            ..Default::default()
+        });
+        creq.set_metadata(meta);
+        creq.payload = vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9];
+        creq
+    }
+
+    #[test]
+    fn protobuf_codec() {
+        let creq = new_protobuf_request();
+        let buf = creq.encode().unwrap();
+        assert_eq!(&buf, &PROTOBUF_REQUEST);
+        let dreq = Request::decode(&buf).unwrap();
+        assert_eq!(creq, dreq);
+        let dreq2 = Request::decode(&PROTOBUF_REQUEST).unwrap();
+        assert_eq!(creq, dreq2);
+    }
+
+    #[test]
+    fn gen_message_to_message() {
+        let req = new_protobuf_request();
+        let msg = Message::new_request(3, req);
+        let msg_clone = msg.clone();
+        let gen: GenMessage = msg.try_into().unwrap();
+        let dmsg = Message::<Request>::try_from(gen).unwrap();
+        assert_eq!(msg_clone, dmsg);
+    }
+
+    #[cfg(feature = "async")]
+    #[tokio::test]
+    async fn async_message_header() {
+        use std::io::Cursor;
+        let mut buf = vec![];
+        let mut io = Cursor::new(&mut buf);
+        let mh = MessageHeader::from(&MESSAGE_HEADER);
+        mh.write_to(&mut io).await.unwrap();
+        assert_eq!(buf, &MESSAGE_HEADER);
+
+        let dmh = MessageHeader::read_from(&buf[..]).await.unwrap();
+        assert_eq!(mh, dmh);
+    }
+
+    #[cfg(feature = "async")]
+    #[tokio::test]
+    async fn async_gen_message() {
+        let mut buf = Vec::from(MESSAGE_HEADER);
+        buf.extend_from_slice(&PROTOBUF_REQUEST);
+        let res = GenMessage::read_from(&*buf).await;
+        // exceed maximum message size
+        assert!(matches!(res, Err(Error::RpcStatus(_))));
+
+        let mut buf = Vec::from(PROTOBUF_MESSAGE_HEADER);
+        buf.extend_from_slice(&PROTOBUF_REQUEST);
+        buf.extend_from_slice(&[0x0, 0x0]);
+        let gen = GenMessage::read_from(&*buf).await.unwrap();
+        assert_eq!(gen.header.length as usize, TEST_PAYLOAD_LEN);
+        assert_eq!(gen.header.length, gen.payload.len() as u32);
+        assert_eq!(gen.header.stream_id, 0x123456);
+        assert_eq!(gen.header.type_, MESSAGE_TYPE_REQUEST);
+        assert_eq!(gen.header.flags, 0xef);
+        assert_eq!(&gen.payload, &PROTOBUF_REQUEST);
+        assert_eq!(
+            &buf[MESSAGE_HEADER_LENGTH + TEST_PAYLOAD_LEN..],
+            &[0x0, 0x0]
+        );
+
+        let mut dbuf = vec![];
+        let mut io = std::io::Cursor::new(&mut dbuf);
+        gen.write_to(&mut io).await.unwrap();
+        assert_eq!(&*dbuf, &buf[..MESSAGE_HEADER_LENGTH + TEST_PAYLOAD_LEN]);
+    }
+
+    #[cfg(feature = "async")]
+    #[tokio::test]
+    async fn async_message() {
+        let mut buf = Vec::from(MESSAGE_HEADER);
+        buf.extend_from_slice(&PROTOBUF_REQUEST);
+        let res = Message::<Request>::read_from(&*buf).await;
+        // exceed maximum message size
+        assert!(matches!(res, Err(Error::RpcStatus(_))));
+
+        let mut buf = Vec::from(PROTOBUF_MESSAGE_HEADER);
+        buf.extend_from_slice(&PROTOBUF_REQUEST);
+        buf.extend_from_slice(&[0x0, 0x0]);
+        let msg = Message::<Request>::read_from(&*buf).await.unwrap();
+        assert_eq!(msg.header.length, 67);
+        assert_eq!(msg.header.length, msg.payload.size() as u32);
+        assert_eq!(msg.header.stream_id, 0x123456);
+        assert_eq!(msg.header.type_, MESSAGE_TYPE_REQUEST);
+        assert_eq!(msg.header.flags, 0xef);
+        assert_eq!(&msg.payload.service, "grpc.TestServices");
+        assert_eq!(&msg.payload.method, "Test");
+        assert_eq!(
+            msg.payload.payload,
+            vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9]
+        );
+        assert_eq!(msg.payload.timeout_nano, 20 * 1000 * 1000);
+        assert_eq!(msg.payload.metadata.len(), 1);
+        assert_eq!(&msg.payload.metadata[0].key, "test_key1");
+        assert_eq!(&msg.payload.metadata[0].value, "test_value1");
+
+        let req = new_protobuf_request();
+        let mut dmsg = Message::new_request(u32::MAX, req);
+        dmsg.header.set_stream_id(0x123456);
+        dmsg.header.set_flags(0xe0);
+        dmsg.header.add_flags(0x0f);
+        let mut dbuf = vec![];
+        let mut io = std::io::Cursor::new(&mut dbuf);
+        dmsg.write_to(&mut io).await.unwrap();
+        assert_eq!(&dbuf, &buf[..MESSAGE_HEADER_LENGTH + TEST_PAYLOAD_LEN]);
+    }
+}
