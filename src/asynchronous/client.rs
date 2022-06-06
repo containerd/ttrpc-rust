@@ -8,12 +8,15 @@ use std::convert::TryInto;
 use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
 use nix::unistd::close;
-use tokio::{self, io::split, sync::mpsc, sync::Notify};
+use tokio::{self, sync::mpsc, task};
 
 use crate::common::client_connect;
 use crate::error::{Error, Result};
 use crate::proto::{Code, Codec, GenMessage, Message, Request, Response, MESSAGE_TYPE_RESPONSE};
+use crate::r#async::connection::*;
+use crate::r#async::shutdown;
 use crate::r#async::stream::{ResultReceiver, ResultSender};
 use crate::r#async::utils;
 
@@ -36,122 +39,12 @@ impl Client {
     pub fn new(fd: RawFd) -> Client {
         let stream = utils::new_unix_stream_from_raw_fd(fd);
 
-        let (mut reader, mut writer) = split(stream);
-        let (req_tx, mut rx): (RequestSender, RequestReceiver) = mpsc::channel(100);
+        let (req_tx, rx): (RequestSender, RequestReceiver) = mpsc::channel(100);
 
-        let req_map = Arc::new(Mutex::new(HashMap::new()));
-        let req_map2 = req_map.clone();
+        let delegate = ClientBuilder { rx: Some(rx) };
 
-        let notify = Arc::new(Notify::new());
-        let notify2 = notify.clone();
-
-        // Request sender
-        let request_sender = tokio::spawn(async move {
-            let mut stream_id: u32 = 1;
-
-            while let Some((mut msg, resp_tx)) = rx.recv().await {
-                let current_stream_id = stream_id;
-                msg.header.set_stream_id(current_stream_id);
-                stream_id += 2;
-
-                {
-                    let mut map = req_map2.lock().unwrap();
-                    map.insert(current_stream_id, resp_tx.clone());
-                }
-
-                if let Err(e) = msg.write_to(&mut writer).await {
-                    error!("write_message got error: {:?}", e);
-
-                    {
-                        let mut map = req_map2.lock().unwrap();
-                        map.remove(&current_stream_id);
-                    }
-
-                    let e = Error::Socket(format!("{:?}", e));
-                    resp_tx
-                        .send(Err(e))
-                        .await
-                        .unwrap_or_else(|_e| error!("The request has returned"));
-
-                    break; // The stream is dead, exit the loop.
-                }
-            }
-
-            // rx.recv will abort when client.req_tx and client is dropped.
-            // notify the response-receiver to quit at this time.
-            notify.notify_one();
-        });
-
-        // Response receiver
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = notify2.notified() => {
-                        break;
-                    }
-                    res = GenMessage::read_from(&mut reader) => {
-                        match res {
-                            Ok(msg) => {
-                                trace!("Got Message body {:?}", msg.payload);
-                                let req_map = req_map.clone();
-                                tokio::spawn(async move {
-                                    let resp_tx2;
-                                    {
-                                        let mut map = req_map.lock().unwrap();
-                                        let resp_tx = match map.get(&msg.header.stream_id) {
-                                            Some(tx) => tx,
-                                            None => {
-                                                debug!(
-                                                    "Receiver got unknown packet {:?}",
-                                                    msg
-                                                );
-                                                return;
-                                            }
-                                        };
-
-                                        resp_tx2 = resp_tx.clone();
-                                        map.remove(&msg.header.stream_id); // Forget the result, just remove.
-                                    }
-
-                                    if msg.header.type_ != MESSAGE_TYPE_RESPONSE {
-                                        resp_tx2
-                                            .send(Err(Error::Others(format!(
-                                                "Recver got malformed packet {:?}",
-                                                msg
-                                            ))))
-                                            .await
-                                            .unwrap_or_else(|_e| error!("The request has returned"));
-                                        return;
-                                    }
-
-                                    resp_tx2.send(Ok(msg)).await.unwrap_or_else(|_e| error!("The request has returned"));
-                                });
-                            }
-                            Err(e) => {
-                                debug!("Connection closed by the ttRPC server: {}", e);
-
-                                // Abort the request sender task to prevent incoming RPC requests
-                                // from being processed.
-                                request_sender.abort();
-                                let _ = request_sender.await;
-
-                                // Take all items out of `req_map`.
-                                let mut map = std::mem::take(&mut *req_map.lock().unwrap());
-                                // Terminate outstanding RPC requests with the error.
-                                for (_stream_id, resp_tx) in map.drain() {
-                                    if let Err(_e) = resp_tx.send(Err(e.clone())).await {
-                                        warn!("Failed to terminate pending RPC: \
-                                               the request has returned");
-                                    }
-                                }
-
-                                break;
-                            }
-                        }
-                    }
-                };
-            }
-        });
+        let conn = Connection::new(stream, delegate);
+        tokio::spawn(async move { conn.run().await });
 
         Client { req_tx }
     }
@@ -206,5 +99,142 @@ impl Drop for ClientClose {
         close(self.close_fd).unwrap();
         close(self.fd).unwrap();
         trace!("All client is droped");
+    }
+}
+
+#[derive(Debug)]
+struct ClientBuilder {
+    rx: Option<RequestReceiver>,
+}
+
+impl Builder for ClientBuilder {
+    type Reader = ClientReader;
+    type Writer = ClientWriter;
+
+    fn build(&mut self) -> (Self::Reader, Self::Writer) {
+        let (notifier, waiter) = shutdown::new();
+        let req_map = Arc::new(Mutex::new(HashMap::new()));
+        (
+            ClientReader {
+                shutdown_waiter: waiter,
+                req_map: req_map.clone(),
+            },
+            ClientWriter {
+                stream_id: 1,
+                rx: self.rx.take().unwrap(),
+                shutdown_notifier: notifier,
+                req_map,
+            },
+        )
+    }
+}
+
+struct ClientWriter {
+    stream_id: u32,
+    rx: RequestReceiver,
+    shutdown_notifier: shutdown::Notifier,
+    req_map: Arc<Mutex<HashMap<u32, ResultSender>>>,
+}
+
+#[async_trait]
+impl WriterDelegate for ClientWriter {
+    async fn recv(&mut self) -> Option<GenMessage> {
+        if let Some((mut msg, resp_tx)) = self.rx.recv().await {
+            let current_stream_id = self.stream_id;
+            msg.header.set_stream_id(current_stream_id);
+            self.stream_id += 2;
+            {
+                let mut map = self.req_map.lock().unwrap();
+                map.insert(current_stream_id, resp_tx);
+            }
+            return Some(msg);
+        } else {
+            return None;
+        }
+    }
+
+    async fn disconnect(&self, msg: &GenMessage, e: Error) {
+        let resp_tx = {
+            let mut map = self.req_map.lock().unwrap();
+            map.remove(&msg.header.stream_id)
+        };
+
+        if let Some(resp_tx) = resp_tx {
+            let e = Error::Socket(format!("{:?}", e));
+            resp_tx
+                .send(Err(e))
+                .await
+                .unwrap_or_else(|_e| error!("The request has returned"));
+        }
+    }
+
+    async fn exit(&self) {
+        self.shutdown_notifier.shutdown();
+    }
+}
+
+struct ClientReader {
+    shutdown_waiter: shutdown::Waiter,
+    req_map: Arc<Mutex<HashMap<u32, ResultSender>>>,
+}
+
+#[async_trait]
+impl ReaderDelegate for ClientReader {
+    async fn wait_shutdown(&self) {
+        self.shutdown_waiter.wait_shutdown().await
+    }
+
+    async fn disconnect(&self, e: Error, sender: &mut task::JoinHandle<()>) {
+        // Abort the request sender task to prevent incoming RPC requests
+        // from being processed.
+        sender.abort();
+        let _ = sender.await;
+
+        // Take all items out of `req_map`.
+        let mut map = std::mem::take(&mut *self.req_map.lock().unwrap());
+        // Terminate outstanding RPC requests with the error.
+        for (_stream_id, resp_tx) in map.drain() {
+            if let Err(_e) = resp_tx.send(Err(e.clone())).await {
+                warn!("Failed to terminate pending RPC: the request has returned");
+            }
+        }
+    }
+
+    async fn exit(&self) {}
+
+    async fn handle_msg(&self, msg: GenMessage) {
+        let req_map = self.req_map.clone();
+        tokio::spawn(async move {
+            let resp_tx2;
+            {
+                let mut map = req_map.lock().unwrap();
+                let resp_tx = match map.get(&msg.header.stream_id) {
+                    Some(tx) => tx,
+                    None => {
+                        debug!("Receiver got unknown packet {:?}", msg);
+                        return;
+                    }
+                };
+
+                resp_tx2 = resp_tx.clone();
+                map.remove(&msg.header.stream_id); // Forget the result, just remove.
+            }
+
+            if msg.header.type_ != MESSAGE_TYPE_RESPONSE {
+                resp_tx2
+                    .send(Err(Error::Others(format!(
+                        "Recver got malformed packet {:?}",
+                        msg
+                    ))))
+                    .await
+                    .unwrap_or_else(|_e| error!("The request has returned"));
+                return;
+            }
+
+            resp_tx2
+                .send(Ok(msg))
+                .await
+                .unwrap_or_else(|_e| error!("The request has returned"));
+        });
     }
 }

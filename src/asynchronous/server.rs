@@ -4,6 +4,7 @@
 //
 
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::marker::Unpin;
 use std::os::unix::io::RawFd;
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -12,26 +13,31 @@ use std::result::Result as StdResult;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use futures::stream::Stream;
 use futures::StreamExt as _;
 use nix::unistd;
 use tokio::{
     self,
-    io::{split, AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncWrite},
     net::UnixListener,
     select, spawn,
     sync::mpsc::{channel, Sender},
+    task,
     time::timeout,
 };
 #[cfg(target_os = "linux")]
 use tokio_vsock::VsockListener;
 
-use crate::asynchronous::stream::{respond, respond_with_status};
 use crate::asynchronous::unix_incoming::UnixIncoming;
 use crate::common::{self, Domain};
 use crate::context;
 use crate::error::{get_status, Error, Result};
-use crate::proto::{Code, GenMessage, MessageHeader, Response, Status, MESSAGE_TYPE_REQUEST};
+use crate::proto::{
+    Code, Codec, GenMessage, Message, MessageHeader, Request, Response, Status,
+    MESSAGE_TYPE_REQUEST,
+};
+use crate::r#async::connection::*;
 use crate::r#async::shutdown;
 use crate::r#async::stream::{MessageReceiver, MessageSender};
 use crate::r#async::utils;
@@ -235,151 +241,28 @@ impl Server {
     }
 }
 
-async fn spawn_connection_handler<S>(
+async fn spawn_connection_handler<C>(
     fd: RawFd,
-    stream: S,
+    conn: C,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
     shutdown_waiter: shutdown::Waiter,
 ) where
-    S: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
+    C: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
 {
+    let delegate = ServerBuilder {
+        fd,
+        methods,
+        shutdown_waiter,
+    };
+    let conn = Connection::new(conn, delegate);
     spawn(async move {
-        let (mut reader, mut writer) = split(stream);
-        let (tx, mut rx): (MessageSender, MessageReceiver) = channel(100);
-
-        let server_shutdown = shutdown_waiter.clone();
-        let (disconnect_notifier, disconnect_waiter) =
-            shutdown::with_timeout(DEFAULT_CONN_SHUTDOWN_TIMEOUT);
-
-        spawn(async move {
-            while let Some(msg) = rx.recv().await {
-                if let Err(e) = msg.write_to(&mut writer).await {
-                    error!("write_message got error: {:?}", e);
-                }
-            }
-        });
-
-        loop {
-            let tx = tx.clone();
-            let methods = methods.clone();
-            let handler_shutdown_waiter = disconnect_waiter.clone();
-
-            select! {
-                res = GenMessage::read_from(&mut reader) => {
-                    match res {
-                        Ok(message) => {
-                            spawn(async move {
-                                select! {
-                                    _ = handle_request(tx, fd, methods, message) => {}
-                                    _ = handler_shutdown_waiter.wait_shutdown() => {}
-                                }
-                            });
-                        }
-                        Err(e) => {
-                            disconnect_notifier.shutdown();
-                            trace!("error {:?}", e);
-                            break;
-                        }
-                    }
-                }
-                _ = server_shutdown.wait_shutdown() => {
-                    trace!("Receive shutdown.");
-                    break;
-                }
-            }
-        }
-        // TODO: Don't disconnect_notifier.shutdown();
-        // Wait pedding request/stream to exit.
-        disconnect_notifier
-            .wait_all_exit()
+        conn.run()
             .await
             .map_err(|e| {
-                trace!("wait handler exit error: {}", e);
+                trace!("connection run error. {}", e);
             })
             .ok();
     });
-}
-
-async fn do_handle_request(
-    fd: RawFd,
-    methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
-    header: MessageHeader,
-    body: &[u8],
-) -> StdResult<Option<Response>, Status> {
-    let req = utils::body_to_request(body)?;
-    let path = utils::get_path(&req.service, &req.method);
-    let method = methods
-        .get(&path)
-        .ok_or_else(|| get_status(Code::INVALID_ARGUMENT, format!("{} does not exist", &path)))?;
-
-    let ctx = TtrpcContext {
-        fd,
-        mh: header,
-        metadata: context::from_pb(&req.metadata),
-        timeout_nano: req.timeout_nano,
-    };
-
-    let get_unknown_status_and_log_err = |e| {
-        error!("method handle {} got error {:?}", path, &e);
-        get_status(Code::UNKNOWN, e)
-    };
-
-    if req.timeout_nano == 0 {
-        method
-            .handler(ctx, req)
-            .await
-            .map_err(get_unknown_status_and_log_err)
-            .map(Some)
-    } else {
-        timeout(
-            Duration::from_nanos(req.timeout_nano as u64),
-            method.handler(ctx, req),
-        )
-        .await
-        .map_err(|_| {
-            // Timed out
-            error!("method handle {} got error timed out", path);
-            get_status(Code::DEADLINE_EXCEEDED, "timeout")
-        })
-        .and_then(|r| {
-            // Handler finished
-            r.map_err(get_unknown_status_and_log_err)
-        })
-        .map(Some)
-    }
-}
-
-async fn handle_request(
-    tx: MessageSender,
-    fd: RawFd,
-    methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
-    message: GenMessage,
-) {
-    let GenMessage {
-        header,
-        payload: body,
-    } = message;
-    let stream_id = header.stream_id;
-
-    if header.type_ != MESSAGE_TYPE_REQUEST {
-        return;
-    }
-
-    match do_handle_request(fd, methods, header, &body).await {
-        Ok(opt_msg) => match opt_msg {
-            Some(msg) => {
-                if let Err(x) = respond(tx.clone(), stream_id, msg).await {
-                    error!("respond got error {:?}", x);
-                }
-            }
-            None => {
-                unimplemented!();
-            }
-        },
-        Err(status) => {
-            respond_with_status(tx.clone(), stream_id, status).await;
-        }
-    }
 }
 
 impl FromRawFd for Server {
@@ -391,5 +274,237 @@ impl FromRawFd for Server {
 impl AsRawFd for Server {
     fn as_raw_fd(&self) -> RawFd {
         self.listeners[0]
+    }
+}
+
+struct ServerBuilder {
+    fd: RawFd,
+    methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
+    shutdown_waiter: shutdown::Waiter,
+}
+
+impl Builder for ServerBuilder {
+    type Reader = ServerReader;
+    type Writer = ServerWriter;
+
+    fn build(&mut self) -> (Self::Reader, Self::Writer) {
+        let (tx, rx): (MessageSender, MessageReceiver) = channel(100);
+        let (disconnect_notifier, _disconnect_waiter) =
+            shutdown::with_timeout(DEFAULT_CONN_SHUTDOWN_TIMEOUT);
+
+        (
+            ServerReader {
+                fd: self.fd,
+                tx,
+                methods: self.methods.clone(),
+                server_shutdown: self.shutdown_waiter.clone(),
+                handler_shutdown: disconnect_notifier,
+            },
+            ServerWriter { rx },
+        )
+    }
+}
+
+struct ServerWriter {
+    rx: MessageReceiver,
+}
+
+#[async_trait]
+impl WriterDelegate for ServerWriter {
+    async fn recv(&mut self) -> Option<GenMessage> {
+        self.rx.recv().await
+    }
+    async fn disconnect(&self, _msg: &GenMessage, _: Error) {}
+    async fn exit(&self) {}
+}
+
+struct ServerReader {
+    fd: RawFd,
+    tx: MessageSender,
+    methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
+    server_shutdown: shutdown::Waiter,
+    handler_shutdown: shutdown::Notifier,
+}
+
+#[async_trait]
+impl ReaderDelegate for ServerReader {
+    async fn wait_shutdown(&self) {
+        self.server_shutdown.wait_shutdown().await
+    }
+
+    async fn disconnect(&self, _: Error, _: &mut task::JoinHandle<()>) {
+        self.handler_shutdown.shutdown();
+        // TODO: Don't wait for all requests to complete? when the connection is disconnected.
+    }
+
+    async fn exit(&self) {
+        // TODO: Don't self.conn_shutdown.shutdown();
+        // Wait pedding request/stream to exit.
+        self.handler_shutdown
+            .wait_all_exit()
+            .await
+            .map_err(|e| {
+                trace!("wait handler exit error: {}", e);
+            })
+            .ok();
+    }
+
+    async fn handle_msg(&self, msg: GenMessage) {
+        let handler_shutdown_waiter = self.handler_shutdown.subscribe();
+        let context = self.context();
+        spawn(async move {
+            select! {
+                _ = context.handle_msg(msg) => {}
+                _ = handler_shutdown_waiter.wait_shutdown() => {}
+            }
+        });
+    }
+}
+
+impl ServerReader {
+    fn context(&self) -> HandlerContext {
+        HandlerContext {
+            fd: self.fd,
+            tx: self.tx.clone(),
+            methods: self.methods.clone(),
+            _handler_shutdown_waiter: self.handler_shutdown.subscribe(),
+        }
+    }
+}
+
+struct HandlerContext {
+    fd: RawFd,
+    tx: MessageSender,
+    methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
+    // Used for waiting handler exit.
+    _handler_shutdown_waiter: shutdown::Waiter,
+}
+
+impl HandlerContext {
+    async fn handle_msg(&self, msg: GenMessage) {
+        let stream_id = msg.header.stream_id;
+
+        if (stream_id % 2) != 1 {
+            Self::respond_with_status(
+                self.tx.clone(),
+                stream_id,
+                get_status(Code::INVALID_ARGUMENT, "stream id must be odd"),
+            )
+            .await;
+            return;
+        }
+
+        match msg.header.type_ {
+            MESSAGE_TYPE_REQUEST => match self.handle_request(msg).await {
+                Ok(opt_msg) => match opt_msg {
+                    Some(msg) => {
+                        Self::respond(self.tx.clone(), stream_id, msg)
+                            .await
+                            .map_err(|e| {
+                                error!("respond got error {:?}", e);
+                            })
+                            .ok();
+                    }
+                    None => {
+                        unimplemented!();
+                    }
+                },
+                Err(status) => Self::respond_with_status(self.tx.clone(), stream_id, status).await,
+            },
+            _ => {
+                // TODO: else we must ignore this for future compat. log this?
+                // TODO(wllenyj): Compatible with golang behavior.
+                error!("Unknown message type. {:?}", msg.header);
+            }
+        }
+    }
+
+    async fn handle_request(&self, msg: GenMessage) -> StdResult<Option<Response>, Status> {
+        //TODO:
+        //if header.stream_id <= self.last_stream_id {
+        //    return Err;
+        //}
+        // self.last_stream_id = header.stream_id;
+
+        let req_msg = Message::<Request>::try_from(msg)
+            .map_err(|e| get_status(Code::INVALID_ARGUMENT, e.to_string()))?;
+
+        let req = &req_msg.payload;
+        trace!("Got Message request {} {}", req.service, req.method);
+
+        let path = utils::get_path(&req.service, &req.method);
+        let method = self.methods.get(&path).ok_or_else(|| {
+            get_status(Code::INVALID_ARGUMENT, format!("{} does not exist", &path))
+        })?;
+
+        return self.handle_method(method.as_ref(), req_msg).await;
+    }
+
+    async fn handle_method(
+        &self,
+        method: &(dyn MethodHandler + Send + Sync),
+        req_msg: Message<Request>,
+    ) -> StdResult<Option<Response>, Status> {
+        let req = req_msg.payload;
+        let path = utils::get_path(&req.service, &req.method);
+
+        let ctx = TtrpcContext {
+            fd: self.fd,
+            mh: req_msg.header,
+            metadata: context::from_pb(&req.metadata),
+            timeout_nano: req.timeout_nano,
+        };
+
+        let get_unknown_status_and_log_err = |e| {
+            error!("method handle {} got error {:?}", path, &e);
+            get_status(Code::UNKNOWN, e)
+        };
+        if req.timeout_nano == 0 {
+            method
+                .handler(ctx, req)
+                .await
+                .map_err(get_unknown_status_and_log_err)
+                .map(Some)
+        } else {
+            timeout(
+                Duration::from_nanos(req.timeout_nano as u64),
+                method.handler(ctx, req),
+            )
+            .await
+            .map_err(|_| {
+                // Timed out
+                error!("method handle {} got error timed out", path);
+                get_status(Code::DEADLINE_EXCEEDED, "timeout")
+            })
+            .and_then(|r| {
+                // Handler finished
+                r.map_err(get_unknown_status_and_log_err)
+            })
+            .map(Some)
+        }
+    }
+
+    async fn respond(tx: MessageSender, stream_id: u32, resp: Response) -> Result<()> {
+        let payload = resp
+            .encode()
+            .map_err(err_to_others_err!(e, "Encode Response failed."))?;
+        let msg = GenMessage {
+            header: MessageHeader::new_response(stream_id, payload.len() as u32),
+            payload,
+        };
+        tx.send(msg)
+            .await
+            .map_err(err_to_others_err!(e, "Send packet to sender error "))
+    }
+
+    async fn respond_with_status(tx: MessageSender, stream_id: u32, status: Status) {
+        let mut resp = Response::new();
+        resp.set_status(status);
+        Self::respond(tx, stream_id, resp)
+            .await
+            .map_err(|e| {
+                error!("respond with status got error {:?}", e);
+            })
+            .ok();
     }
 }

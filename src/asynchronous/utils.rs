@@ -5,14 +5,12 @@
 
 use std::collections::HashMap;
 use std::os::unix::io::{FromRawFd, RawFd};
-use std::result::Result as StdResult;
 
 use async_trait::async_trait;
-use protobuf::{CodedInputStream, Message};
 use tokio::net::UnixStream;
 
-use crate::error::{get_status, Result};
-use crate::proto::{Code, MessageHeader, Request, Response, Status};
+use crate::error::Result;
+use crate::proto::{MessageHeader, Request, Response};
 
 /// Handle request in async mode.
 #[macro_export]
@@ -104,23 +102,6 @@ pub(crate) fn new_unix_stream_from_raw_fd(fd: RawFd) -> UnixStream {
     // we must set nonblocking by ourselves in tokio 1.0
     std_stream.set_nonblocking(true).unwrap();
     UnixStream::from_std(std_stream).unwrap()
-}
-
-pub(crate) fn body_to_request(body: &[u8]) -> StdResult<Request, Status> {
-    let mut req = Request::new();
-    let merge_result;
-    {
-        let mut s = CodedInputStream::from_bytes(body);
-        merge_result = req.merge_from(&mut s);
-    }
-
-    if merge_result.is_err() {
-        return Err(get_status(Code::INVALID_ARGUMENT, "".to_string()));
-    }
-
-    trace!("Got Message request {:?}", req);
-
-    Ok(req)
 }
 
 pub(crate) fn get_path(service: &str, method: &str) -> String {
