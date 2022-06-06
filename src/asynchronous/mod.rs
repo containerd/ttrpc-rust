@@ -11,8 +11,9 @@ mod stream;
 #[macro_use]
 #[doc(hidden)]
 mod utils;
-mod unix_incoming;
+mod connection;
 pub mod shutdown;
+mod unix_incoming;
 
 #[doc(inline)]
 pub use crate::r#async::client::Client;
