@@ -1,9 +1,11 @@
+// Copyright 2022 Alibaba Cloud. All rights reserved.
 // Copyright (c) 2020 Ant Financial
 //
 // SPDX-License-Identifier: Apache-2.0
 //
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -20,6 +22,291 @@ pub type MessageReceiver = mpsc::Receiver<GenMessage>;
 
 pub type ResultSender = mpsc::Sender<Result<GenMessage>>;
 pub type ResultReceiver = mpsc::Receiver<Result<GenMessage>>;
+
+#[derive(Debug)]
+pub struct ClientStream<Q, P> {
+    tx: CSSender<Q>,
+    rx: CSReceiver<P>,
+}
+
+impl<Q, P> ClientStream<Q, P>
+where
+    Q: Codec,
+    P: Codec,
+    <Q as Codec>::E: std::fmt::Display,
+    <P as Codec>::E: std::fmt::Display,
+{
+    pub fn new(inner: StreamInner) -> Self {
+        let (tx, rx) = inner.split();
+        Self {
+            tx: CSSender {
+                tx,
+                _send: PhantomData,
+            },
+            rx: CSReceiver {
+                rx,
+                _recv: PhantomData,
+            },
+        }
+    }
+
+    pub fn split(self) -> (CSSender<Q>, CSReceiver<P>) {
+        (self.tx, self.rx)
+    }
+
+    pub async fn send(&self, req: &Q) -> Result<()> {
+        self.tx.send(req).await
+    }
+
+    pub async fn close_send(&self) -> Result<()> {
+        self.tx.close_send().await
+    }
+
+    pub async fn recv(&mut self) -> Result<P> {
+        self.rx.recv().await
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CSSender<Q> {
+    tx: StreamSender,
+    _send: PhantomData<Q>,
+}
+
+impl<Q> CSSender<Q>
+where
+    Q: Codec,
+    <Q as Codec>::E: std::fmt::Display,
+{
+    pub async fn send(&self, req: &Q) -> Result<()> {
+        let msg_buf = req
+            .encode()
+            .map_err(err_to_others_err!(e, "Encode message failed."))?;
+        self.tx.send(msg_buf).await
+    }
+
+    pub async fn close_send(&self) -> Result<()> {
+        self.tx.close_send().await
+    }
+}
+
+#[derive(Debug)]
+pub struct CSReceiver<P> {
+    rx: StreamReceiver,
+    _recv: PhantomData<P>,
+}
+
+impl<P> CSReceiver<P>
+where
+    P: Codec,
+    <P as Codec>::E: std::fmt::Display,
+{
+    pub async fn recv(&mut self) -> Result<P> {
+        let msg_buf = self.rx.recv().await?;
+        P::decode(&msg_buf).map_err(err_to_others_err!(e, "Decode message failed."))
+    }
+}
+
+#[derive(Debug)]
+pub struct ServerStream<P, Q> {
+    tx: SSSender<P>,
+    rx: SSReceiver<Q>,
+}
+
+impl<P, Q> ServerStream<P, Q>
+where
+    P: Codec,
+    Q: Codec,
+    <P as Codec>::E: std::fmt::Display,
+    <Q as Codec>::E: std::fmt::Display,
+{
+    pub fn new(inner: StreamInner) -> Self {
+        let (tx, rx) = inner.split();
+        Self {
+            tx: SSSender {
+                tx,
+                _send: PhantomData,
+            },
+            rx: SSReceiver {
+                rx,
+                _recv: PhantomData,
+            },
+        }
+    }
+
+    pub fn split(self) -> (SSSender<P>, SSReceiver<Q>) {
+        (self.tx, self.rx)
+    }
+
+    pub async fn send(&self, resp: &P) -> Result<()> {
+        self.tx.send(resp).await
+    }
+
+    pub async fn recv(&mut self) -> Result<Option<Q>> {
+        self.rx.recv().await
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SSSender<P> {
+    tx: StreamSender,
+    _send: PhantomData<P>,
+}
+
+impl<P> SSSender<P>
+where
+    P: Codec,
+    <P as Codec>::E: std::fmt::Display,
+{
+    pub async fn send(&self, resp: &P) -> Result<()> {
+        let msg_buf = resp
+            .encode()
+            .map_err(err_to_others_err!(e, "Encode message failed."))?;
+        self.tx.send(msg_buf).await
+    }
+}
+
+#[derive(Debug)]
+pub struct SSReceiver<Q> {
+    rx: StreamReceiver,
+    _recv: PhantomData<Q>,
+}
+
+impl<Q> SSReceiver<Q>
+where
+    Q: Codec,
+    <Q as Codec>::E: std::fmt::Display,
+{
+    pub async fn recv(&mut self) -> Result<Option<Q>> {
+        let res = self.rx.recv().await;
+
+        if matches!(res, Err(Error::Eof)) {
+            return Ok(None);
+        }
+        let msg_buf = res?;
+        Q::decode(&msg_buf)
+            .map_err(err_to_others_err!(e, "Decode message failed."))
+            .map(Some)
+    }
+}
+
+pub struct ClientStreamSender<Q, P> {
+    inner: StreamInner,
+    _send: PhantomData<Q>,
+    _recv: PhantomData<P>,
+}
+
+impl<Q, P> ClientStreamSender<Q, P>
+where
+    Q: Codec,
+    P: Codec,
+    <Q as Codec>::E: std::fmt::Display,
+    <P as Codec>::E: std::fmt::Display,
+{
+    pub fn new(inner: StreamInner) -> Self {
+        Self {
+            inner,
+            _send: PhantomData,
+            _recv: PhantomData,
+        }
+    }
+
+    pub async fn send(&self, req: &Q) -> Result<()> {
+        let msg_buf = req
+            .encode()
+            .map_err(err_to_others_err!(e, "Encode message failed."))?;
+        self.inner.send(msg_buf).await
+    }
+
+    pub async fn close_and_recv(&mut self) -> Result<P> {
+        self.inner.close_send().await?;
+        let msg_buf = self.inner.recv().await?;
+        P::decode(&msg_buf).map_err(err_to_others_err!(e, "Decode message failed."))
+    }
+}
+
+pub struct ServerStreamSender<P> {
+    inner: StreamSender,
+    _send: PhantomData<P>,
+}
+
+impl<P> ServerStreamSender<P>
+where
+    P: Codec,
+    <P as Codec>::E: std::fmt::Display,
+{
+    pub fn new(inner: StreamInner) -> Self {
+        Self {
+            inner: inner.split().0,
+            _send: PhantomData,
+        }
+    }
+
+    pub async fn send(&self, resp: &P) -> Result<()> {
+        let msg_buf = resp
+            .encode()
+            .map_err(err_to_others_err!(e, "Encode message failed."))?;
+        self.inner.send(msg_buf).await
+    }
+}
+
+pub struct ClientStreamReceiver<P> {
+    inner: StreamReceiver,
+    _recv: PhantomData<P>,
+}
+
+impl<P> ClientStreamReceiver<P>
+where
+    P: Codec,
+    <P as Codec>::E: std::fmt::Display,
+{
+    pub fn new(inner: StreamInner) -> Self {
+        Self {
+            inner: inner.split().1,
+            _recv: PhantomData,
+        }
+    }
+
+    pub async fn recv(&mut self) -> Result<Option<P>> {
+        let res = self.inner.recv().await;
+        if matches!(res, Err(Error::Eof)) {
+            return Ok(None);
+        }
+        let msg_buf = res?;
+        P::decode(&msg_buf)
+            .map_err(err_to_others_err!(e, "Decode message failed."))
+            .map(Some)
+    }
+}
+
+pub struct ServerStreamReceiver<Q> {
+    inner: StreamReceiver,
+    _recv: PhantomData<Q>,
+}
+
+impl<Q> ServerStreamReceiver<Q>
+where
+    Q: Codec,
+    <Q as Codec>::E: std::fmt::Display,
+{
+    pub fn new(inner: StreamInner) -> Self {
+        Self {
+            inner: inner.split().1,
+            _recv: PhantomData,
+        }
+    }
+
+    pub async fn recv(&mut self) -> Result<Option<Q>> {
+        let res = self.inner.recv().await;
+        if matches!(res, Err(Error::Eof)) {
+            return Ok(None);
+        }
+        let msg_buf = res?;
+        Q::decode(&msg_buf)
+            .map_err(err_to_others_err!(e, "Decode message failed."))
+            .map(Some)
+    }
+}
 
 async fn _recv(rx: &mut ResultReceiver) -> Result<GenMessage> {
     rx.recv()

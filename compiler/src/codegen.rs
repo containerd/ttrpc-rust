@@ -55,7 +55,6 @@ struct MethodGen<'a> {
     proto: &'a MethodDescriptorProto,
     package_name: String,
     service_name: String,
-    service_path: String,
     root_scope: &'a RootScope<'a>,
     customize: &'a Customize,
 }
@@ -65,7 +64,6 @@ impl<'a> MethodGen<'a> {
         proto: &'a MethodDescriptorProto,
         package_name: String,
         service_name: String,
-        service_path: String,
         root_scope: &'a RootScope<'a>,
         customize: &'a Customize,
     ) -> MethodGen<'a> {
@@ -73,7 +71,6 @@ impl<'a> MethodGen<'a> {
             proto,
             package_name,
             service_name,
-            service_path,
             root_scope,
             customize,
         }
@@ -127,10 +124,6 @@ impl<'a> MethodGen<'a> {
         to_camel_case(self.proto.get_name())
     }
 
-    fn fq_name(&self) -> String {
-        format!("\"{}/{}\"", self.service_path, &self.proto.get_name())
-    }
-
     fn const_method_name(&self) -> String {
         format!(
             "METHOD_{}_{}",
@@ -139,36 +132,13 @@ impl<'a> MethodGen<'a> {
         )
     }
 
-    fn write_definition(&self, w: &mut CodeWriter) {
-        let head = format!(
-            "const {}: {}<{}, {}> = {} {{",
-            self.const_method_name(),
-            fq_grpc("Method"),
-            self.input(),
-            self.output(),
-            fq_grpc("Method")
-        );
-        let pb_mar = format!(
-            "{} {{ ser: {}, de: {} }}",
-            fq_grpc("Marshaller"),
-            fq_grpc("pb_ser"),
-            fq_grpc("pb_de")
-        );
-        w.block(&head, "};", |w| {
-            w.field_entry("ty", &self.method_type().1);
-            w.field_entry("name", &self.fq_name());
-            w.field_entry("req_mar", &pb_mar);
-            w.field_entry("resp_mar", &pb_mar);
-        });
-    }
-
     fn write_handler(&self, w: &mut CodeWriter) {
         w.block(
             &format!("struct {}Method {{", self.struct_name()),
             "}",
             |w| {
                 w.write_line(&format!(
-                    "service: Arc<std::boxed::Box<dyn {} + Send + Sync>>,",
+                    "service: Arc<Box<dyn {} + Send + Sync>>,",
                     self.service_name
                 ));
             },
@@ -197,16 +167,55 @@ impl<'a> MethodGen<'a> {
 
     fn write_handler_impl_async(&self, w: &mut CodeWriter) {
         w.write_line("#[async_trait]");
-        w.block(&format!("impl ::ttrpc::r#async::MethodHandler for {}Method {{", self.struct_name()), "}",
-        |w| {
-            w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, req: ::ttrpc::Request) -> ::ttrpc::Result<(u32, Vec<u8>)> {", "}",
-            |w| {
-                w.write_line(&format!("::ttrpc::async_request_handler!(self, ctx, req, {}, {}, {});",
+        match self.method_type().0 {
+            MethodType::Unary => {
+                w.block(&format!("impl ::ttrpc::r#async::MethodHandler for {}Method {{", self.struct_name()), "}",
+                |w| {
+                    w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, req: ::ttrpc::Request) -> ::ttrpc::Result<::ttrpc::Response> {", "}",
+                        |w| {
+                            w.write_line(&format!("::ttrpc::async_request_handler!(self, ctx, req, {}, {}, {});",
                                         proto_path_to_rust_mod(self.root_scope.find_message(self.proto.get_input_type()).get_scope().get_file_descriptor().get_name()),
                                         self.root_scope.find_message(self.proto.get_input_type()).rust_name(),
                                         self.name()));
+                    });
             });
-        });
+            }
+            // only receive
+            MethodType::ClientStreaming => {
+                w.block(&format!("impl ::ttrpc::r#async::StreamHandler for {}Method {{", self.struct_name()), "}",
+                |w| {
+                    w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, inner: ::ttrpc::r#async::StreamInner) -> ::ttrpc::Result<Option<::ttrpc::Response>> {", "}",
+                        |w| {
+                            w.write_line(&format!("::ttrpc::async_client_streamimg_handler!(self, ctx, inner, {});",
+                                        self.name()));
+                    });
+            });
+            }
+            // only send
+            MethodType::ServerStreaming => {
+                w.block(&format!("impl ::ttrpc::r#async::StreamHandler for {}Method {{", self.struct_name()), "}",
+                |w| {
+                    w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, mut inner: ::ttrpc::r#async::StreamInner) -> ::ttrpc::Result<Option<::ttrpc::Response>> {", "}",
+                        |w| {
+                            w.write_line(&format!("::ttrpc::async_server_streamimg_handler!(self, ctx, inner, {}, {}, {});",
+                                        proto_path_to_rust_mod(self.root_scope.find_message(self.proto.get_input_type()).get_scope().get_file_descriptor().get_name()),
+                                        self.root_scope.find_message(self.proto.get_input_type()).rust_name(),
+                                        self.name()));
+                    });
+            });
+            }
+            // receive and send
+            MethodType::Duplex => {
+                w.block(&format!("impl ::ttrpc::r#async::StreamHandler for {}Method {{", self.struct_name()), "}",
+                |w| {
+                    w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, inner: ::ttrpc::r#async::StreamInner) -> ::ttrpc::Result<Option<::ttrpc::Response>> {", "}",
+                        |w| {
+                            w.write_line(&format!("::ttrpc::async_duplex_streamimg_handler!(self, ctx, inner, {});",
+                                        self.name()));
+                    });
+            });
+            }
+        }
     }
 
     // Method signatures
@@ -222,73 +231,33 @@ impl<'a> MethodGen<'a> {
 
     fn client_streaming(&self, method_name: &str) -> String {
         format!(
-            "{}(&self) -> {}<({}<{}>, {}<{}>)>",
+            "{}(&self, ctx: ttrpc::context::Context) -> {}<{}<{}, {}>>",
             method_name,
             fq_grpc("Result"),
-            fq_grpc("ClientCStreamSender"),
+            fq_grpc("r#async::ClientStreamSender"),
             self.input(),
-            fq_grpc("ClientCStreamReceiver"),
-            self.output()
-        )
-    }
-
-    fn client_streaming_opt(&self, method_name: &str) -> String {
-        format!(
-            "{}_opt(&self, opt: {}) -> {}<({}<{}>, {}<{}>)>",
-            method_name,
-            fq_grpc("CallOption"),
-            fq_grpc("Result"),
-            fq_grpc("ClientCStreamSender"),
-            self.input(),
-            fq_grpc("ClientCStreamReceiver"),
             self.output()
         )
     }
 
     fn server_streaming(&self, method_name: &str) -> String {
         format!(
-            "{}(&self, req: &{}) -> {}<{}<{}>>",
+            "{}(&self, ctx: ttrpc::context::Context, req: &{}) -> {}<{}<{}>>",
             method_name,
             self.input(),
             fq_grpc("Result"),
-            fq_grpc("ClientSStreamReceiver"),
-            self.output()
-        )
-    }
-
-    fn server_streaming_opt(&self, method_name: &str) -> String {
-        format!(
-            "{}_opt(&self, req: &{}, opt: {}) -> {}<{}<{}>>",
-            method_name,
-            self.input(),
-            fq_grpc("CallOption"),
-            fq_grpc("Result"),
-            fq_grpc("ClientSStreamReceiver"),
+            fq_grpc("r#async::ClientStreamReceiver"),
             self.output()
         )
     }
 
     fn duplex_streaming(&self, method_name: &str) -> String {
         format!(
-            "{}(&self) -> {}<({}<{}>, {}<{}>)>",
+            "{}(&self, ctx: ttrpc::context::Context) -> {}<{}<{}, {}>>",
             method_name,
             fq_grpc("Result"),
-            fq_grpc("ClientDuplexSender"),
+            fq_grpc("r#async::ClientStream"),
             self.input(),
-            fq_grpc("ClientDuplexReceiver"),
-            self.output()
-        )
-    }
-
-    fn duplex_streaming_opt(&self, method_name: &str) -> String {
-        format!(
-            "{}_opt(&self, opt: {}) -> {}<({}<{}>, {}<{}>)>",
-            method_name,
-            fq_grpc("CallOption"),
-            fq_grpc("Result"),
-            fq_grpc("ClientDuplexSender"),
-            self.input(),
-            fq_grpc("ClientDuplexReceiver"),
             self.output()
         )
     }
@@ -317,7 +286,7 @@ impl<'a> MethodGen<'a> {
     fn write_async_client(&self, w: &mut CodeWriter) {
         let method_name = self.name();
         match self.method_type().0 {
-            // Unary
+            // Unary RPC
             MethodType::Unary => {
                 pub_async_fn(w, &self.unary(&method_name), |w| {
                     w.write_line(&format!("let mut cres = {}::new();", self.output()));
@@ -329,28 +298,79 @@ impl<'a> MethodGen<'a> {
                     ));
                 });
             }
-
-            _ => {}
+            // Client Streaming RPC
+            MethodType::ClientStreaming => {
+                pub_async_fn(w, &self.client_streaming(&method_name), |w| {
+                    w.write_line(&format!(
+                        "::ttrpc::async_client_stream_send!(self, ctx, \"{}.{}\", \"{}\");",
+                        self.package_name,
+                        self.service_name,
+                        &self.proto.get_name(),
+                    ));
+                });
+            }
+            // Server Streaming RPC
+            MethodType::ServerStreaming => {
+                pub_async_fn(w, &self.server_streaming(&method_name), |w| {
+                    w.write_line(&format!(
+                        "::ttrpc::async_client_stream_receive!(self, ctx, req, \"{}.{}\", \"{}\");",
+                        self.package_name,
+                        self.service_name,
+                        &self.proto.get_name(),
+                    ));
+                });
+            }
+            // Bidirectional streaming RPC
+            MethodType::Duplex => {
+                pub_async_fn(w, &self.duplex_streaming(&method_name), |w| {
+                    w.write_line(&format!(
+                        "::ttrpc::async_client_stream!(self, ctx, \"{}.{}\", \"{}\");",
+                        self.package_name,
+                        self.service_name,
+                        &self.proto.get_name(),
+                    ));
+                });
+            }
         };
     }
 
     fn write_service(&self, w: &mut CodeWriter) {
-        let req_stream_type = format!("{}<{}>", fq_grpc("RequestStream"), self.input());
-        let (req, req_type, _resp_type) = match self.method_type().0 {
-            MethodType::Unary => ("req", self.input(), "UnarySink"),
-            MethodType::ClientStreaming => ("stream", req_stream_type, "ClientStreamingSink"),
-            MethodType::ServerStreaming => ("req", self.input(), "ServerStreamingSink"),
-            MethodType::Duplex => ("stream", req_stream_type, "DuplexSink"),
+        let (_req, req_type, resp_type) = match self.method_type().0 {
+            MethodType::Unary => ("req", self.input(), self.output()),
+            MethodType::ClientStreaming => (
+                "stream",
+                format!("::ttrpc::r#async::ServerStreamReceiver<{}>", self.input()),
+                self.output(),
+            ),
+            MethodType::ServerStreaming => (
+                "req",
+                format!(
+                    "{}, _: {}<{}>",
+                    self.input(),
+                    "::ttrpc::r#async::ServerStreamSender",
+                    self.output()
+                ),
+                "()".to_string(),
+            ),
+            MethodType::Duplex => (
+                "stream",
+                format!(
+                    "{}<{}, {}>",
+                    "::ttrpc::r#async::ServerStream",
+                    self.output(),
+                    self.input(),
+                ),
+                "()".to_string(),
+            ),
         };
 
         let get_sig = |context_name| {
             format!(
-                "{}(&self, _ctx: &{}, _{}: {}) -> ::ttrpc::Result<{}>",
+                "{}(&self, _ctx: &{}, _: {}) -> ::ttrpc::Result<{}>",
                 self.name(),
                 fq_grpc(context_name),
-                req,
                 req_type,
-                self.output()
+                resp_type,
             )
         };
 
@@ -370,20 +390,38 @@ impl<'a> MethodGen<'a> {
     }
 
     fn write_bind(&self, w: &mut CodeWriter) {
-        let mut method_handler_name = "::ttrpc::MethodHandler";
+        let method_handler_name = "::ttrpc::MethodHandler";
 
-        if async_on(self.customize, "server") {
-            method_handler_name = "::ttrpc::r#async::MethodHandler";
-        }
+        let s = format!(
+            "methods.insert(\"/{}.{}/{}\".to_string(),
+                    Box::new({}Method{{service: service.clone()}}) as Box<dyn {} + Send + Sync>);",
+            self.package_name,
+            self.service_name,
+            self.proto.get_name(),
+            self.struct_name(),
+            method_handler_name,
+        );
+        w.write_line(&s);
+    }
 
-        let s = format!("methods.insert(\"/{}.{}/{}\".to_string(),
-                    std::boxed::Box::new({}Method{{service: service.clone()}}) as std::boxed::Box<dyn {} + Send + Sync>);",
-                    self.package_name,
-                    self.service_name,
-                    self.proto.get_name(),
-                    self.struct_name(),
-                    method_handler_name,
-                );
+    fn write_async_bind(&self, w: &mut CodeWriter) {
+        let s = if matches!(self.method_type().0, MethodType::Unary) {
+            format!(
+                "methods.insert(\"{}\".to_string(),
+                    Box::new({}Method{{service: service.clone()}}) as {});",
+                self.proto.get_name(),
+                self.struct_name(),
+                "Box<dyn ::ttrpc::r#async::MethodHandler + Send + Sync>"
+            )
+        } else {
+            format!(
+                "streams.insert(\"{}\".to_string(),
+                    Arc::new({}Method{{service: service.clone()}}) as {});",
+                self.proto.get_name(),
+                self.struct_name(),
+                "Arc<dyn ::ttrpc::r#async::StreamHandler + Send + Sync>"
+            )
+        };
         w.write_line(&s);
     }
 }
@@ -392,6 +430,7 @@ struct ServiceGen<'a> {
     proto: &'a ServiceDescriptorProto,
     methods: Vec<MethodGen<'a>>,
     customize: &'a Customize,
+    package_name: String,
 }
 
 impl<'a> ServiceGen<'a> {
@@ -401,11 +440,6 @@ impl<'a> ServiceGen<'a> {
         root_scope: &'a RootScope,
         customize: &'a Customize,
     ) -> ServiceGen<'a> {
-        let service_path = if file.get_package().is_empty() {
-            format!("{}", proto.get_name())
-        } else {
-            format!("{}.{}", file.get_package(), proto.get_name())
-        };
         let methods = proto
             .get_method()
             .iter()
@@ -414,7 +448,6 @@ impl<'a> ServiceGen<'a> {
                     m,
                     file.get_package().to_string(),
                     util::to_camel_case(proto.get_name()),
-                    service_path.clone(),
                     root_scope,
                     &customize,
                 )
@@ -425,6 +458,7 @@ impl<'a> ServiceGen<'a> {
             proto,
             methods,
             customize,
+            package_name: file.get_package().to_string(),
         }
     }
 
@@ -432,8 +466,18 @@ impl<'a> ServiceGen<'a> {
         util::to_camel_case(self.proto.get_name())
     }
 
+    fn service_path(&self) -> String {
+        format!("{}.{}", self.package_name, self.service_name())
+    }
+
     fn client_name(&self) -> String {
         format!("{}Client", self.service_name())
+    }
+
+    fn has_stream_method(&self) -> bool {
+        self.methods
+            .iter()
+            .any(|method| !matches!(method.method_type().0, MethodType::Unary))
     }
 
     fn write_client(&self, w: &mut CodeWriter) {
@@ -490,11 +534,9 @@ impl<'a> ServiceGen<'a> {
 
     fn write_server(&self, w: &mut CodeWriter) {
         let mut trait_name = self.service_name();
-        let mut method_handler_name = "::ttrpc::MethodHandler";
         if async_on(self.customize, "server") {
             w.write_line("#[async_trait]");
             trait_name = format!("{}: Sync", &self.service_name());
-            method_handler_name = "::ttrpc::r#async::MethodHandler";
         }
 
         w.pub_trait(&trait_name.to_owned(), |w| {
@@ -504,9 +546,17 @@ impl<'a> ServiceGen<'a> {
         });
 
         w.write_line("");
+        if async_on(self.customize, "server") {
+            self.write_async_server_create(w);
+        } else {
+            self.write_sync_server_create(w);
+        }
+    }
 
+    fn write_sync_server_create(&self, w: &mut CodeWriter) {
+        let method_handler_name = "::ttrpc::MethodHandler";
         let s = format!(
-            "create_{}(service: Arc<std::boxed::Box<dyn {} + Send + Sync>>) -> HashMap <String, Box<dyn {} + Send + Sync>>",
+            "create_{}(service: Arc<Box<dyn {} + Send + Sync>>) -> HashMap<String, Box<dyn {} + Send + Sync>>",
             to_snake_case(&self.service_name()),
             self.service_name(),
             method_handler_name,
@@ -523,14 +573,35 @@ impl<'a> ServiceGen<'a> {
         });
     }
 
-    fn write_method_definitions(&self, w: &mut CodeWriter) {
-        for (i, method) in self.methods.iter().enumerate() {
-            if i != 0 {
-                w.write_line("");
-            }
+    fn write_async_server_create(&self, w: &mut CodeWriter) {
+        let s = format!(
+            "create_{}(service: Arc<Box<dyn {} + Send + Sync>>) -> HashMap<String, {}>",
+            to_snake_case(&self.service_name()),
+            self.service_name(),
+            "::ttrpc::r#async::Service"
+        );
 
-            method.write_definition(w);
-        }
+        let has_stream_method = self.has_stream_method();
+        w.pub_fn(&s, |w| {
+            w.write_line("let mut ret = HashMap::new();");
+            w.write_line("let mut methods = HashMap::new();");
+            if has_stream_method {
+                w.write_line("let mut streams = HashMap::new();");
+            } else {
+                w.write_line("let streams = HashMap::new();");
+            }
+            for method in &self.methods[0..self.methods.len()] {
+                w.write_line("");
+                method.write_async_bind(w);
+            }
+            w.write_line("");
+            w.write_line(format!(
+                "ret.insert(\"{}\".to_string(), {});",
+                self.service_path(),
+                "::ttrpc::r#async::Service{ methods, streams }"
+            ));
+            w.write_line("ret");
+        });
     }
 
     fn write_method_handlers(&self, w: &mut CodeWriter) {
