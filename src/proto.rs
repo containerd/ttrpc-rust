@@ -21,6 +21,11 @@ pub const MESSAGE_LENGTH_MAX: usize = 4 << 20;
 
 pub const MESSAGE_TYPE_REQUEST: u8 = 0x1;
 pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
+pub const MESSAGE_TYPE_DATA: u8 = 0x3;
+
+pub const FLAG_REMOTE_CLOSED: u8 = 0x1;
+pub const FLAG_REMOTE_OPEN: u8 = 0x2;
+pub const FLAG_NO_DATA: u8 = 0x4;
 
 /// Message header of ttrpc.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
@@ -57,6 +62,7 @@ impl From<MessageHeader> for Vec<u8> {
 
 impl MessageHeader {
     /// Creates a request MessageHeader from stream_id and len.
+    ///
     /// Use the default message type MESSAGE_TYPE_REQUEST, and default flags 0.
     pub fn new_request(stream_id: u32, len: u32) -> Self {
         Self {
@@ -68,12 +74,25 @@ impl MessageHeader {
     }
 
     /// Creates a response MessageHeader from stream_id and len.
-    /// Use the default message type MESSAGE_TYPE_RESPONSE, and default flags 0.
+    ///
+    /// Use the MESSAGE_TYPE_RESPONSE message type, and default flags 0.
     pub fn new_response(stream_id: u32, len: u32) -> Self {
         Self {
             length: len,
             stream_id,
             type_: MESSAGE_TYPE_RESPONSE,
+            flags: 0,
+        }
+    }
+
+    /// Creates a data MessageHeader from stream_id and len.
+    ///
+    /// Use the MESSAGE_TYPE_DATA message type, and default flags 0.
+    pub fn new_data(stream_id: u32, len: u32) -> Self {
+        Self {
+            length: len,
+            stream_id,
+            type_: MESSAGE_TYPE_DATA,
             flags: 0,
         }
     }
