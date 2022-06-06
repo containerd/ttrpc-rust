@@ -3,23 +3,23 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use nix::unistd::close;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
 
-use crate::common::client_connect;
-use crate::error::{Error, Result};
-use crate::proto::{Code, Codec, GenMessage, Message, Request, Response, MESSAGE_TYPE_RESPONSE};
-
-use crate::r#async::utils;
+use nix::unistd::close;
 use tokio::{
     self,
     io::split,
     sync::mpsc::{channel, Receiver, Sender},
     sync::Notify,
 };
+
+use crate::common::client_connect;
+use crate::error::{Error, Result};
+use crate::proto::{Code, Codec, GenMessage, Message, Request, Response, MESSAGE_TYPE_RESPONSE};
+use crate::r#async::utils;
 
 type RequestSender = Sender<(GenMessage, Sender<Result<Vec<u8>>>)>;
 type RequestReceiver = Receiver<(GenMessage, Sender<Result<Vec<u8>>>)>;

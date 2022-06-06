@@ -3,16 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::error::{get_status, Result};
-use crate::proto::{
-    Code, MessageHeader, Request, Status, MESSAGE_TYPE_RESPONSE,
-};
-use async_trait::async_trait;
-use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::result::Result as StdResult;
+
+use async_trait::async_trait;
+use protobuf::{CodedInputStream, Message};
 use tokio::net::UnixStream;
+
+use crate::error::{get_status, Result};
+use crate::proto::{Code, MessageHeader, Request, Status, MESSAGE_TYPE_RESPONSE};
 
 /// Handle request in async mode.
 #[macro_export]

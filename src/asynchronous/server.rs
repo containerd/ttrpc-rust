@@ -3,26 +3,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::r#async::utils;
-use nix::unistd;
 use std::collections::HashMap;
+use std::marker::Unpin;
 use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::net::UnixListener as SysUnixListener;
 use std::result::Result as StdResult;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::asynchronous::stream::{receive, respond, respond_with_status};
-use crate::asynchronous::unix_incoming::UnixIncoming;
-use crate::common::{self, Domain};
-use crate::context;
-use crate::error::{get_status, Error, Result};
-use crate::proto::{Code, MessageHeader, Status, MESSAGE_TYPE_REQUEST};
-use crate::r#async::{MethodHandler, TtrpcContext};
 use futures::stream::Stream;
 use futures::StreamExt as _;
-use std::marker::Unpin;
-use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::os::unix::net::UnixListener as SysUnixListener;
+use nix::unistd;
 use tokio::{
     self,
     io::{split, AsyncRead, AsyncWrite, AsyncWriteExt},
@@ -32,9 +24,17 @@ use tokio::{
     sync::watch,
     time::timeout,
 };
-
 #[cfg(target_os = "linux")]
 use tokio_vsock::VsockListener;
+
+use crate::asynchronous::stream::{receive, respond, respond_with_status};
+use crate::asynchronous::unix_incoming::UnixIncoming;
+use crate::common::{self, Domain};
+use crate::context;
+use crate::error::{get_status, Error, Result};
+use crate::proto::{Code, MessageHeader, Status, MESSAGE_TYPE_REQUEST};
+use crate::r#async::utils;
+use crate::r#async::{MethodHandler, TtrpcContext};
 
 /// A ttrpc Server (async).
 pub struct Server {
