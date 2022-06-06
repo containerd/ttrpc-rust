@@ -9,23 +9,16 @@ use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
 
 use nix::unistd::close;
-use tokio::{
-    self,
-    io::split,
-    sync::mpsc::{channel, Receiver, Sender},
-    sync::Notify,
-};
+use tokio::{self, io::split, sync::mpsc, sync::Notify};
 
 use crate::common::client_connect;
 use crate::error::{Error, Result};
 use crate::proto::{Code, Codec, GenMessage, Message, Request, Response, MESSAGE_TYPE_RESPONSE};
+use crate::r#async::stream::{ResultReceiver, ResultSender};
 use crate::r#async::utils;
 
-type RequestSender = Sender<(GenMessage, Sender<Result<Vec<u8>>>)>;
-type RequestReceiver = Receiver<(GenMessage, Sender<Result<Vec<u8>>>)>;
-
-type ResponseSender = Sender<Result<Vec<u8>>>;
-type ResponseReceiver = Receiver<Result<Vec<u8>>>;
+type RequestSender = mpsc::Sender<(GenMessage, ResultSender)>;
+type RequestReceiver = mpsc::Receiver<(GenMessage, ResultSender)>;
 
 /// A ttrpc Client (async).
 #[derive(Clone)]
@@ -44,7 +37,7 @@ impl Client {
         let stream = utils::new_unix_stream_from_raw_fd(fd);
 
         let (mut reader, mut writer) = split(stream);
-        let (req_tx, mut rx): (RequestSender, RequestReceiver) = channel(100);
+        let (req_tx, mut rx): (RequestSender, RequestReceiver) = mpsc::channel(100);
 
         let req_map = Arc::new(Mutex::new(HashMap::new()));
         let req_map2 = req_map.clone();
@@ -131,7 +124,7 @@ impl Client {
                                         return;
                                     }
 
-                                    resp_tx2.send(Ok(msg.payload)).await.unwrap_or_else(|_e| error!("The request has returned"));
+                                    resp_tx2.send(Ok(msg)).await.unwrap_or_else(|_e| error!("The request has returned"));
                                 });
                             }
                             Err(e) => {
@@ -170,7 +163,7 @@ impl Client {
             .try_into()
             .map_err(|e: protobuf::error::ProtobufError| Error::Others(e.to_string()))?;
 
-        let (tx, mut rx): (ResponseSender, ResponseReceiver) = channel(100);
+        let (tx, mut rx): (ResultSender, ResultReceiver) = mpsc::channel(100);
         self.req_tx
             .send((msg, tx))
             .await
@@ -190,9 +183,9 @@ impl Client {
             .ok_or_else(|| Error::Others("Receive packet from receiver error".to_string()))?
         };
 
-        let buf = result?;
-        let res =
-            Response::decode(&buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
+        let msg = result?;
+        let res = Response::decode(&msg.payload)
+            .map_err(err_to_others_err!(e, "Unpack response error "))?;
 
         let status = res.get_status();
         if status.get_code() != Code::OK {

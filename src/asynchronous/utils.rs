@@ -12,7 +12,7 @@ use protobuf::{CodedInputStream, Message};
 use tokio::net::UnixStream;
 
 use crate::error::{get_status, Result};
-use crate::proto::{Code, MessageHeader, Request, Status, MESSAGE_TYPE_RESPONSE};
+use crate::proto::{Code, MessageHeader, Request, Response, Status};
 
 /// Handle request in async mode.
 #[macro_export]
@@ -48,12 +48,7 @@ macro_rules! async_request_handler {
             },
         }
 
-        let mut buf = Vec::with_capacity(res.compute_size() as usize);
-        let mut s = protobuf::CodedOutputStream::vec(&mut buf);
-        res.write_to(&mut s).map_err(ttrpc::err_to_others!(e, ""))?;
-        s.flush().map_err(ttrpc::err_to_others!(e, ""))?;
-
-        return Ok(($ctx.mh.stream_id, buf));
+        return Ok(res);
     };
 }
 
@@ -88,7 +83,7 @@ macro_rules! async_client_request {
 /// Trait that implements handler which is a proxy to the desired method (async).
 #[async_trait]
 pub trait MethodHandler {
-    async fn handler(&self, ctx: TtrpcContext, req: Request) -> Result<(u32, Vec<u8>)>;
+    async fn handler(&self, ctx: TtrpcContext, req: Request) -> Result<Response>;
 }
 
 /// The context of ttrpc (async).
@@ -98,15 +93,6 @@ pub struct TtrpcContext {
     pub mh: MessageHeader,
     pub metadata: HashMap<String, Vec<String>>,
     pub timeout_nano: i64,
-}
-
-pub(crate) fn get_response_header_from_body(stream_id: u32, body: &[u8]) -> MessageHeader {
-    MessageHeader {
-        length: body.len() as u32,
-        stream_id,
-        type_: MESSAGE_TYPE_RESPONSE,
-        flags: 0,
-    }
 }
 
 pub(crate) fn new_unix_stream_from_raw_fd(fd: RawFd) -> UnixStream {

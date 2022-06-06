@@ -17,22 +17,23 @@ use futures::StreamExt as _;
 use nix::unistd;
 use tokio::{
     self,
-    io::{split, AsyncRead, AsyncWrite, AsyncWriteExt},
+    io::{split, AsyncRead, AsyncWrite},
     net::UnixListener,
     select, spawn,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{channel, Sender},
     time::timeout,
 };
 #[cfg(target_os = "linux")]
 use tokio_vsock::VsockListener;
 
-use crate::asynchronous::stream::{receive, respond, respond_with_status};
+use crate::asynchronous::stream::{respond, respond_with_status};
 use crate::asynchronous::unix_incoming::UnixIncoming;
 use crate::common::{self, Domain};
 use crate::context;
 use crate::error::{get_status, Error, Result};
-use crate::proto::{Code, MessageHeader, Status, MESSAGE_TYPE_REQUEST};
+use crate::proto::{Code, GenMessage, MessageHeader, Response, Status, MESSAGE_TYPE_REQUEST};
 use crate::r#async::shutdown;
+use crate::r#async::stream::{MessageReceiver, MessageSender};
 use crate::r#async::utils;
 use crate::r#async::{MethodHandler, TtrpcContext};
 
@@ -244,15 +245,15 @@ async fn spawn_connection_handler<S>(
 {
     spawn(async move {
         let (mut reader, mut writer) = split(stream);
-        let (tx, mut rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = channel(100);
+        let (tx, mut rx): (MessageSender, MessageReceiver) = channel(100);
 
         let server_shutdown = shutdown_waiter.clone();
         let (disconnect_notifier, disconnect_waiter) =
             shutdown::with_timeout(DEFAULT_CONN_SHUTDOWN_TIMEOUT);
 
         spawn(async move {
-            while let Some(buf) = rx.recv().await {
-                if let Err(e) = writer.write_all(&buf).await {
+            while let Some(msg) = rx.recv().await {
+                if let Err(e) = msg.write_to(&mut writer).await {
                     error!("write_message got error: {:?}", e);
                 }
             }
@@ -264,8 +265,8 @@ async fn spawn_connection_handler<S>(
             let handler_shutdown_waiter = disconnect_waiter.clone();
 
             select! {
-                resp = receive(&mut reader) => {
-                    match resp {
+                res = GenMessage::read_from(&mut reader) => {
+                    match res {
                         Ok(message) => {
                             spawn(async move {
                                 select! {
@@ -304,7 +305,7 @@ async fn do_handle_request(
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
     header: MessageHeader,
     body: &[u8],
-) -> StdResult<(u32, Vec<u8>), Status> {
+) -> StdResult<Option<Response>, Status> {
     let req = utils::body_to_request(body)?;
     let path = utils::get_path(&req.service, &req.method);
     let method = methods
@@ -328,6 +329,7 @@ async fn do_handle_request(
             .handler(ctx, req)
             .await
             .map_err(get_unknown_status_and_log_err)
+            .map(Some)
     } else {
         timeout(
             Duration::from_nanos(req.timeout_nano as u64),
@@ -343,16 +345,20 @@ async fn do_handle_request(
             // Handler finished
             r.map_err(get_unknown_status_and_log_err)
         })
+        .map(Some)
     }
 }
 
 async fn handle_request(
-    tx: Sender<Vec<u8>>,
+    tx: MessageSender,
     fd: RawFd,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
-    message: (MessageHeader, Vec<u8>),
+    message: GenMessage,
 ) {
-    let (header, body) = message;
+    let GenMessage {
+        header,
+        payload: body,
+    } = message;
     let stream_id = header.stream_id;
 
     if header.type_ != MESSAGE_TYPE_REQUEST {
@@ -360,15 +366,18 @@ async fn handle_request(
     }
 
     match do_handle_request(fd, methods, header, &body).await {
-        Ok((stream_id, resp_body)) => {
-            if let Err(x) = respond(tx.clone(), stream_id, resp_body).await {
-                error!("respond got error {:?}", x);
+        Ok(opt_msg) => match opt_msg {
+            Some(msg) => {
+                if let Err(x) = respond(tx.clone(), stream_id, msg).await {
+                    error!("respond got error {:?}", x);
+                }
             }
-        }
+            None => {
+                unimplemented!();
+            }
+        },
         Err(status) => {
-            if let Err(x) = respond_with_status(tx.clone(), stream_id, status).await {
-                error!("respond got error {:?}", x);
-            }
+            respond_with_status(tx.clone(), stream_id, status).await;
         }
     }
 }
