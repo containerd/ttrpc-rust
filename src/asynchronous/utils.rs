@@ -84,6 +84,16 @@ pub trait MethodHandler {
     async fn handler(&self, ctx: TtrpcContext, req: Request) -> Result<Response>;
 }
 
+/// Trait that implements handler which is a proxy to the stream (async).
+#[async_trait]
+pub trait StreamHandler {
+    async fn handler(
+        &self,
+        ctx: TtrpcContext,
+        stream: crate::r#async::StreamInner,
+    ) -> Result<Option<Response>>;
+}
+
 /// The context of ttrpc (async).
 #[derive(Debug)]
 pub struct TtrpcContext {

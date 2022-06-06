@@ -15,9 +15,10 @@ mod connection;
 pub mod shutdown;
 mod unix_incoming;
 
+pub use self::stream::{Kind, StreamInner};
 #[doc(inline)]
 pub use crate::r#async::client::Client;
 #[doc(inline)]
-pub use crate::r#async::server::Server;
+pub use crate::r#async::server::{Server, Service};
 #[doc(inline)]
-pub use utils::{MethodHandler, TtrpcContext};
+pub use utils::{MethodHandler, StreamHandler, TtrpcContext};
