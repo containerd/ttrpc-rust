@@ -1,3 +1,4 @@
+// Copyright 2022 Alibaba Cloud. All rights reserved.
 // Copyright (c) 2020 Ant Financial
 //
 // SPDX-License-Identifier: Apache-2.0
@@ -6,6 +7,7 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::os::unix::io::RawFd;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -14,19 +16,23 @@ use tokio::{self, sync::mpsc, task};
 
 use crate::common::client_connect;
 use crate::error::{Error, Result};
-use crate::proto::{Code, Codec, GenMessage, Message, Request, Response, MESSAGE_TYPE_RESPONSE};
+use crate::proto::{
+    Code, Codec, GenMessage, Message, Request, Response, FLAG_REMOTE_CLOSED, FLAG_REMOTE_OPEN,
+    MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
+};
 use crate::r#async::connection::*;
 use crate::r#async::shutdown;
-use crate::r#async::stream::{ResultReceiver, ResultSender};
+use crate::r#async::stream::{
+    Kind, MessageReceiver, MessageSender, ResultReceiver, ResultSender, StreamInner,
+};
 use crate::r#async::utils;
-
-type RequestSender = mpsc::Sender<(GenMessage, ResultSender)>;
-type RequestReceiver = mpsc::Receiver<(GenMessage, ResultSender)>;
 
 /// A ttrpc Client (async).
 #[derive(Clone)]
 pub struct Client {
-    req_tx: RequestSender,
+    req_tx: MessageSender,
+    next_stream_id: Arc<AtomicU32>,
+    streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
 }
 
 impl Client {
@@ -39,26 +45,40 @@ impl Client {
     pub fn new(fd: RawFd) -> Client {
         let stream = utils::new_unix_stream_from_raw_fd(fd);
 
-        let (req_tx, rx): (RequestSender, RequestReceiver) = mpsc::channel(100);
+        let (req_tx, rx): (MessageSender, MessageReceiver) = mpsc::channel(100);
 
-        let delegate = ClientBuilder { rx: Some(rx) };
+        let req_map = Arc::new(Mutex::new(HashMap::new()));
+        let delegate = ClientBuilder {
+            rx: Some(rx),
+            streams: req_map.clone(),
+        };
 
         let conn = Connection::new(stream, delegate);
         tokio::spawn(async move { conn.run().await });
 
-        Client { req_tx }
+        Client {
+            req_tx,
+            next_stream_id: Arc::new(AtomicU32::new(1)),
+            streams: req_map,
+        }
     }
 
     /// Requsts a unary request and returns with response.
     pub async fn request(&self, req: Request) -> Result<Response> {
         let timeout_nano = req.timeout_nano;
-        let msg: GenMessage = Message::new_request(0, req)
+        let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
+
+        let msg: GenMessage = Message::new_request(stream_id, req)
             .try_into()
             .map_err(|e: protobuf::error::ProtobufError| Error::Others(e.to_string()))?;
 
         let (tx, mut rx): (ResultSender, ResultReceiver) = mpsc::channel(100);
+
+        // TODO: check return.
+        self.streams.lock().unwrap().insert(stream_id, tx);
+
         self.req_tx
-            .send((msg, tx))
+            .send(msg)
             .await
             .map_err(|e| Error::Others(format!("Send packet to sender error {:?}", e)))?;
 
@@ -87,6 +107,44 @@ impl Client {
 
         Ok(res)
     }
+
+    /// Creates a StreamInner instance.
+    pub async fn new_stream(
+        &self,
+        req: Request,
+        streaming_client: bool,
+        streaming_server: bool,
+    ) -> Result<StreamInner> {
+        let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
+
+        let mut msg: GenMessage = Message::new_request(stream_id, req)
+            .try_into()
+            .map_err(|e: protobuf::error::ProtobufError| Error::Others(e.to_string()))?;
+
+        if streaming_client {
+            msg.header.add_flags(FLAG_REMOTE_OPEN);
+        } else {
+            msg.header.add_flags(FLAG_REMOTE_CLOSED);
+        }
+
+        let (tx, rx): (ResultSender, ResultReceiver) = mpsc::channel(100);
+        // TODO: check return
+        self.streams.lock().unwrap().insert(stream_id, tx);
+        self.req_tx
+            .send(msg)
+            .await
+            .map_err(|e| Error::Others(format!("Send packet to sender error {:?}", e)))?;
+
+        Ok(StreamInner::new(
+            stream_id,
+            self.req_tx.clone(),
+            rx,
+            streaming_client,
+            streaming_server,
+            Kind::Client,
+            self.streams.clone(),
+        ))
+    }
 }
 
 struct ClientClose {
@@ -104,7 +162,8 @@ impl Drop for ClientClose {
 
 #[derive(Debug)]
 struct ClientBuilder {
-    rx: Option<RequestReceiver>,
+    rx: Option<MessageReceiver>,
+    streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
 }
 
 impl Builder for ClientBuilder {
@@ -113,52 +172,43 @@ impl Builder for ClientBuilder {
 
     fn build(&mut self) -> (Self::Reader, Self::Writer) {
         let (notifier, waiter) = shutdown::new();
-        let req_map = Arc::new(Mutex::new(HashMap::new()));
         (
             ClientReader {
                 shutdown_waiter: waiter,
-                req_map: req_map.clone(),
+                streams: self.streams.clone(),
             },
             ClientWriter {
-                stream_id: 1,
                 rx: self.rx.take().unwrap(),
                 shutdown_notifier: notifier,
-                req_map,
+
+                streams: self.streams.clone(),
             },
         )
     }
 }
 
 struct ClientWriter {
-    stream_id: u32,
-    rx: RequestReceiver,
+    rx: MessageReceiver,
     shutdown_notifier: shutdown::Notifier,
-    req_map: Arc<Mutex<HashMap<u32, ResultSender>>>,
+
+    streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
 }
 
 #[async_trait]
 impl WriterDelegate for ClientWriter {
     async fn recv(&mut self) -> Option<GenMessage> {
-        if let Some((mut msg, resp_tx)) = self.rx.recv().await {
-            let current_stream_id = self.stream_id;
-            msg.header.set_stream_id(current_stream_id);
-            self.stream_id += 2;
-            {
-                let mut map = self.req_map.lock().unwrap();
-                map.insert(current_stream_id, resp_tx);
-            }
-            return Some(msg);
-        } else {
-            return None;
-        }
+        self.rx.recv().await
     }
 
     async fn disconnect(&self, msg: &GenMessage, e: Error) {
+        // TODO:
+        // At this point, a new request may have been received.
         let resp_tx = {
-            let mut map = self.req_map.lock().unwrap();
+            let mut map = self.streams.lock().unwrap();
             map.remove(&msg.header.stream_id)
         };
 
+        // TODO: if None
         if let Some(resp_tx) = resp_tx {
             let e = Error::Socket(format!("{:?}", e));
             resp_tx
@@ -174,8 +224,8 @@ impl WriterDelegate for ClientWriter {
 }
 
 struct ClientReader {
+    streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
     shutdown_waiter: shutdown::Waiter,
-    req_map: Arc<Mutex<HashMap<u32, ResultSender>>>,
 }
 
 #[async_trait]
@@ -191,8 +241,8 @@ impl ReaderDelegate for ClientReader {
         let _ = sender.await;
 
         // Take all items out of `req_map`.
-        let mut map = std::mem::take(&mut *self.req_map.lock().unwrap());
-        // Terminate outstanding RPC requests with the error.
+        let mut map = std::mem::take(&mut *self.streams.lock().unwrap());
+        // Terminate undone RPC requests with the error.
         for (_stream_id, resp_tx) in map.drain() {
             if let Err(_e) = resp_tx.send(Err(e.clone())).await {
                 warn!("Failed to terminate pending RPC: the request has returned");
@@ -203,35 +253,56 @@ impl ReaderDelegate for ClientReader {
     async fn exit(&self) {}
 
     async fn handle_msg(&self, msg: GenMessage) {
-        let req_map = self.req_map.clone();
+        let req_map = self.streams.clone();
         tokio::spawn(async move {
-            let resp_tx2;
-            {
-                let mut map = req_map.lock().unwrap();
-                let resp_tx = match map.get(&msg.header.stream_id) {
-                    Some(tx) => tx,
-                    None => {
-                        debug!("Receiver got unknown packet {:?}", msg);
-                        return;
+            let resp_tx = match msg.header.type_ {
+                MESSAGE_TYPE_RESPONSE => {
+                    match req_map.lock().unwrap().remove(&msg.header.stream_id) {
+                        Some(tx) => tx,
+                        None => {
+                            debug!("Receiver got unknown response packet {:?}", msg);
+                            return;
+                        }
                     }
-                };
-
-                resp_tx2 = resp_tx.clone();
-                map.remove(&msg.header.stream_id); // Forget the result, just remove.
-            }
-
-            if msg.header.type_ != MESSAGE_TYPE_RESPONSE {
-                resp_tx2
-                    .send(Err(Error::Others(format!(
-                        "Recver got malformed packet {:?}",
-                        msg
-                    ))))
-                    .await
-                    .unwrap_or_else(|_e| error!("The request has returned"));
-                return;
-            }
-
-            resp_tx2
+                }
+                MESSAGE_TYPE_DATA => {
+                    if (msg.header.flags & FLAG_REMOTE_CLOSED) == FLAG_REMOTE_CLOSED {
+                        match req_map.lock().unwrap().remove(&msg.header.stream_id) {
+                            Some(tx) => tx.clone(),
+                            None => {
+                                debug!("Receiver got unknown data packet {:?}", msg);
+                                return;
+                            }
+                        }
+                    } else {
+                        match req_map.lock().unwrap().get(&msg.header.stream_id) {
+                            Some(tx) => tx.clone(),
+                            None => {
+                                debug!("Receiver got unknown data packet {:?}", msg);
+                                return;
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    let resp_tx = match req_map.lock().unwrap().remove(&msg.header.stream_id) {
+                        Some(tx) => tx,
+                        None => {
+                            debug!("Receiver got unknown packet {:?}", msg);
+                            return;
+                        }
+                    };
+                    resp_tx
+                        .send(Err(Error::Others(format!(
+                            "Recver got malformed packet {:?}",
+                            msg
+                        ))))
+                        .await
+                        .unwrap_or_else(|_e| error!("The request has returned"));
+                    return;
+                }
+            };
+            resp_tx
                 .send(Ok(msg))
                 .await
                 .unwrap_or_else(|_e| error!("The request has returned"));
