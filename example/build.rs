@@ -9,7 +9,7 @@ use ttrpc_codegen::Codegen;
 use ttrpc_codegen::Customize;
 
 fn main() {
-    let protos = vec![
+    let mut protos = vec![
         "protocols/protos/github.com/kata-containers/agent/pkg/types/types.proto",
         "protocols/protos/agent.proto",
         "protocols/protos/health.proto",
@@ -27,6 +27,9 @@ fn main() {
         })
         .run()
         .expect("Gen sync code failed.");
+
+    // Only async support stream currently.
+    protos.push("protocols/protos/streaming.proto");
 
     Codegen::new()
         .out_dir("protocols/asynchronous")
