@@ -21,7 +21,7 @@ build: debug
 
 .PHONY: test
 test:
-	cargo test --verbose
+	cargo test --all-features --verbose
 
 .PHONY: check
 check:
