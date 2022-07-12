@@ -2190,7 +2190,7 @@ mod test {
             dfgdg
         "#;
 
-        let err = FileDescriptor::parse(msg).err().expect("err");
+        let err = FileDescriptor::parse(msg).expect_err("err");
         assert_eq!(3, err.line);
     }
 
