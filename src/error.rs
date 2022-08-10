@@ -30,6 +30,15 @@ pub enum Error {
     #[error("Nix error: {0}")]
     Nix(#[from] nix::Error),
 
+    #[error("ttrpc err: local stream closed")]
+    LocalClosed,
+
+    #[error("ttrpc err: remote stream closed")]
+    RemoteClosed,
+
+    #[error("eof")]
+    Eof,
+
     #[error("ttrpc err: {0}")]
     Others(String),
 }

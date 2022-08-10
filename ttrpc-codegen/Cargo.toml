@@ -16,4 +16,4 @@ readme = "README.md"
 protobuf = { version = "2.14.0" }
 protobuf-codegen-pure = "2.14.0"
 protobuf-codegen = "2.14.0"
-ttrpc-compiler = "0.5.0"
+ttrpc-compiler = { version = "0.5.0", path = "../compiler" }

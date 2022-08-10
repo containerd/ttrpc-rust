@@ -22,6 +22,7 @@ ttrpc = { path = "../", features = ["async"] }
 ctrlc = { version = "3.0", features = ["termination"] }
 tokio = { version = "1.0.1", features = ["signal", "time"] }
 async-trait = "0.1.42"
+rand = "0.8.5"
 
 
 [[example]]
@@ -39,6 +40,14 @@ path = "./async-server.rs"
 [[example]]
 name = "async-client"
 path = "./async-client.rs"
+
+[[example]]
+name = "async-stream-server"
+path = "./async-stream-server.rs"
+
+[[example]]
+name = "async-stream-client"
+path = "./async-stream-client.rs"
 
 [build-dependencies]
 ttrpc-codegen = { path = "../ttrpc-codegen"}

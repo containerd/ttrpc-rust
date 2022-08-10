@@ -10,3 +10,5 @@ pub mod health;
 pub mod health_ttrpc;
 mod oci;
 pub mod types;
+pub mod streaming;
+pub mod streaming_ttrpc;

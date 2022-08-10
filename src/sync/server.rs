@@ -26,14 +26,13 @@ use std::thread::JoinHandle;
 use std::{io, thread};
 
 use super::utils::response_to_channel;
+use crate::common;
 #[cfg(not(target_os = "linux"))]
 use crate::common::set_fd_close_exec;
-use crate::common::{self, MESSAGE_TYPE_REQUEST};
 use crate::context;
 use crate::error::{get_status, Error, Result};
-use crate::proto::{Code, Request, Response};
+use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
-use crate::MessageHeader;
 use crate::{MethodHandler, TtrpcContext};
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
