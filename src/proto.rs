@@ -28,7 +28,7 @@ pub const FLAG_REMOTE_OPEN: u8 = 0x2;
 pub const FLAG_NO_DATA: u8 = 0x4;
 
 /// Message header of ttrpc.
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MessageHeader {
     pub length: u32,
     pub stream_id: u32,
@@ -150,7 +150,7 @@ impl MessageHeader {
 }
 
 /// Generic message of ttrpc.
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct GenMessage {
     pub header: MessageHeader,
     pub payload: Vec<u8>,
@@ -236,7 +236,7 @@ impl<M: protobuf::Message> Codec for M {
 }
 
 /// Message of ttrpc.
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Message<C> {
     pub header: MessageHeader,
     pub payload: C,

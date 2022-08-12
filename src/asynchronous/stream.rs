@@ -309,9 +309,11 @@ where
 }
 
 async fn _recv(rx: &mut ResultReceiver) -> Result<GenMessage> {
-    rx.recv()
-        .await
-        .unwrap_or_else(|| Err(Error::Others("Receive packet from recver error".to_string())))
+    rx.recv().await.unwrap_or_else(|| {
+        Err(Error::Others(
+            "Receive packet from recver error".to_string(),
+        ))
+    })
 }
 
 async fn _send(tx: &MessageSender, msg: GenMessage) -> Result<()> {
@@ -320,7 +322,7 @@ async fn _send(tx: &MessageSender, msg: GenMessage) -> Result<()> {
         .map_err(|e| Error::Others(format!("Send data packet to sender error {:?}", e)))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Client,
     Server,
