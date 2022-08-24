@@ -454,7 +454,7 @@ impl StreamReceiver {
                 let resp = Response::decode(&msg.payload)
                     .map_err(err_to_others_err!(e, "Decode message failed."))?;
                 if let Some(status) = resp.status.as_ref() {
-                    if status.get_code() != Code::OK {
+                    if status.code() != Code::OK {
                         return Err(Error::RpcStatus((*status).clone()));
                     }
                 }

@@ -231,8 +231,8 @@ impl Client {
         let res =
             Response::decode(&buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
 
-        let status = res.get_status();
-        if status.get_code() != Code::OK {
+        let status = res.status();
+        if status.code() != Code::OK {
             return Err(Error::RpcStatus((*status).clone()));
         }
 

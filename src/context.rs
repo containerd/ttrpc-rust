@@ -48,7 +48,7 @@ impl Context {
     }
 }
 
-pub fn from_pb(kvs: &protobuf::RepeatedField<KeyValue>) -> HashMap<String, Vec<String>> {
+pub fn from_pb(kvs: &Vec<KeyValue>) -> HashMap<String, Vec<String>> {
     let mut meta: HashMap<String, Vec<String>> = HashMap::new();
     for kv in kvs {
         if let Some(ref mut vl) = meta.get_mut(&kv.key) {
@@ -60,8 +60,9 @@ pub fn from_pb(kvs: &protobuf::RepeatedField<KeyValue>) -> HashMap<String, Vec<S
     meta
 }
 
-pub fn to_pb(kvs: HashMap<String, Vec<String>>) -> protobuf::RepeatedField<KeyValue> {
-    let mut meta: protobuf::RepeatedField<KeyValue> = protobuf::RepeatedField::default();
+pub fn to_pb(kvs: HashMap<String, Vec<String>>) -> Vec<KeyValue> {
+    let mut meta = Vec::with_capacity(kvs.len());
+
     for (k, vl) in kvs {
         for v in vl {
             let key = KeyValue {
@@ -72,6 +73,7 @@ pub fn to_pb(kvs: HashMap<String, Vec<String>>) -> protobuf::RepeatedField<KeyVa
             meta.push(key);
         }
     }
+
     meta
 }
 
@@ -83,7 +85,7 @@ mod tests {
     #[test]
     fn test_metadata() {
         // RepeatedField -> HashMap, test from_pb()
-        let mut src: protobuf::RepeatedField<KeyValue> = protobuf::RepeatedField::default();
+        let mut src = Vec::new();
         for i in &[
             ("key1", "value1-1"),
             ("key1", "value1-2"),
@@ -108,8 +110,7 @@ mod tests {
         assert_eq!(dst.get("key3"), None);
 
         // HashMap -> RepeatedField , test to_pb()
-        let src = context::to_pb(dst);
-        let mut kvs = src.into_vec();
+        let mut kvs = context::to_pb(dst);
         kvs.sort_by(|a, b| a.key.partial_cmp(&b.key).unwrap());
 
         assert_eq!(kvs.len(), 3);

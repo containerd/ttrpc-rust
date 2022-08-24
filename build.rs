@@ -7,10 +7,16 @@ fn main() {
     let path: PathBuf = [out_dir.clone(), "mod.rs".to_string()].iter().collect();
     fs::write(path, "pub mod ttrpc;").unwrap();
 
-    protobuf_codegen_pure::Codegen::new()
+    let customize = protobuf_codegen::Customize::default()
+        .gen_mod_rs(false)
+        .generate_accessors(true);
+
+    protobuf_codegen::Codegen::new()
+        .pure()
         .out_dir(out_dir)
         .inputs(&["src/ttrpc.proto"])
         .include("src")
+        .customize(customize)
         .run()
         .expect("Codegen failed.");
 }

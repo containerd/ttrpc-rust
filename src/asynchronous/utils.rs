@@ -145,13 +145,15 @@ macro_rules! async_duplex_streamimg_handler {
 #[macro_export]
 macro_rules! async_client_request {
     ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr, $cres: ident) => {
-        let mut creq = ::ttrpc::Request::new();
-        creq.set_service($server.to_string());
-        creq.set_method($method.to_string());
-        creq.set_timeout_nano($ctx.timeout_nano);
-        let md = ::ttrpc::context::to_pb($ctx.metadata);
-        creq.set_metadata(md);
-        creq.payload.reserve($req.compute_size() as usize);
+        let mut creq = ttrpc::Request {
+            service: $server.to_string(),
+            method: $method.to_string(),
+            timeout_nano: $ctx.timeout_nano,
+            metadata: ttrpc::context::to_pb($ctx.metadata),
+            payload: Vec::with_capacity($req.compute_size() as usize),
+            ..Default::default()
+        };
+
         {
             let mut s = CodedOutputStream::vec(&mut creq.payload);
             $req.write_to(&mut s)
