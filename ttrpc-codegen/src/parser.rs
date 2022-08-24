@@ -5,7 +5,7 @@ use std::str;
 
 use crate::model::*;
 use crate::str_lit::*;
-use protobuf_codegen::float;
+use protobuf_support::lexer::float;
 
 const FIRST_LINE: u32 = 1;
 const FIRST_COL: u32 = 1;
@@ -735,11 +735,15 @@ impl MessageBodyParseMode {
                 | MessageBodyParseMode::ExtendProto3 => true,
                 MessageBodyParseMode::Oneof => false,
             },
-            Rule::Optional | Rule::Required => match *self {
+            Rule::Optional => match *self {
                 MessageBodyParseMode::MessageProto2 | MessageBodyParseMode::ExtendProto2 => true,
-                MessageBodyParseMode::MessageProto3
-                | MessageBodyParseMode::ExtendProto3
-                | MessageBodyParseMode::Oneof => false,
+                MessageBodyParseMode::MessageProto3 | MessageBodyParseMode::ExtendProto3 => true,
+                MessageBodyParseMode::Oneof => false,
+            },
+            Rule::Required => match *self {
+                MessageBodyParseMode::MessageProto2 | MessageBodyParseMode::ExtendProto2 => true,
+                MessageBodyParseMode::MessageProto3 | MessageBodyParseMode::ExtendProto3 => false,
+                MessageBodyParseMode::Oneof => false,
             },
         }
     }
@@ -1974,7 +1978,7 @@ mod test {
         let mess = parse(msg, |p| p.next_field(MessageBodyParseMode::MessageProto2));
         assert_eq!("f", mess.name);
         assert_eq!("default", mess.options[0].name);
-        assert_eq!("10.0", mess.options[0].value.format());
+        assert_eq!("10", mess.options[0].value.format());
     }
 
     #[test]
