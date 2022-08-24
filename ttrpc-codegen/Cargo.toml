@@ -13,7 +13,7 @@ readme = "README.md"
 
 
 [dependencies]
-protobuf = { version = "2.14.0" }
-protobuf-codegen-pure = "2.14.0"
-protobuf-codegen = "2.14.0"
+protobuf = { version = "2.27.1" }
+protobuf-codegen-pure = "2.27.1"
+protobuf-codegen = "2.27.1"
 ttrpc-compiler = "0.5.0"
