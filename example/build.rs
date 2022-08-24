@@ -3,19 +3,23 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::fs::File;
-use std::io::{Read, Write};
-use ttrpc_codegen::Codegen;
-use ttrpc_codegen::Customize;
+use std::{
+    fs::File,
+    io::{Read, Write},
+};
+use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
 
 fn main() {
     let mut protos = vec![
+        "protocols/protos/github.com/gogo/protobuf/gogoproto/gogo.proto",
         "protocols/protos/github.com/kata-containers/agent/pkg/types/types.proto",
         "protocols/protos/agent.proto",
         "protocols/protos/health.proto",
         "protocols/protos/google/protobuf/empty.proto",
         "protocols/protos/oci.proto",
     ];
+
+    let protobuf_customized = ProtobufCustomize::default().gen_mod_rs(false);
 
     Codegen::new()
         .out_dir("protocols/sync")
@@ -25,6 +29,7 @@ fn main() {
         .customize(Customize {
             ..Default::default()
         })
+        .rust_protobuf_customize(protobuf_customized.clone())
         .run()
         .expect("Gen sync code failed.");
 
@@ -40,6 +45,7 @@ fn main() {
             async_all: true,
             ..Default::default()
         })
+        .rust_protobuf_customize(protobuf_customized.clone())
         .run()
         .expect("Gen async code failed.");
 

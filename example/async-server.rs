@@ -66,17 +66,17 @@ impl agent_ttrpc::AgentService for AgentService {
         _ctx: &::ttrpc::r#async::TtrpcContext,
         _req: agent::ListInterfacesRequest,
     ) -> ::ttrpc::Result<agent::Interfaces> {
-        let mut rp = protobuf::RepeatedField::new();
+        let mut rp = Vec::new();
 
         let mut i = types::Interface::new();
-        i.set_name("first".to_string());
+        i.name = "first".to_string();
         rp.push(i);
         let mut i = types::Interface::new();
-        i.set_name("second".to_string());
+        i.name = "second".to_string();
         rp.push(i);
 
         let mut i = agent::Interfaces::new();
-        i.set_Interfaces(rp);
+        i.Interfaces = rp;
 
         Ok(i)
     }
