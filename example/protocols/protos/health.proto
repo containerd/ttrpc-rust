@@ -17,6 +17,7 @@ option (gogoproto.benchgen_all) = true;
 
 message CheckRequest {
 	string service = 1;
+	optional string option_val = 2;
 }
 
 message HealthCheckResponse {
