@@ -1,26 +1,27 @@
 //! API to generate .rs files for ttrpc from protobuf
 //!
 //!
-//!```
-//!use ttrpc_codegen::Codegen;
-//!use ttrpc_codegen::Customize;
+//!```no_run
+//!use ttrpc_codegen::{Customize, Codegen, ProtobufCustomize};
 //!# use std::path::Path;
 //!
 //!fn main() {
 //!#   let protos: Vec<&Path> = vec![];
+//!    let protobuf_customized = ProtobufCustomize::default().gen_mod_rs(false);
+//!
 //!    Codegen::new()
-//!        .out_dir("protocols/sync")
+//!        .out_dir("protocols/asynchronous")
 //!        .inputs(&protos)
 //!        .include("protocols/protos")
 //!        .rust_protobuf()
 //!        .customize(Customize {
+//!            async_all: true,
 //!            ..Default::default()
 //!        })
+//!        .rust_protobuf_customize(protobuf_customized.clone())
 //!        .run()
-//!        .expect("Gen code failed.");
-//!}
-//!
-//!```
+//!        .expect("Gen async code failed.");
+//! }
 
 pub use protobuf_codegen::Customize as ProtobufCustomize;
 use std::collections::HashMap;
@@ -121,7 +122,8 @@ impl Codegen {
         let p = parse_and_typecheck(&includes, &inputs)?;
 
         if self.rust_protobuf {
-            protobuf_codegen_pure::Codegen::new()
+            protobuf_codegen::Codegen::new()
+                .pure()
                 .out_dir(&self.out_dir)
                 .inputs(&self.inputs)
                 .includes(&self.includes)

@@ -70,7 +70,7 @@ impl Client {
 
         let msg: GenMessage = Message::new_request(stream_id, req)
             .try_into()
-            .map_err(|e: protobuf::error::ProtobufError| Error::Others(e.to_string()))?;
+            .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
 
         let (tx, mut rx): (ResultSender, ResultReceiver) = mpsc::channel(100);
 
@@ -100,8 +100,8 @@ impl Client {
         let res = Response::decode(&msg.payload)
             .map_err(err_to_others_err!(e, "Unpack response error "))?;
 
-        let status = res.get_status();
-        if status.get_code() != Code::OK {
+        let status = res.status();
+        if status.code() != Code::OK {
             return Err(Error::RpcStatus((*status).clone()));
         }
 
@@ -119,7 +119,7 @@ impl Client {
 
         let mut msg: GenMessage = Message::new_request(stream_id, req)
             .try_into()
-            .map_err(|e: protobuf::error::ProtobufError| Error::Others(e.to_string()))?;
+            .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
 
         if streaming_client {
             msg.header.add_flags(FLAG_REMOTE_OPEN);

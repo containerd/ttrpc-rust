@@ -5,7 +5,7 @@
 
 use crate::parser::{Loc, Parser, ParserErrorWithLocation};
 use crate::str_lit::StrLit;
-use protobuf_codegen::float;
+use protobuf_support::lexer::float;
 
 /// Protobox syntax
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

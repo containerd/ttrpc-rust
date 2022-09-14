@@ -20,6 +20,8 @@ pub fn response_to_channel(
     res.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
     s.flush().map_err(err_to_others_err!(e, ""))?;
 
+    drop(s);
+
     let mh = MessageHeader {
         length: buf.len() as u32,
         stream_id,
@@ -81,6 +83,8 @@ macro_rules! client_request {
         $req.write_to(&mut s)
             .map_err(::ttrpc::err_to_others!(e, ""))?;
         s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
+
+        drop(s);
 
         let res = $self.client.request(creq)?;
         let mut s = CodedInputStream::from_bytes(&res.payload);

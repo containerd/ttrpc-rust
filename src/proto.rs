@@ -215,10 +215,10 @@ pub trait Codec {
 }
 
 impl<M: protobuf::Message> Codec for M {
-    type E = protobuf::error::ProtobufError;
+    type E = protobuf::Error;
 
     fn size(&self) -> u32 {
-        self.compute_size()
+        self.compute_size() as u32
     }
 
     fn encode(&self) -> Result<Vec<u8>, Self::E> {
@@ -226,6 +226,7 @@ impl<M: protobuf::Message> Codec for M {
         let mut s = CodedOutputStream::bytes(&mut buf);
         self.write_to(&mut s)?;
         s.flush()?;
+        drop(s);
         Ok(buf)
     }
 
@@ -380,12 +381,11 @@ mod tests {
         creq.set_service("grpc.TestServices".to_string());
         creq.set_method("Test".to_string());
         creq.set_timeout_nano(20 * 1000 * 1000);
-        let mut meta: protobuf::RepeatedField<KeyValue> = protobuf::RepeatedField::default();
-        meta.push(KeyValue {
+        let meta = vec![KeyValue {
             key: "test_key1".to_string(),
             value: "test_value1".to_string(),
             ..Default::default()
-        });
+        }];
         creq.set_metadata(meta);
         creq.payload = vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9];
         creq
