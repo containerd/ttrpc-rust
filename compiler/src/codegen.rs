@@ -39,12 +39,19 @@
 use std::collections::HashMap;
 
 use crate::Customize;
-use protobuf::compiler_plugin;
-use protobuf::descriptor::*;
-use protobuf::descriptorx::*;
+use protobuf::{
+    compiler_plugin::{GenRequest, GenResult},
+    descriptor::*,
+    descriptorx::*,
+    plugin::{
+        CodeGeneratorRequest, CodeGeneratorResponse, CodeGeneratorResponse_Feature,
+        CodeGeneratorResponse_File,
+    },
+    Message,
+};
 use protobuf_codegen::code_writer::CodeWriter;
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::{self, stdin, stdout, Write};
 use std::path::Path;
 
 use super::util::{
@@ -598,7 +605,7 @@ fn gen_file(
     file: &FileDescriptorProto,
     root_scope: &RootScope,
     customize: &Customize,
-) -> Option<compiler_plugin::GenResult> {
+) -> Option<GenResult> {
     if file.get_service().is_empty() {
         return None;
     }
@@ -624,7 +631,7 @@ fn gen_file(
         }
     }
 
-    Some(compiler_plugin::GenResult {
+    Some(GenResult {
         name: base + "_ttrpc.rs",
         content: v,
     })
@@ -634,7 +641,7 @@ pub fn gen(
     file_descriptors: &[FileDescriptorProto],
     files_to_generate: &[String],
     customize: &Customize,
-) -> Vec<compiler_plugin::GenResult> {
+) -> Vec<GenResult> {
     let files_map: HashMap<&str, &FileDescriptorProto> =
         file_descriptors.iter().map(|f| (f.get_name(), f)).collect();
 
@@ -675,7 +682,7 @@ pub fn gen_and_write(
 }
 
 pub fn protoc_gen_grpc_rust_main() {
-    compiler_plugin::plugin_main(|file_descriptors, files_to_generate| {
+    plugin_main(|file_descriptors, files_to_generate| {
         gen(
             file_descriptors,
             files_to_generate,
@@ -684,4 +691,41 @@ pub fn protoc_gen_grpc_rust_main() {
             },
         )
     });
+}
+
+fn plugin_main<F>(gen: F)
+where
+    F: Fn(&[FileDescriptorProto], &[String]) -> Vec<GenResult>,
+{
+    plugin_main_2(|r| gen(r.file_descriptors, r.files_to_generate))
+}
+
+fn plugin_main_2<F>(gen: F)
+where
+    F: Fn(&GenRequest) -> Vec<GenResult>,
+{
+    let req = CodeGeneratorRequest::parse_from_reader(&mut stdin()).unwrap();
+    let result = gen(&GenRequest {
+        file_descriptors: &req.get_proto_file(),
+        files_to_generate: &req.get_file_to_generate(),
+        parameter: req.get_parameter(),
+    });
+    let mut resp = CodeGeneratorResponse::new();
+    resp.set_supported_features(CodeGeneratorResponse_Feature::FEATURE_PROTO3_OPTIONAL as u64);
+    resp.set_file(
+        result
+            .iter()
+            .map(|file| {
+                let mut r = CodeGeneratorResponse_File::new();
+                r.set_name(file.name.to_string());
+                r.set_content(
+                    std::str::from_utf8(file.content.as_ref())
+                        .unwrap()
+                        .to_string(),
+                );
+                r
+            })
+            .collect(),
+    );
+    resp.write_to_writer(&mut stdout()).unwrap();
 }
