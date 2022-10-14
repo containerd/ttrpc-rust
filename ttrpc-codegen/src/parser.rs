@@ -351,12 +351,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_char_if_in(&mut self, alphabet: &str) -> Option<char> {
-        for c in alphabet.chars() {
-            if self.next_char_if_eq(c) {
-                return Some(c);
-            }
-        }
-        None
+        alphabet.chars().find(|&c| self.next_char_if_eq(c))
     }
 
     fn next_char_expect_eq(&mut self, expect: char) -> ParserResult<()> {
