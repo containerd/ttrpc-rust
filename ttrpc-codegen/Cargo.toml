@@ -16,5 +16,5 @@ readme = "README.md"
 protobuf = "2.27.1"
 protobuf-codegen = "2.27.1"
 # protobuf-codegen-pure3 is a protobuf-codegen-pure version that supports proto3 optional fields
-protobuf-codegen-pure = { version = "2.27.3", package = "protobuf-codegen-pure3" }
+protobuf-codegen-pure = { version = "2.28.1", package = "protobuf-codegen-pure3" }
 ttrpc-compiler = "0.5.0"
