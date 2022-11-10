@@ -103,7 +103,7 @@ where
 {
     pub async fn recv(&mut self) -> Result<P> {
         let msg_buf = self.rx.recv().await?;
-        P::decode(&msg_buf).map_err(err_to_others_err!(e, "Decode message failed."))
+        P::decode(msg_buf).map_err(err_to_others_err!(e, "Decode message failed."))
     }
 }
 
@@ -184,7 +184,7 @@ where
             return Ok(None);
         }
         let msg_buf = res?;
-        Q::decode(&msg_buf)
+        Q::decode(msg_buf)
             .map_err(err_to_others_err!(e, "Decode message failed."))
             .map(Some)
     }
@@ -221,7 +221,7 @@ where
     pub async fn close_and_recv(&mut self) -> Result<P> {
         self.inner.close_send().await?;
         let msg_buf = self.inner.recv().await?;
-        P::decode(&msg_buf).map_err(err_to_others_err!(e, "Decode message failed."))
+        P::decode(msg_buf).map_err(err_to_others_err!(e, "Decode message failed."))
     }
 }
 
@@ -273,7 +273,7 @@ where
             return Ok(None);
         }
         let msg_buf = res?;
-        P::decode(&msg_buf)
+        P::decode(msg_buf)
             .map_err(err_to_others_err!(e, "Decode message failed."))
             .map(Some)
     }
@@ -302,7 +302,7 @@ where
             return Ok(None);
         }
         let msg_buf = res?;
-        Q::decode(&msg_buf)
+        Q::decode(msg_buf)
             .map_err(err_to_others_err!(e, "Decode message failed."))
             .map(Some)
     }

@@ -229,7 +229,7 @@ impl Client {
 
         let buf = result?;
         let res =
-            Response::decode(&buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
+            Response::decode(buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
 
         let status = res.status();
         if status.code() != Code::OK {

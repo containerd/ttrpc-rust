@@ -97,7 +97,7 @@ impl Client {
         };
 
         let msg = result?;
-        let res = Response::decode(&msg.payload)
+        let res = Response::decode(msg.payload)
             .map_err(err_to_others_err!(e, "Unpack response error "))?;
 
         let status = res.status();
