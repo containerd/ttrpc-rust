@@ -27,7 +27,7 @@ use tokio::{
     task,
     time::timeout,
 };
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use tokio_vsock::VsockListener;
 
 use crate::asynchronous::unix_incoming::UnixIncoming;
@@ -111,7 +111,7 @@ impl Server {
         self
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub fn set_domain_vsock(mut self) -> Self {
         self.domain = Some(Domain::Vsock);
         self
@@ -157,7 +157,7 @@ impl Server {
 
                 self.do_start(incoming).await
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             Some(Domain::Vsock) => {
                 let incoming = unsafe { VsockListener::from_raw_fd(listenfd).incoming() };
                 self.do_start(incoming).await

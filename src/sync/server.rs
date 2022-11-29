@@ -27,7 +27,7 @@ use std::{io, thread};
 
 use super::utils::response_to_channel;
 use crate::common;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 use crate::common::set_fd_close_exec;
 use crate::context;
 use crate::error::{get_status, Error, Result};
@@ -329,10 +329,10 @@ impl Server {
 
         self.listener_quit_flag.store(false, Ordering::SeqCst);
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         let fds = pipe2(nix::fcntl::OFlag::O_CLOEXEC)?;
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         let fds = {
             let (rfd, wfd) = pipe()?;
             set_fd_close_exec(rfd)?;
@@ -435,7 +435,7 @@ impl Server {
                         break;
                     }
 
-                    #[cfg(target_os = "linux")]
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
                     let fd = match accept4(listener, SockFlag::SOCK_CLOEXEC) {
                         Ok(fd) => fd,
                         Err(e) => {
@@ -447,7 +447,7 @@ impl Server {
                     // Non Linux platforms do not support accept4 with SOCK_CLOEXEC flag, so instead
                     // use accept and call fcntl separately to set SOCK_CLOEXEC.
                     // Because of this there is chance of the descriptor leak if fork + exec happens in between.
-                    #[cfg(not(target_os = "linux"))]
+                    #[cfg(not(any(target_os = "linux", target_os = "android")))]
                     let fd = match accept(listener) {
                         Ok(fd) => {
                             if let Err(err) = set_fd_close_exec(fd) {
