@@ -6,7 +6,10 @@
 //! Common functions and macros.
 
 use crate::error::{Error, Result};
-#[cfg(any(feature = "async", not(target_os = "linux")))]
+#[cfg(any(
+    feature = "async",
+    not(any(target_os = "linux", target_os = "android"))
+))]
 use nix::fcntl::FdFlag;
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::sys::socket::*;
@@ -15,7 +18,7 @@ use std::os::unix::io::RawFd;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Domain {
     Unix,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     Vsock,
 }
 
@@ -30,7 +33,7 @@ pub(crate) fn do_listen(listener: RawFd) -> Result<()> {
     listen(listener, 10).map_err(|e| Error::Socket(e.to_string()))
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn parse_sockaddr(addr: &str) -> Result<(Domain, &str)> {
     if let Some(addr) = addr.strip_prefix("unix://") {
         return Ok((Domain::Unix, addr));
@@ -43,7 +46,7 @@ fn parse_sockaddr(addr: &str) -> Result<(Domain, &str)> {
     Err(Error::Others(format!("Scheme {:?} is not supported", addr)))
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn parse_sockaddr(addr: &str) -> Result<(Domain, &str)> {
     if let Some(addr) = addr.strip_prefix("unix://") {
         if addr.starts_with('@') {
@@ -57,7 +60,10 @@ fn parse_sockaddr(addr: &str) -> Result<(Domain, &str)> {
     Err(Error::Others(format!("Scheme {:?} is not supported", addr)))
 }
 
-#[cfg(any(feature = "async", not(target_os = "linux")))]
+#[cfg(any(
+    feature = "async",
+    not(any(target_os = "linux", target_os = "android"))
+))]
 pub(crate) fn set_fd_close_exec(fd: RawFd) -> Result<RawFd> {
     if let Err(e) = fcntl(fd, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)) {
         return Err(Error::Others(format!(
@@ -69,12 +75,12 @@ pub(crate) fn set_fd_close_exec(fd: RawFd) -> Result<RawFd> {
 }
 
 // SOCK_CLOEXEC flag is Linux specific
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub(crate) const SOCK_CLOEXEC: SockFlag = SockFlag::SOCK_CLOEXEC;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub(crate) const SOCK_CLOEXEC: SockFlag = SockFlag::empty();
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn make_addr(domain: Domain, sockaddr: &str) -> Result<UnixAddr> {
     match domain {
         Domain::Unix => {
@@ -90,7 +96,7 @@ fn make_addr(domain: Domain, sockaddr: &str) -> Result<UnixAddr> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn make_addr(_domain: Domain, sockaddr: &str) -> Result<UnixAddr> {
     UnixAddr::new(sockaddr).map_err(err_to_others_err!(e, ""))
 }
@@ -114,7 +120,7 @@ fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, SockAddr)> {
 
     let (fd, sockaddr) = match domain {
         Domain::Unix => get_sock_addr(domain, sockaddrv)?,
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         Domain::Vsock => {
             let sockaddr_port_v: Vec<&str> = sockaddrv.split(':').collect();
             if sockaddr_port_v.len() != 2 {
@@ -143,13 +149,13 @@ fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, SockAddr)> {
 }
 
 // Vsock is not supported on non Linux.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use libc::VMADDR_CID_ANY;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 const VMADDR_CID_ANY: u32 = 0;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use libc::VMADDR_CID_HOST;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 const VMADDR_CID_HOST: u32 = 0;
 
 pub(crate) fn do_bind(sockaddr: &str) -> Result<(RawFd, Domain)> {
@@ -194,7 +200,7 @@ macro_rules! cfg_async {
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn test_parse_sockaddr() {
         for i in &[
@@ -226,7 +232,7 @@ mod tests {
         }
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     #[test]
     fn test_parse_sockaddr() {
         for i in &[
