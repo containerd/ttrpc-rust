@@ -495,7 +495,7 @@ impl<'a> Resolver<'a> {
             for (oneof_index, oneof) in input.oneofs.iter().enumerate() {
                 let oneof_index = oneof_index as i32;
                 for f in &oneof.fields {
-                    fields.push(self.field(f, Some(oneof_index as i32), &nested_path_in_file)?);
+                    fields.push(self.field(f, Some(oneof_index), &nested_path_in_file)?);
                 }
             }
 
@@ -908,7 +908,7 @@ impl<'a> Resolver<'a> {
                 if field_type != &model::FieldType::Bool {
                     Err(())
                 } else {
-                    Ok(protobuf::UnknownValue::Varint(if b { 1 } else { 0 }))
+                    Ok(protobuf::UnknownValue::Varint(u64::from(b)))
                 }
             }
             // TODO: check overflow
@@ -938,7 +938,7 @@ impl<'a> Resolver<'a> {
                 | model::FieldType::Int32
                 | model::FieldType::Uint64
                 | model::FieldType::Uint32 => Ok(protobuf::UnknownValue::Varint(v as u64)),
-                model::FieldType::Sint64 => Ok(protobuf::UnknownValue::sint64(v as i64)),
+                model::FieldType::Sint64 => Ok(protobuf::UnknownValue::sint64(v)),
                 model::FieldType::Sint32 => Ok(protobuf::UnknownValue::sint32(v as i32)),
                 _ => Err(()),
             },

@@ -258,7 +258,7 @@ impl<'a> Run<'a> {
         let mut this_file_deps = HashMap::new();
         self.get_all_deps_already_parsed(&parsed, &mut this_file_deps);
 
-        let this_file_deps: Vec<_> = this_file_deps.into_iter().map(|(_, v)| v.parsed).collect();
+        let this_file_deps: Vec<_> = this_file_deps.into_values().map(|v| v.parsed).collect();
 
         let descriptor =
             convert::file_descriptor(protobuf_path.to_owned(), &parsed, &this_file_deps).map_err(
@@ -346,8 +346,8 @@ pub fn parse_and_typecheck(
 
     let file_descriptors: Vec<_> = run
         .parsed_files
-        .into_iter()
-        .map(|(_, v)| v.descriptor)
+        .into_values()
+        .map(|v| v.descriptor)
         .collect();
 
     Ok(ParsedAndTypechecked {

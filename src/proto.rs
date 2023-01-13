@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(&buf, &PROTOBUF_REQUEST);
         let dreq = Request::decode(&buf).unwrap();
         assert_eq!(creq, dreq);
-        let dreq2 = Request::decode(&PROTOBUF_REQUEST).unwrap();
+        let dreq2 = Request::decode(PROTOBUF_REQUEST).unwrap();
         assert_eq!(creq, dreq2);
     }
 
@@ -470,7 +470,7 @@ mod tests {
         buf.extend_from_slice(&[0x0, 0x0]);
         let msg = Message::<Request>::read_from(&*buf).await.unwrap();
         assert_eq!(msg.header.length, 67);
-        assert_eq!(msg.header.length, msg.payload.size() as u32);
+        assert_eq!(msg.header.length, msg.payload.size());
         assert_eq!(msg.header.stream_id, 0x123456);
         assert_eq!(msg.header.type_, MESSAGE_TYPE_REQUEST);
         assert_eq!(msg.header.flags, 0xef);

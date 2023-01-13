@@ -347,16 +347,11 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_char_if_eq(&mut self, expect: char) -> bool {
-        self.next_char_if(|c| c == expect) != None
+        self.next_char_if(|c| c == expect).is_some()
     }
 
     fn next_char_if_in(&mut self, alphabet: &str) -> Option<char> {
-        for c in alphabet.chars() {
-            if self.next_char_if_eq(c) {
-                return Some(c);
-            }
-        }
-        None
+        alphabet.chars().find(|&c| self.next_char_if_eq(c))
     }
 
     fn next_char_expect_eq(&mut self, expect: char) -> ParserResult<()> {
@@ -430,7 +425,7 @@ impl<'a> Lexer<'a> {
         Ok(
             if self.skip_if_lookahead_is_str("0x") || self.skip_if_lookahead_is_str("0X") {
                 let s = self.take_while(Lexer::is_ascii_hexdigit);
-                Some(u64::from_str_radix(s, 16)? as u64)
+                Some(u64::from_str_radix(s, 16)?)
             } else {
                 None
             },
@@ -449,7 +444,7 @@ impl<'a> Lexer<'a> {
 
         let pos = clone.pos;
 
-        Ok(if clone.next_char_if(Lexer::is_ascii_digit) != None {
+        Ok(if clone.next_char_if(Lexer::is_ascii_digit).is_some() {
             clone.take_while(Lexer::is_ascii_digit);
             let value = clone.input[pos..clone.pos].parse()?;
             *self = clone;
@@ -517,7 +512,7 @@ impl<'a> Lexer<'a> {
 
     // exponent  = ( "e" | "E" ) [ "+" | "-" ] decimals
     fn next_exponent_opt(&mut self) -> ParserResult<Option<()>> {
-        if self.next_char_if_in("eE") != None {
+        if self.next_char_if_in("eE").is_some() {
             self.next_char_if_in("+-");
             self.next_decimal_digits()?;
             Ok(Some(()))
@@ -537,7 +532,7 @@ impl<'a> Lexer<'a> {
             if self.next_char_if_eq('.') {
                 self.next_decimal_digits()?;
                 self.next_exponent_opt()?;
-            } else if self.next_exponent_opt()? == None {
+            } else if (self.next_exponent_opt()?).is_none() {
                 return Err(ParserError::IncorrectFloatLit);
             }
         }
@@ -931,7 +926,7 @@ impl<'a> Parser<'a> {
     }
 
     fn next_ident_if_eq(&mut self, word: &str) -> ParserResult<bool> {
-        Ok(self.next_ident_if_in(&[word])? != None)
+        Ok((self.next_ident_if_in(&[word])?).is_some())
     }
 
     pub fn next_ident_expect_eq(&mut self, word: &str) -> ParserResult<()> {
@@ -950,7 +945,10 @@ impl<'a> Parser<'a> {
     }
 
     fn next_symbol_if_eq(&mut self, symbol: char) -> ParserResult<bool> {
-        Ok(self.next_token_if(|token| matches!(*token, Token::Symbol(c) if c == symbol))? != None)
+        Ok(
+            (self.next_token_if(|token| matches!(*token, Token::Symbol(c) if c == symbol))?)
+                .is_some(),
+        )
     }
 
     fn next_symbol_expect_eq(&mut self, symbol: char) -> ParserResult<()> {
