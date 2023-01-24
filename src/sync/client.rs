@@ -14,18 +14,15 @@
 
 //! Sync client of ttrpc.
 
-use nix::sys::socket::*;
-use nix::unistd::close;
+
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::{io, thread};
+use std::{thread};
 
-#[cfg(target_os = "macos")]
-use crate::common::set_fd_close_exec;
-use crate::common::{client_connect, SOCK_CLOEXEC};
 use crate::error::{Error, Result};
+use crate::sync::sys::{ClientConnection};
 use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 use crate::sync::channel::{read_message, write_message};
 use std::time::Duration;
@@ -36,38 +33,36 @@ type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 /// A ttrpc Client (sync).
 #[derive(Clone)]
 pub struct Client {
-    _fd: RawFd,
+    _fd: Arc<ClientConnection>,
     sender_tx: Sender,
-    _client_close: Arc<ClientClose>,
 }
 
 impl Client {
     pub fn connect(sockaddr: &str) -> Result<Client> {
-        let fd = unsafe { client_connect(sockaddr)? };
-        Ok(Self::new(fd))
+        let conn = ClientConnection::client_connect(sockaddr)?;
+        
+        Ok(Self::new_client(conn))
     }
 
     /// Initialize a new [`Client`] from raw file descriptor.
     pub fn new(fd: RawFd) -> Client {
+        let conn = ClientConnection::new(fd);
+
+        Self::new_client(conn)
+    }
+
+    fn new_client(pipe_client: ClientConnection) -> Client {
+        let client = Arc::new(pipe_client);
+        
+
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
 
-        let (recver_fd, close_fd) =
-            socketpair(AddressFamily::Unix, SockType::Stream, None, SOCK_CLOEXEC).unwrap();
-
-        // MacOS doesn't support descriptor creation with SOCK_CLOEXEC automically,
-        // so there is a chance of leak if fork + exec happens in between of these calls.
-        #[cfg(target_os = "macos")]
-        {
-            set_fd_close_exec(recver_fd).unwrap();
-            set_fd_close_exec(close_fd).unwrap();
-        }
-
-        let client_close = Arc::new(ClientClose { fd, close_fd });
-
+        
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
 
         //Sender
         let recver_map = recver_map_orig.clone();
+        let sender_client = client.clone();
         thread::spawn(move || {
             let mut stream_id: u32 = 1;
             for (buf, recver_tx) in rx.iter() {
@@ -80,7 +75,8 @@ impl Client {
                 }
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
-                if let Err(e) = write_message(fd, mh, buf) {
+                let c = sender_client.get_pipe_connection();
+                if let Err(e) = write_message(&c, mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
                         let mut map = recver_map.lock().unwrap();
@@ -95,53 +91,28 @@ impl Client {
         });
 
         //Recver
+        let reciever_client = client.clone();
         thread::spawn(move || {
-            let mut pollers = vec![
-                libc::pollfd {
-                    fd: recver_fd,
-                    events: libc::POLLIN,
-                    revents: 0,
-                },
-                libc::pollfd {
-                    fd,
-                    events: libc::POLLIN,
-                    revents: 0,
-                },
-            ];
+          
 
             loop {
-                let returned = unsafe {
-                    let pollers: &mut [libc::pollfd] = &mut pollers;
-                    libc::poll(
-                        pollers as *mut _ as *mut libc::pollfd,
-                        pollers.len() as _,
-                        -1,
-                    )
-                };
-
-                if returned == -1 {
-                    let err = io::Error::last_os_error();
-                    if err.raw_os_error() == Some(libc::EINTR) {
+                
+                match reciever_client.ready() {
+                    Ok(None) => {
                         continue;
                     }
-
-                    error!("fatal error in process reaper:{}", err);
-                    break;
-                } else if returned < 1 {
-                    continue;
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("pipeConnection ready error {:?}", e);
+                        break;
+                    }
                 }
-
-                if pollers[0].revents != 0 {
-                    break;
-                }
-
-                if pollers[pollers.len() - 1].revents == 0 {
-                    continue;
-                }
-
                 let mh;
                 let buf;
-                match read_message(fd) {
+
+                let pipe_connection = reciever_client.get_pipe_connection();
+
+                match read_message(&pipe_connection) {
                     Ok((x, y)) => {
                         mh = x;
                         buf = y;
@@ -190,10 +161,9 @@ impl Client {
                 map.remove(&mh.stream_id);
             }
 
-            let _ = close(recver_fd).map_err(|e| {
+            let _ = reciever_client.close_receiver().map_err(|e| {
                 warn!(
-                    "failed to close recver_fd: {} with error: {:?}",
-                    recver_fd, e
+                    "failed to close with error: {:?}", e
                 )
             });
 
@@ -201,9 +171,8 @@ impl Client {
         });
 
         Client {
-            _fd: fd,
+            _fd: client,
             sender_tx,
-            _client_close: client_close,
         }
     }
     pub fn request(&self, req: Request) -> Result<Response> {
@@ -239,15 +208,9 @@ impl Client {
     }
 }
 
-struct ClientClose {
-    fd: RawFd,
-    close_fd: RawFd,
-}
-
-impl Drop for ClientClose {
+impl Drop for ClientConnection {
     fn drop(&mut self) {
-        close(self.close_fd).unwrap();
-        close(self.fd).unwrap();
-        trace!("All client is droped");
+        self.close().unwrap();
+        trace!("All client is dropped");
     }
 }
