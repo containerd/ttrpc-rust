@@ -89,7 +89,7 @@ fn read_message_header(fd: RawFd) -> Result<MessageHeader> {
     if size != MESSAGE_HEADER_LENGTH {
         return Err(sock_error_msg(
             size,
-            format!("Message header length {} is too small", size),
+            format!("Message header length {size} is too small"),
         ));
     }
 
@@ -132,7 +132,7 @@ fn write_message_header(fd: RawFd, mh: MessageHeader) -> Result<()> {
     if size != MESSAGE_HEADER_LENGTH {
         return Err(sock_error_msg(
             size,
-            format!("Send Message header length size {} is not right", size),
+            format!("Send Message header length size {size} is not right"),
         ));
     }
 
@@ -146,7 +146,7 @@ pub fn write_message(fd: RawFd, mh: MessageHeader, buf: Vec<u8>) -> Result<()> {
     if size != buf.len() {
         return Err(sock_error_msg(
             size,
-            format!("Send Message length size {} is not right", size),
+            format!("Send Message length size {size} is not right"),
         ));
     }
 

@@ -454,8 +454,7 @@ impl HandlerContext {
                         get_status(
                             Code::INVALID_ARGUMENT,
                             format!(
-                                "Stream id {}: data close message connot include data",
-                                stream_id
+                                "Stream id {stream_id}: data close message connot include data"
                             ),
                         ),
                     )
@@ -470,7 +469,7 @@ impl HandlerContext {
                             stream_id,
                             get_status(
                                 Code::INVALID_ARGUMENT,
-                                format!("Stream id {}: handling data error: {}", stream_id, e),
+                                format!("Stream id {stream_id}: handling data error: {e}"),
                             ),
                         )
                         .await;
@@ -616,8 +615,7 @@ impl HandlerContext {
         task.await
             .unwrap_or_else(|e| {
                 Err(Error::Others(format!(
-                    "stream {} task got error {:?}",
-                    path, e
+                    "stream {path} task got error {e:?}"
                 )))
             })
             .map_err(|e| get_status(Code::UNKNOWN, e))

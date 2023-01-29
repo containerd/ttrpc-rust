@@ -269,5 +269,5 @@ pub(crate) fn new_unix_stream_from_raw_fd(fd: RawFd) -> UnixStream {
 }
 
 pub(crate) fn get_path(service: &str, method: &str) -> String {
-    format!("/{}/{}", service, method)
+    format!("/{service}/{method}")
 }
