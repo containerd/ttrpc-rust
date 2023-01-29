@@ -41,9 +41,9 @@ trait ProtobufOptions {
 impl<'a> ProtobufOptions for &'a [model::ProtobufOption] {
     fn by_name(&self, name: &str) -> Option<&model::ProtobufConstant> {
         let option_name = name;
-        for &model::ProtobufOption {
-            ref name,
-            ref value,
+        for model::ProtobufOption {
+            name,
+            value,
         } in *self
         {
             if name == option_name {
@@ -224,7 +224,7 @@ impl AbsolutePath {
         } else {
             assert!(!path.starts_with('.'));
             assert!(!path.ends_with('.'));
-            AbsolutePath::new(format!(".{}", path))
+            AbsolutePath::new(format!(".{path}"))
         }
     }
 
@@ -396,7 +396,7 @@ struct Resolver<'a> {
 
 impl<'a> Resolver<'a> {
     fn map_entry_name_for_field_name(field_name: &str) -> String {
-        format!("{}_MapEntry", field_name)
+        format!("{field_name}_MapEntry")
     }
 
     fn map_entry_field(
@@ -964,7 +964,7 @@ impl<'a> Resolver<'a> {
         v.map_err(|()| {
             ConvertError::UnsupportedExtensionType(
                 option_name.to_owned(),
-                format!("{:?}", field_type),
+                format!("{field_type:?}"),
             )
         })
     }

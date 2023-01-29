@@ -912,7 +912,7 @@ impl<'a> Parser<'a> {
 
     fn next_ident_if_in(&mut self, idents: &[&str]) -> ParserResult<Option<String>> {
         let v = match self.lookahead()? {
-            Some(&Token::Ident(ref next)) => {
+            Some(Token::Ident(next)) => {
                 if idents.iter().any(|i| i == next) {
                     next.clone()
                 } else {
