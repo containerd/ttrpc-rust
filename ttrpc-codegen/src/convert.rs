@@ -41,11 +41,7 @@ trait ProtobufOptions {
 impl<'a> ProtobufOptions for &'a [model::ProtobufOption] {
     fn by_name(&self, name: &str) -> Option<&model::ProtobufConstant> {
         let option_name = name;
-        for model::ProtobufOption {
-            name,
-            value,
-        } in *self
-        {
+        for model::ProtobufOption { name, value } in *self {
             if name == option_name {
                 return Some(value);
             }
