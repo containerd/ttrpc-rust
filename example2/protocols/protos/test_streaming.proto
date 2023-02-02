@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package test_streaming;
+
+message TestStreamingMessage {
+    string Name = 1;
+};
+
+service TestStreamingService {
+    // A streaming argument, a non-streaming return value
+    rpc Echo0(stream TestStreamingMessage) returns (TestStreamingMessage);
+    // Both the argument and the return value are streaming
+    rpc Echo1(stream TestStreamingMessage) returns (stream TestStreamingMessage);
+    // A non-streaming argument, a streaming return value
+    rpc Echo2(TestStreamingMessage) returns (stream TestStreamingMessage);
+    // Both the argument and the return value aren't streaming
+    rpc Echo3(TestStreamingMessage) returns (TestStreamingMessage);
+};
