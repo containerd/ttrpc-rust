@@ -17,7 +17,6 @@ fn main() {
         "protocols/protos/health.proto",
         "protocols/protos/google/protobuf/empty.proto",
         "protocols/protos/oci.proto",
-        "protocols/protos/test.proto",
     ];
 
     let protobuf_customized = ProtobufCustomize::default().gen_mod_rs(false);
@@ -36,7 +35,6 @@ fn main() {
 
     // Only async support stream currently.
     protos.push("protocols/protos/streaming.proto");
-    protos.push("protocols/protos/test_streaming.proto");
 
     Codegen::new()
         .out_dir("protocols/asynchronous")

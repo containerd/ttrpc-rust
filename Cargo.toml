@@ -11,7 +11,8 @@ homepage = "https://github.com/containerd/ttrpc-rust"
 description = "A Rust version of ttrpc."
 
 [dependencies]
-protobuf = { version = "3.1.0" }
+prost = { version = "0.11", optional = true }
+protobuf = "3.1.0"
 libc = { version = "0.2.59", features = [ "extra_traits" ] }
 nix = "0.23.0"
 log = "0.4"
@@ -27,11 +28,13 @@ tokio-vsock = { version = "0.3.1", optional = true }
 
 [build-dependencies]
 protobuf-codegen = "3.1.0"
+prost-build = "0.11"
 
 [features]
 default = ["sync"]
-async = ["async-trait", "tokio", "futures", "tokio-vsock"]
+async = ["dep:async-trait", "dep:tokio", "dep:futures", "dep:tokio-vsock"]
 sync = []
+prost = ["dep:prost"]
 
 [package.metadata.docs.rs]
 all-features = true

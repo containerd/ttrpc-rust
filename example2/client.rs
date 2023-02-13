@@ -15,23 +15,23 @@
 mod protocols;
 mod utils;
 
-use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
+use protocols::sync::{agent, health};
 use std::thread;
 use ttrpc::context::{self, Context};
 use ttrpc::Client;
 
 fn main() {
     let c = Client::connect(utils::SOCK_ADDR).unwrap();
-    let hc = health_ttrpc::HealthClient::new(c.clone());
-    let ac = agent_ttrpc::AgentServiceClient::new(c);
+    let health_client = health::HealthClient::new(c.clone());
+    let agent_service_client = agent::AgentServiceClient::new(c);
 
-    let thc = hc.clone();
-    let tac = ac.clone();
+    let thread_health_client = health_client.clone();
+    let thread_agent_service_client = agent_service_client.clone();
 
     let now = std::time::Instant::now();
 
     let t = thread::spawn(move || {
-        let req = health::CheckRequest::new();
+        let req = health::CheckRequest::default();
         println!(
             "OS Thread {:?} - {} started: {:?}",
             std::thread::current().id(),
@@ -42,7 +42,7 @@ fn main() {
             "OS Thread {:?} - {} -> {:?} ended: {:?}",
             std::thread::current().id(),
             "health.check()",
-            thc.check(default_ctx(), &req),
+            thread_health_client.check(default_ctx(), &req),
             now.elapsed(),
         );
     });
@@ -55,7 +55,9 @@ fn main() {
             now.elapsed(),
         );
 
-        let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new()) {
+        let show = match thread_agent_service_client
+            .list_interfaces(default_ctx(), &agent::ListInterfacesRequest::default())
+        {
             Err(e) => format!("{:?}", e),
             Ok(s) => format!("{:?}", s),
         };
@@ -74,7 +76,9 @@ fn main() {
         "agent.online_cpu_mem()",
         now.elapsed()
     );
-    let show = match ac.online_cpu_mem(default_ctx(), &agent::OnlineCPUMemRequest::new()) {
+    let show = match agent_service_client
+        .online_cpu_mem(default_ctx(), &agent::OnlineCpuMemRequest::default())
+    {
         Err(e) => format!("{:?}", e),
         Ok(s) => format!("{:?}", s),
     };
@@ -92,10 +96,12 @@ fn main() {
         "health.version()",
         now.elapsed()
     );
+    let mut req = health::CheckRequest::default();
+    req.service = "haha".to_owned();
     println!(
         "Main OS Thread - {} -> {:?} ended: {:?}",
         "health.version()",
-        hc.version(default_ctx(), &health::CheckRequest::new()),
+        health_client.version(default_ctx(), &req),
         now.elapsed()
     );
 

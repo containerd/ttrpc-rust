@@ -104,7 +104,10 @@ pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
 
     if mh.length > MESSAGE_LENGTH_MAX as u32 {
         return Err(get_rpc_status(
+            #[cfg(not(feature = "prost"))]
             Code::INVALID_ARGUMENT,
+            #[cfg(feature = "prost")]
+            Code::InvalidArgument,
             format!(
                 "message length {} exceed maximum message size of {}",
                 mh.length, MESSAGE_LENGTH_MAX

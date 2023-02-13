@@ -11,6 +11,7 @@ mod compiled {
 pub use compiled::ttrpc::*;
 
 use byteorder::{BigEndian, ByteOrder};
+#[cfg(not(feature = "prost"))]
 use protobuf::{CodedInputStream, CodedOutputStream};
 
 #[cfg(feature = "async")]
@@ -181,8 +182,17 @@ impl GenMessage {
             .map_err(|e| Error::Socket(e.to_string()))?;
 
         if header.length > MESSAGE_LENGTH_MAX as u32 {
+            #[cfg(not(feature = "prost"))]
             return Err(get_rpc_status(
                 Code::INVALID_ARGUMENT,
+                format!(
+                    "message length {} exceed maximum message size of {}",
+                    header.length, MESSAGE_LENGTH_MAX
+                ),
+            ));
+            #[cfg(feature = "prost")]
+            return Err(get_rpc_status(
+                Code::InvalidArgument,
                 format!(
                     "message length {} exceed maximum message size of {}",
                     header.length, MESSAGE_LENGTH_MAX
@@ -214,6 +224,7 @@ pub trait Codec {
         Self: Sized;
 }
 
+#[cfg(not(feature = "prost"))]
 impl<M: protobuf::Message> Codec for M {
     type E = protobuf::Error;
 
@@ -233,6 +244,26 @@ impl<M: protobuf::Message> Codec for M {
     fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E> {
         let mut s = CodedInputStream::from_bytes(buf.as_ref());
         M::parse_from(&mut s)
+    }
+}
+
+#[cfg(feature = "prost")]
+impl<M: prost::Message + Default> Codec for M {
+    type E = std::io::Error;
+
+    fn size(&self) -> u32 {
+        self.encoded_len() as u32
+    }
+
+    fn encode(&self) -> Result<Vec<u8>, Self::E> {
+        Ok(self.encode_to_vec())
+    }
+
+    fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E>
+    where
+        Self: Sized,
+    {
+        prost::Message::decode(buf.as_ref()).map_err(std::io::Error::from)
     }
 }
 
@@ -311,8 +342,17 @@ where
             .map_err(|e| Error::Socket(e.to_string()))?;
 
         if header.length > MESSAGE_LENGTH_MAX as u32 {
+            #[cfg(not(feature = "prost"))]
             return Err(get_rpc_status(
                 Code::INVALID_ARGUMENT,
+                format!(
+                    "message length {} exceed maximum message size of {}",
+                    header.length, MESSAGE_LENGTH_MAX
+                ),
+            ));
+            #[cfg(feature = "prost")]
+            return Err(get_rpc_status(
+                Code::InvalidArgument,
                 format!(
                     "message length {} exceed maximum message size of {}",
                     header.length, MESSAGE_LENGTH_MAX
@@ -376,6 +416,7 @@ mod tests {
         117, 101, 49,
     ];
 
+    #[cfg(not(feature = "prost"))]
     fn new_protobuf_request() -> Request {
         let mut creq = Request::new();
         creq.set_service("grpc.TestServices".to_string());
@@ -387,6 +428,22 @@ mod tests {
             ..Default::default()
         }];
         creq.set_metadata(meta);
+        creq.payload = vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9];
+        creq
+    }
+
+    #[cfg(feature = "prost")]
+    fn new_protobuf_request() -> Request {
+        let mut creq = Request::default();
+        creq.service = "grpc.TestServices".to_string();
+        creq.method = "Test".to_string();
+        creq.timeout_nano = 20 * 1000 * 1000;
+        let meta = vec![KeyValue {
+            key: "test_key1".to_string(),
+            value: "test_value1".to_string(),
+            ..Default::default()
+        }];
+        creq.metadata = meta;
         creq.payload = vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9];
         creq
     }
