@@ -86,9 +86,12 @@ pub fn to_snake_case(name: &str) -> String {
 
 pub fn type_token(type_str: &str) -> TokenStream {
     if type_str == "()" {
-        quote!( () )
+        quote!(())
     } else {
-        let idents: Vec<_> = type_str.split("::").map(|ident| format_ident!("{}", ident)).collect();
+        let idents: Vec<_> = type_str
+            .split("::")
+            .map(|ident| format_ident!("{}", ident))
+            .collect();
         quote!( #(#idents)::* )
     }
 }

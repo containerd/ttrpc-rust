@@ -97,10 +97,17 @@ pub fn read_message(conn: &PipeConnection) -> Result<(MessageHeader, Result<Vec<
     let mh = read_message_header(conn)?;
     trace!("Got Message header {:?}", mh);
 
-    let mh_len = mh.length as usize;
-    if let Err(e) = check_oversize(mh_len, true) {
-        discard_count(conn, mh_len)?;
-        return Ok((mh, Err(e)));
+    if mh.length > MESSAGE_LENGTH_MAX as u32 {
+        return Err(get_rpc_status(
+            #[cfg(not(feature = "prost"))]
+            Code::INVALID_ARGUMENT,
+            #[cfg(feature = "prost")]
+            Code::InvalidArgument,
+            format!(
+                "message length {} exceed maximum message size of {}",
+                mh.length, MESSAGE_LENGTH_MAX
+            ),
+        ));
     }
 
     let buf = read_count(conn, mh.length as usize)?;

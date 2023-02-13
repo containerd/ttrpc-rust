@@ -7,6 +7,11 @@ fn main() {
     let path: PathBuf = [out_dir.clone(), "mod.rs".to_string()].iter().collect();
     fs::write(path, "pub mod ttrpc;").unwrap();
 
+    generate_ttrpc(&out_dir);
+}
+
+#[cfg(not(feature = "prost"))]
+fn generate_ttrpc(out_dir: &str) {
     let customize = protobuf_codegen::Customize::default()
         .gen_mod_rs(false)
         .generate_accessors(true);
@@ -19,4 +24,14 @@ fn main() {
         .customize(customize)
         .run()
         .expect("Codegen failed.");
+}
+
+#[cfg(feature = "prost")]
+fn generate_ttrpc(out_dir: &str) {
+    prost_build::Config::new()
+        .out_dir(out_dir)
+        .compile_well_known_types()
+        .protoc_arg("--experimental_allow_proto3_optional")
+        .compile_protos(&["src/ttrpc.proto"], &["src"])
+        .expect("Codegen failed")
 }

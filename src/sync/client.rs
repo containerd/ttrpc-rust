@@ -182,11 +182,23 @@ impl Client {
         };
 
         let buf = result?;
-        let res = Response::decode(buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
+        let res = Response::decode(&buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
 
-        let status = res.status();
-        if status.code() != Code::OK {
-            return Err(Error::RpcStatus((*status).clone()));
+        #[cfg(not(feature = "prost"))]
+        {
+            let status = res.status();
+            if status.code() != Code::OK {
+                return Err(Error::RpcStatus((*status).clone()));
+            }
+        }
+        #[cfg(feature = "prost")]
+        {
+            let status = res.status.as_ref();
+            if let Some(status) = status {
+                if status.code != Code::Ok as i32 {
+                    return Err(Error::RpcStatus(status.clone()));
+                }
+            }
         }
 
         Ok(res)

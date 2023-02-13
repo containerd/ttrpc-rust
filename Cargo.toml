@@ -12,7 +12,8 @@ description = "A Rust version of ttrpc."
 rust-version = "1.70"
 
 [dependencies]
-protobuf = { version = "3.1.0" }
+prost = { version = "0.11", optional = true }
+protobuf = "3.1.0"
 libc = { version = "0.2.59", features = [ "extra_traits" ] }
 nix = "0.26.2"
 log = "0.4"
@@ -34,11 +35,13 @@ tokio-vsock = { version = "0.7.0", optional = true }
 # lock home to avoid conflict with latest version
 home = "=0.5.9"
 protobuf-codegen = "3.1.0"
+prost-build = "0.11"
 
 [features]
 default = ["sync"]
-async = ["async-trait", "async-stream", "tokio", "futures", "tokio-vsock"]
+async = ["dep:async-trait", "dep:tokio", "dep:futures", "dep:tokio-vsock"]
 sync = []
+prost = ["dep:prost"]
 
 [package.metadata.docs.rs]
 all-features = true
