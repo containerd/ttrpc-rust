@@ -21,7 +21,7 @@ byteorder = "1.3.2"
 log = "0.4.6"
 simple-logging = "2.0.2"
 nix = "0.23.0"
-ttrpc = { path = "../", features = ["async"] }
+ttrpc = { path = "../", features = ["sync", "async", "prost"] }
 ctrlc = { version = "3.0", features = ["termination"] }
 tokio = { version = "1.0.1", features = ["signal", "time"] }
 async-trait = "0.1.42"
@@ -37,3 +37,19 @@ path = "./client.rs"
 [[example]]
 name = "server"
 path = "./server.rs"
+
+[[example]]
+name = "async-server"
+path = "./async_server.rs"
+
+[[example]]
+name = "async-client"
+path = "./async_client.rs"
+
+[[example]]
+name = "async-stream-server"
+path = "./async_stream_server.rs"
+
+[[example]]
+name = "async-stream-client"
+path = "./async_stream_client.rs"

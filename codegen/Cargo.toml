@@ -2,6 +2,14 @@
 name = "ttrpc-codegen"
 version = "1.0.0"
 edition = "2021"
+authors = ["The Ant Group Kata Team <kata@list.alibaba-inc.com>"]
+license = "Apache-2.0"
+keywords = ["codegen", "ttrpc", "protobuf"]
+description = "Rust codegen for ttrpc using prost crate"
+categories = ["network-programming", "development-tools::build-utils"]
+repository = "https://github.com/containerd/ttrpc-rust/tree/master/codegen"
+homepage = "https://github.com/containerd/ttrpc-rust/tree/master/codegen"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -65,11 +65,22 @@ impl From<Error> for Response {
 /// A specialized Result type for ttrpc.
 pub type Result<T> = result::Result<T, Error>;
 
+#[cfg(not(feature = "prost"))]
 /// Get ttrpc::Status from ttrpc::Code and a message.
 pub fn get_status(c: Code, msg: impl ToString) -> Status {
     let mut status = Status::new();
     status.set_code(c);
     status.set_message(msg.to_string());
+
+    status
+}
+
+#[cfg(feature = "prost")]
+/// Get ttrpc::Status from ttrpc::Code and a message.
+pub fn get_status(c: Code, msg: impl ToString) -> Status {
+    let mut status = Status::default();
+    status.code = c as i32;
+    status.message = msg.to_string();
 
     status
 }
@@ -84,7 +95,12 @@ pub fn sock_error_msg(size: usize, msg: String) -> Error {
         return Error::Socket(SOCK_DICONNECTED.to_string());
     }
 
-    get_rpc_status(Code::INVALID_ARGUMENT, msg)
+    #[cfg(not(feature = "prost"))]
+    let err = get_rpc_status(Code::INVALID_ARGUMENT, msg);
+    #[cfg(feature = "prost")]
+    let err = get_rpc_status(Code::InvalidArgument, msg);
+
+    err
 }
 
 macro_rules! err_to_others_err {

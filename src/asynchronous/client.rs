@@ -78,9 +78,14 @@ impl Client {
         let timeout_nano = req.timeout_nano;
         let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
 
-        let msg: GenMessage = Message::new_request(stream_id, req)?
+        #[cfg(not(feature = "prost"))]
+        let msg: GenMessage = Message::new_request(stream_id, req)
             .try_into()
-            .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
+            .map_err(|err: protobuf::Error| Error::Others(err.to_string()))?;
+        #[cfg(feature = "prost")]
+        let msg: GenMessage = Message::new_request(stream_id, req)
+            .try_into()
+            .map_err(|err: std::io::Error| Error::Others(err.to_string()))?;
 
         let (tx, mut rx): (ResultSender, ResultReceiver) = mpsc::channel(100);
 
@@ -111,9 +116,21 @@ impl Client {
         let res = Response::decode(msg.payload)
             .map_err(err_to_others_err!(e, "Unpack response error "))?;
 
-        let status = res.status();
-        if status.code() != Code::OK {
-            return Err(Error::RpcStatus((*status).clone()));
+        #[cfg(not(feature = "prost"))]
+        {
+            let status = res.status();
+            if status.code() != Code::OK {
+                return Err(Error::RpcStatus((*status).clone()));
+            }
+        }
+        #[cfg(feature = "prost")]
+        {
+            let status = res.status.as_ref();
+            if let Some(status) = status {
+                if status.code != Code::Ok as i32 {
+                    return Err(Error::RpcStatus(status.clone()));
+                }
+            }
         }
 
         Ok(res)
@@ -129,9 +146,14 @@ impl Client {
         let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
         let is_req_payload_empty = req.payload.is_empty();
 
-        let mut msg: GenMessage = Message::new_request(stream_id, req)?
+        #[cfg(not(feature = "prost"))]
+        let mut msg: GenMessage = Message::new_request(stream_id, req)
             .try_into()
             .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
+        #[cfg(feature = "prost")]
+        let mut msg: GenMessage = Message::new_request(stream_id, req)
+            .try_into()
+            .map_err(|err: std::io::Error| Error::Others(err.to_string()))?;
 
         if streaming_client {
             if !is_req_payload_empty {

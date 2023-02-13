@@ -46,6 +46,7 @@ impl TtrpcServiceGenerator {
         let type_aliases = quote!(
             use std::collections::HashMap;
             use std::sync::Arc;
+            use prost::Message;
             #async_trait_token
         );
         buf.push_str(type_aliases.to_string().as_str());
@@ -65,7 +66,11 @@ impl TtrpcServiceGenerator {
         } else {
             (quote!(), quote!())
         };
-        let method_signatures: Vec<_> = service.methods.iter().map(|method| self.trait_method_signature_token(service, method)).collect();
+        let method_signatures: Vec<_> = service
+            .methods
+            .iter()
+            .map(|method| self.trait_method_signature_token(service, method))
+            .collect();
         let trait_token = quote!(
             #derive_token
             pub trait #trait_name #sync_token {
@@ -104,7 +109,7 @@ impl TtrpcServiceGenerator {
         );
         // Prepend a function prefix if necessary
         let async_token = if async_on(self.async_mode, Side::Server) {
-            quote!( async )
+            quote!(async)
         } else {
             quote!()
         };
@@ -114,7 +119,7 @@ impl TtrpcServiceGenerator {
                 Err(
                     #mod_path::Error::RpcStatus(
                         #mod_path::get_status(
-                            #mod_path::Code::NOT_FOUND,
+                            #mod_path::Code::NotFound,
                             #err_msg,
                         )
                     )
@@ -135,9 +140,9 @@ impl TtrpcServiceGenerator {
         let struct_name = format_ident!("{}Method", to_camel_case(method.proto_name.as_str()));
         let service_name = format_ident!("{}", service.name);
         let method_handler_impl = if async_on(self.async_mode, Side::Server) {
-            self.method_handler_impl_async_token(&struct_name, service, method)
+            self.method_handler_impl_async_token(&struct_name, method)
         } else {
-            self.method_handler_impl_sync_token(&struct_name, service, method)
+            self.method_handler_impl_sync_token(&struct_name, method)
         };
         quote!(
             struct #struct_name {
@@ -147,36 +152,24 @@ impl TtrpcServiceGenerator {
         )
     }
 
-    fn method_handler_impl_sync_token(
-        &self,
-        struct_name: &Ident,
-        service: &Service,
-        method: &Method,
-    ) -> TokenStream {
+    fn method_handler_impl_sync_token(&self, struct_name: &Ident, method: &Method) -> TokenStream {
         let mod_path = ttrpc_mod();
         let context = self.ttrpc_context(false);
-        let package_name = format_ident!("{}", to_snake_case(&service.package));
         let input_type = format_ident!("{}", method.input_type);
         let method_name = format_ident!("{}", self.method_name_rust(method));
         quote!(
             impl #mod_path::MethodHandler for #struct_name {
                 fn handler(&self, ctx: #context, req: #mod_path::Request) -> #mod_path::Result<()> {
-                    #mod_path::request_handler!(self, ctx, req, #package_name, #input_type, #method_name);
+                    #mod_path::request_handler!(self, ctx, req, #input_type, #method_name);
                     Ok(())
                 }
             }
         )
     }
 
-    fn method_handler_impl_async_token(
-        &self,
-        struct_name: &Ident,
-        service: &Service,
-        method: &Method,
-    ) -> TokenStream {
+    fn method_handler_impl_async_token(&self, struct_name: &Ident, method: &Method) -> TokenStream {
         let mod_path = ttrpc_mod();
         let context = self.ttrpc_context(true);
-        let package_name = format_ident!("{}", to_snake_case(&service.package));
         let input_type = format_ident!("{}", method.input_type);
         let method_name = format_ident!("{}", self.method_name_rust(method));
 
@@ -186,7 +179,7 @@ impl TtrpcServiceGenerator {
                     quote!(MethodHandler),
                     quote!( req: #mod_path::Request ),
                     quote!( #mod_path::Response ),
-                    quote!( #mod_path::async_request_handler!(self, ctx, req, #package_name, #input_type, #method_name); ),
+                    quote!( #mod_path::async_request_handler!(self, ctx, req, #input_type, #method_name); ),
                 ),
                 MethodType::ClientStreaming => (
                     quote!(StreamHandler),
@@ -198,7 +191,7 @@ impl TtrpcServiceGenerator {
                     quote!(StreamHandler),
                     quote!( mut inner: #mod_path::r#async::StreamInner ),
                     quote!( Option<#mod_path::Response> ),
-                    quote!( #mod_path::async_server_streamimg_handler!(self, ctx, inner, #package_name, #input_type, #method_name); ),
+                    quote!( #mod_path::async_server_streamimg_handler!(self, ctx, inner, #input_type, #method_name); ),
                 ),
                 MethodType::Duplex => (
                     quote!(StreamHandler),
@@ -234,9 +227,9 @@ impl TtrpcServiceGenerator {
         let method_inserts: Vec<_> = service.methods.iter().map(|method| {
             let key = format!("/{}.{}/{}", service.package, service.name, method.proto_name);
             let mm = format_ident!("{}Method", to_camel_case(&method.proto_name));
-            quote!( 
+            quote!(
                 methods.insert(
-                    #key.to_string(), 
+                    #key.to_string(),
                     Box::new(#mm{service: service.clone()}) as Box<dyn #mod_path::MethodHandler + Send + Sync>);
             )
         }).collect();
@@ -266,14 +259,14 @@ impl TtrpcServiceGenerator {
                 MethodType::Unary => {
                     quote!(
                         methods.insert(
-                            #key.to_string(), 
+                            #key.to_string(),
                             Box::new(#mm{service: service.clone()}) as Box<dyn #mod_path::r#async::MethodHandler + Send + Sync>); 
                     )
                 },
                 _ => {
                     quote!(
                         streams.insert(
-                            #key.to_string(), 
+                            #key.to_string(),
                             Arc::new(#mm{service: service.clone()}) as Arc<dyn #mod_path::r#async::StreamHandler + Send + Sync>); 
                     )
                 }
@@ -331,13 +324,17 @@ impl TtrpcServiceGenerator {
 
     fn client_methods_token(&self, service: &Service) -> TokenStream {
         let client_type = format_ident!("{}", self.client_type(service));
-        let methods: Vec<_> = service.methods.iter().map(|method| {
-            if async_on(self.async_mode, Side::Client) {
-                self.async_client_method_token(service, method)
-            } else {
-                self.sync_client_method_token(service, method)
-            }
-        }).collect();
+        let methods: Vec<_> = service
+            .methods
+            .iter()
+            .map(|method| {
+                if async_on(self.async_mode, Side::Client) {
+                    self.async_client_method_token(service, method)
+                } else {
+                    self.sync_client_method_token(service, method)
+                }
+            })
+            .collect();
 
         quote!(
             impl #client_type {
@@ -363,7 +360,7 @@ impl TtrpcServiceGenerator {
                         Ok(cres)
                     }
                 )
-            },
+            }
             _ => {
                 panic!("Reaching here is prohibited.")
             }
@@ -380,31 +377,31 @@ impl TtrpcServiceGenerator {
 
         let (mut arg_tokens, ret_token, body_token) = match MethodType::from_method(method) {
             MethodType::Unary => (
-                vec![ quote!(req: &#input) ],
+                vec![quote!(req: &#input)],
                 quote!( #mod_path::Result<#output> ),
                 quote!(
                     let mut cres = #output::default();
                     #mod_path::async_client_request!(self, ctx, req, #server_str, #method_str, cres);
-                )
+                ),
             ),
             MethodType::ClientStreaming => (
                 vec![],
                 quote!( #mod_path::Result<#mod_path::r#async::ClientStreamSender<#input, #output>> ),
-                quote!( ::ttrpc::async_client_stream_send!(self, ctx, #server_str, #method_str); )
+                quote!( ::ttrpc::async_client_stream_send!(self, ctx, #server_str, #method_str); ),
             ),
             MethodType::ServerStreaming => (
-                vec![ quote!( req: &#input ) ],
+                vec![quote!( req: &#input )],
                 quote!( #mod_path::Result<#mod_path::r#async::ClientStreamReceiver<#output>> ),
-                quote!( #mod_path::async_client_stream_receive!(self, ctx, req, #server_str, #method_str); )
+                quote!( #mod_path::async_client_stream_receive!(self, ctx, req, #server_str, #method_str); ),
             ),
             MethodType::Duplex => (
                 vec![],
                 quote!( #mod_path::Result<#mod_path::r#async::ClientStream<#input, #output>> ),
-                quote!( ::ttrpc::async_client_stream!(self, ctx, #server_str, #method_str); )
-            )
+                quote!( ::ttrpc::async_client_stream!(self, ctx, #server_str, #method_str); ),
+            ),
         };
 
-        let mut args = vec![ quote!( &self ), quote!( ctx: #mod_path::context::Context )];
+        let mut args = vec![quote!(&self), quote!( ctx: #mod_path::context::Context )];
         args.append(&mut arg_tokens);
 
         quote!(
@@ -440,7 +437,8 @@ impl TtrpcServiceGenerator {
     }
 
     fn has_stream_method(&self, service: &Service) -> bool {
-        service.methods
+        service
+            .methods
             .iter()
             .any(|method| !matches!(MethodType::from_method(method), MethodType::Unary))
     }

@@ -22,49 +22,51 @@ use log::LevelFilter;
 use std::sync::Arc;
 use std::thread;
 
-use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc, types};
+use protocols::sync::{agent, health, types};
 use ttrpc::error::{Error, Result};
 use ttrpc::proto::{Code, Status};
 use ttrpc::Server;
 
 struct HealthService;
-impl health_ttrpc::Health for HealthService {
+
+impl health::Health for HealthService {
     fn check(
         &self,
-        _ctx: &::ttrpc::TtrpcContext,
-        _req: health::CheckRequest,
+        _ctx: &ttrpc::TtrpcContext,
+        _: health::CheckRequest,
     ) -> Result<health::HealthCheckResponse> {
-        let mut status = Status::new();
-        status.set_code(Code::NOT_FOUND);
-        status.set_message("Just for fun".to_string());
+        let mut status = Status::default();
+        status.code = Code::NotFound as i32;
+        status.message = "Just for fun".to_owned();
         Err(Error::RpcStatus(status))
     }
 
     fn version(
         &self,
-        ctx: &::ttrpc::TtrpcContext,
+        ctx: &ttrpc::TtrpcContext,
         req: health::CheckRequest,
     ) -> Result<health::VersionCheckResponse> {
         info!("version {:?}", req);
         info!("ctx {:?}", ctx);
-        let mut rep = health::VersionCheckResponse::new();
-        rep.agent_version = "mock.0.1".to_string();
-        rep.grpc_version = "0.0.1".to_string();
-        let mut status = Status::new();
-        status.set_code(Code::NOT_FOUND);
+        let mut rep = health::VersionCheckResponse::default();
+        rep.agent_version = "mock 0.1".to_owned();
+        rep.grpc_version = "0.0.1".to_owned();
+        let mut status = Status::default();
+        status.code = Code::NotFound as i32;
         Ok(rep)
     }
 }
 
 struct AgentService;
-impl agent_ttrpc::AgentService for AgentService {
+
+impl agent::AgentService for AgentService {
     fn list_interfaces(
         &self,
         _ctx: &::ttrpc::TtrpcContext,
         _req: agent::ListInterfacesRequest,
     ) -> ::ttrpc::Result<agent::Interfaces> {
         Ok(agent::Interfaces {
-            Interfaces: vec![
+            interfaces: vec![
                 types::Interface {
                     name: "first".to_string(),
                     ..Default::default()
@@ -82,13 +84,13 @@ impl agent_ttrpc::AgentService for AgentService {
 fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
 
-    let h = Box::new(HealthService {}) as Box<dyn health_ttrpc::Health + Send + Sync>;
+    let h = Box::new(HealthService {}) as Box<dyn health::Health + Send + Sync>;
     let h = Arc::new(h);
-    let hservice = health_ttrpc::create_health(h);
+    let hservice = health::create_health(h);
 
-    let a = Box::new(AgentService {}) as Box<dyn agent_ttrpc::AgentService + Send + Sync>;
+    let a = Box::new(AgentService {}) as Box<dyn agent::AgentService + Send + Sync>;
     let a = Arc::new(a);
-    let aservice = agent_ttrpc::create_agent_service(a);
+    let aservice = agent::create_agent_service(a);
 
     utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
     let mut server = Server::new()

@@ -4,11 +4,14 @@
 //
 
 use crate::error::{Error, Result};
-use crate::proto::{
-    check_oversize, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
-};
+use crate::proto::{MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
+#[cfg(feature = "prost")]
+use prost::Message;
+#[cfg(not(feature = "prost"))]
+use protobuf::Message;
 use std::collections::HashMap;
 
+#[cfg(not(feature = "prost"))]
 /// Response message through a channel.
 /// Eventually  the message will sent to Client.
 pub fn response_to_channel(
@@ -35,16 +38,30 @@ pub fn response_to_channel(
     Ok(())
 }
 
-pub fn response_error_to_channel(
+#[cfg(feature = "prost")]
+/// Response message through a channel.
+/// Eventually  the message will sent to Client.
+pub fn response_to_channel(
     stream_id: u32,
-    e: Error,
+    res: Response,
     tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
 ) -> Result<()> {
-    response_to_channel(stream_id, e.into(), tx)
+    let buf = res.encode_to_vec();
+
+    let mh = MessageHeader {
+        length: buf.len() as u32,
+        stream_id,
+        type_: MESSAGE_TYPE_RESPONSE,
+        flags: 0,
+    };
+    tx.send((mh, buf)).map_err(err_to_others_err!(e, ""))?;
+
+    Ok(())
 }
 
 /// Handle request in sync mode.
 #[macro_export]
+#[cfg(not(feature = "prost"))]
 macro_rules! request_handler {
     ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
         let mut s = CodedInputStream::from_bytes(&$req.payload);
@@ -78,8 +95,41 @@ macro_rules! request_handler {
     };
 }
 
+/// Handle request in sync mode.
+#[macro_export]
+#[cfg(feature = "prost")]
+macro_rules! request_handler {
+    ($class: ident, $ctx: ident, $req: ident, $req_type: ident, $req_fn: ident) => {
+        let mut req = $req_type::default();
+        req.merge(&$req.payload as &[u8])
+            .map_err(::ttrpc::err_to_others!(e, ""))?;
+
+        let mut res = ::ttrpc::Response::default();
+        match $class.service.$req_fn(&$ctx, req) {
+            Ok(rep) => {
+                res.status = Some(::ttrpc::get_status(::ttrpc::Code::Ok, "".to_string()));
+                rep.encode(&mut res.payload)
+                    .map_err(::ttrpc::err_to_others!(e, "Encoding error "))?;
+            }
+            Err(x) => match x {
+                ::ttrpc::Error::RpcStatus(s) => {
+                    res.status = Some(s);
+                }
+                _ => {
+                    res.status = Some(::ttrpc::get_status(
+                        ::ttrpc::Code::Unknown,
+                        format!("{:?}", x),
+                    ));
+                }
+            },
+        }
+        ::ttrpc::response_to_channel($ctx.mh.stream_id, res, $ctx.res_tx)?
+    };
+}
+
 /// Send request through sync client.
 #[macro_export]
+#[cfg(not(feature = "prost"))]
 macro_rules! client_request {
     ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr, $cres: ident) => {
         let mut creq = ::ttrpc::Request::new();
@@ -100,6 +150,27 @@ macro_rules! client_request {
         let mut s = CodedInputStream::from_bytes(&res.payload);
         $cres
             .merge_from(&mut s)
+            .map_err(::ttrpc::err_to_others!(e, "Unpack get error "))?;
+    };
+}
+
+/// Send request through sync client.
+#[macro_export]
+#[cfg(feature = "prost")]
+macro_rules! client_request {
+    ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr, $cres: ident) => {
+        let mut creq = ::ttrpc::Request::default();
+        creq.service = $server.to_string();
+        creq.method = $method.to_string();
+        creq.timeout_nano = $ctx.timeout_nano;
+        let md = ::ttrpc::context::to_pb($ctx.metadata);
+        creq.metadata = md;
+        creq.payload.reserve($req.encoded_len());
+        $req.encode(&mut creq.payload).map_err(::ttrpc::err_to_others!(e, "Encoding error "))?;
+
+        let res = $self.client.request(creq)?;
+        $cres
+            .merge(&res.payload as &[u8])
             .map_err(::ttrpc::err_to_others!(e, "Unpack get error "))?;
     };
 }
