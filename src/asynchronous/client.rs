@@ -80,7 +80,7 @@ impl Client {
         self.req_tx
             .send(msg)
             .await
-            .map_err(|e| Error::Others(format!("Send packet to sender error {:?}", e)))?;
+            .map_err(|e| Error::Others(format!("Send packet to sender error {e:?}")))?;
 
         let result = if timeout_nano == 0 {
             rx.recv()
@@ -92,7 +92,7 @@ impl Client {
                 rx.recv(),
             )
             .await
-            .map_err(|e| Error::Others(format!("Receive packet timeout {:?}", e)))?
+            .map_err(|e| Error::Others(format!("Receive packet timeout {e:?}")))?
             .ok_or_else(|| Error::Others("Receive packet from receiver error".to_string()))?
         };
 
@@ -133,7 +133,7 @@ impl Client {
         self.req_tx
             .send(msg)
             .await
-            .map_err(|e| Error::Others(format!("Send packet to sender error {:?}", e)))?;
+            .map_err(|e| Error::Others(format!("Send packet to sender error {e:?}")))?;
 
         Ok(StreamInner::new(
             stream_id,
@@ -210,7 +210,7 @@ impl WriterDelegate for ClientWriter {
 
         // TODO: if None
         if let Some(resp_tx) = resp_tx {
-            let e = Error::Socket(format!("{:?}", e));
+            let e = Error::Socket(format!("{e:?}"));
             resp_tx
                 .send(Err(e))
                 .await
@@ -294,8 +294,7 @@ impl ReaderDelegate for ClientReader {
                     };
                     resp_tx
                         .send(Err(Error::Others(format!(
-                            "Recver got malformed packet {:?}",
-                            msg
+                            "Recver got malformed packet {msg:?}"
                         ))))
                         .await
                         .unwrap_or_else(|_e| error!("The request has returned"));

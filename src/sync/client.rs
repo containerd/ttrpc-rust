@@ -152,7 +152,7 @@ impl Client {
                             let mut map = recver_map_orig.lock().unwrap();
                             for (_, recver_tx) in map.iter_mut() {
                                 recver_tx
-                                    .send(Err(Error::Socket(format!("socket error {}", y))))
+                                    .send(Err(Error::Socket(format!("socket error {y}"))))
                                     .unwrap_or_else(|e| {
                                         error!("The request has returned error {:?}", e)
                                     });
@@ -177,8 +177,7 @@ impl Client {
                 if mh.type_ != MESSAGE_TYPE_RESPONSE {
                     recver_tx
                         .send(Err(Error::Others(format!(
-                            "Recver got malformed packet {:?} {:?}",
-                            mh, buf
+                            "Recver got malformed packet {mh:?} {buf:?}"
                         ))))
                         .unwrap_or_else(|_e| error!("The request has returned"));
                     continue;

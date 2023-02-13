@@ -319,7 +319,7 @@ async fn _recv(rx: &mut ResultReceiver) -> Result<GenMessage> {
 async fn _send(tx: &MessageSender, msg: GenMessage) -> Result<()> {
     tx.send(msg)
         .await
-        .map_err(|e| Error::Others(format!("Send data packet to sender error {:?}", e)))
+        .map_err(|e| Error::Others(format!("Send data packet to sender error {e:?}")))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -190,7 +190,7 @@ fn start_method_handler_thread(
             let method = if let Some(x) = methods.get(&path) {
                 x
             } else {
-                let status = get_status(Code::INVALID_ARGUMENT, format!("{} does not exist", path));
+                let status = get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
                 let mut res = Response::new();
                 res.set_status(status);
                 if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
