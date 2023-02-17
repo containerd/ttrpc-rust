@@ -706,9 +706,10 @@ impl HandlerContext {
         };
         #[cfg(feature = "prost")]
         let resp = {
-            let mut resp = Response::default();
-            resp.status = Some(status);
-            resp
+            Response {
+                status: Some(status),
+                ..Default::default()
+            }
         };
         Self::respond(tx, stream_id, resp)
             .await

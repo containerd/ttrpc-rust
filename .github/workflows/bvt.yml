@@ -12,7 +12,11 @@ jobs:
         uses: actions/checkout@v3
       - name: Check
         run: |
-          make check-all
+          make deps
+          make check
+          make -C compiler check
+          make -C ttrpc-codegen check
+          make -C codegen check
 
   make:
     name: Build
@@ -29,9 +33,7 @@ jobs:
           make -C compiler
           make -C ttrpc-codegen
           make -C example build-examples
-        # It's important for windows to fail correctly
-        # https://github.com/actions/runner-images/issues/6668 
-        shell: bash
+          make -C example2 build-examples
 
   deny:
     runs-on: ubuntu-latest

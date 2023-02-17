@@ -493,18 +493,17 @@ mod tests {
 
     #[cfg(feature = "prost")]
     fn new_protobuf_request() -> Request {
-        let mut creq = Request::default();
-        creq.service = "grpc.TestServices".to_string();
-        creq.method = "Test".to_string();
-        creq.timeout_nano = 20 * 1000 * 1000;
         let meta = vec![KeyValue {
             key: "test_key1".to_string(),
             value: "test_value1".to_string(),
-            ..Default::default()
         }];
-        creq.metadata = meta;
-        creq.payload = vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9];
-        creq
+        Request {
+            service: "grpc.TestServices".to_owned(),
+            method: "Test".to_owned(),
+            timeout_nano: 20 * 1000 * 1000,
+            metadata: meta,
+            payload: vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9],
+        }
     }
 
     #[test]

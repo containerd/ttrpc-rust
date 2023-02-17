@@ -199,8 +199,10 @@ fn start_method_handler_thread(
                 req = Request::default();
                 if let Err(x) = req.merge(&buf as &[u8]) {
                     let status = get_status(Code::InvalidArgument, x.to_string());
-                    let mut res = Response::default();
-                    res.status = Some(status);
+                    let res = Response {
+                        status: Some(status),
+                        ..Default::default()
+                    };
                     if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                         debug!("response_to_channel get error {:?}", x);
                         quit.store(true, Ordering::SeqCst);
