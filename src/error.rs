@@ -59,11 +59,11 @@ pub fn get_status(c: Code, msg: impl ToString) -> Status {
 #[cfg(feature = "prost")]
 /// Get ttrpc::Status from ttrpc::Code and a message.
 pub fn get_status(c: Code, msg: impl ToString) -> Status {
-    let mut status = Status::default();
-    status.code = c as i32;
-    status.message = msg.to_string();
-
-    status
+    Status {
+        code: c as i32,
+        message: msg.to_string(),
+        ..Default::default()
+    }
 }
 
 pub fn get_rpc_status(c: Code, msg: impl ToString) -> Error {

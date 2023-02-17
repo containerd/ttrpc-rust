@@ -16,6 +16,7 @@ jobs:
           make check
           make -C compiler check
           make -C ttrpc-codegen check
+          make -C codegen check
 
   make:
     name: Build
@@ -33,6 +34,7 @@ jobs:
           make -C compiler
           make -C ttrpc-codegen
           make -C example build-examples
+          make -C example2 build-examples
 
   deny:
     runs-on: ubuntu-latest

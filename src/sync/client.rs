@@ -227,7 +227,7 @@ impl Client {
         };
 
         let buf = result?;
-        let res = Response::decode(&buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
+        let res = Response::decode(buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
 
         #[cfg(not(feature = "prost"))]
         {
