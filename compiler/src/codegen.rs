@@ -271,23 +271,18 @@ impl<'a> MethodGen<'a> {
 
     fn write_client(&self, w: &mut CodeWriter) {
         let method_name = self.name();
-        match self.method_type().0 {
-            // Unary
-            MethodType::Unary => {
-                w.pub_fn(&self.unary(&method_name), |w| {
-                    w.write_line(&format!("let mut cres = {}::new();", self.output()));
-                    w.write_line(&format!(
-                        "::ttrpc::client_request!(self, ctx, req, \"{}.{}\", \"{}\", cres);",
-                        self.package_name,
-                        self.service_name,
-                        &self.proto.get_name(),
-                    ));
-                    w.write_line("Ok(cres)");
-                });
-            }
-
-            _ => {}
-        };
+        if let MethodType::Unary = self.method_type().0 {
+            w.pub_fn(&self.unary(&method_name), |w| {
+                w.write_line(&format!("let mut cres = {}::new();", self.output()));
+                w.write_line(&format!(
+                    "::ttrpc::client_request!(self, ctx, req, \"{}.{}\", \"{}\", cres);",
+                    self.package_name,
+                    self.service_name,
+                    &self.proto.get_name(),
+                ));
+                w.write_line("Ok(cres)");
+            });
+        }
     }
 
     fn write_async_client(&self, w: &mut CodeWriter) {
@@ -456,7 +451,7 @@ impl<'a> ServiceGen<'a> {
                     file.get_package().to_string(),
                     util::to_camel_case(proto.get_name()),
                     root_scope,
-                    &customize,
+                    customize,
                 )
             })
             .collect();
@@ -546,7 +541,7 @@ impl<'a> ServiceGen<'a> {
             trait_name = format!("{}: Sync", &self.service_name());
         }
 
-        w.pub_trait(&trait_name.to_owned(), |w| {
+        w.pub_trait(&trait_name, |w| {
             for method in &self.methods {
                 method.write_service(w);
             }
@@ -767,8 +762,8 @@ where
 {
     let req = CodeGeneratorRequest::parse_from_reader(&mut stdin()).unwrap();
     let result = gen(&GenRequest {
-        file_descriptors: &req.get_proto_file(),
-        files_to_generate: &req.get_file_to_generate(),
+        file_descriptors: req.get_proto_file(),
+        files_to_generate: req.get_file_to_generate(),
         parameter: req.get_parameter(),
     });
     let mut resp = CodeGeneratorResponse::new();

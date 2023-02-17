@@ -1,8 +1,8 @@
 name: BVT
 on: [pull_request]
 jobs:
-  make:
-    name: Make
+  check:
+    name: Check
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -10,29 +10,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Make
+      - name: Check
         run: |
           make deps
-          make
-          make -C example deps
-          make -C example
-          make -C ttrpc-codegen deps
-          make -C ttrpc-codegen
+          make check
+          make -C compiler check
+          make -C ttrpc-codegen check
 
-  clippy_check:
-    name: Clippy Check
+  make:
+    name: Build
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v3
-      - run: rustup component add clippy
-      - uses: tim-actions/clippy-check@master
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
-          name: checks-${{ matrix.os }}
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Build
+        run: |
+          make deps
+          make
+          make -C compiler
+          make -C ttrpc-codegen
+          make -C example build-examples
 
   deny:
     runs-on: ubuntu-latest

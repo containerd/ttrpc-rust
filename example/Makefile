@@ -4,6 +4,10 @@
 
 .PHONY: build
 build:
+	cargo build
+
+.PHONY: build-examples
+build-examples: build
 	cargo build --example server
 	cargo build --example client
 	cargo build --example async-server

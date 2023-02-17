@@ -48,7 +48,7 @@ impl<'a> Iterator for NameSpliter<'a> {
         let mut meet_lower = false;
         for i in self.pos..self.name.len() {
             let c = self.name[i];
-            if b'A' <= c && c <= b'Z' {
+            if (b'A'..=b'Z').contains(&c) {
                 if meet_lower {
                     // So it should be AaA or aaA
                     pos = i;
@@ -171,7 +171,7 @@ mod test {
         ];
 
         for (origin, exp) in cases {
-            let res = super::to_snake_case(&origin);
+            let res = super::to_snake_case(origin);
             assert_eq!(res, exp);
         }
     }
@@ -193,7 +193,7 @@ mod test {
         ];
 
         for (origin, exp) in cases {
-            let res = super::to_camel_case(&origin);
+            let res = super::to_camel_case(origin);
             assert_eq!(res, exp);
         }
     }
