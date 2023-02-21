@@ -48,8 +48,7 @@ where
         let fd_set = FileDescriptorSet::decode(&buffer as &[u8]).context("Decode fd_set")?;
 
         for fd in fd_set.file.iter() {
-            let rs_path =
-                PathBuf::from(self.out_dir.as_ref()).join(&format!("{}.rs", fd.package()));
+            let rs_path = PathBuf::from(self.out_dir.as_ref()).join(format!("{}.rs", fd.package()));
             let mut f = match File::open(&rs_path) {
                 Ok(f) => f,
                 _ => continue,
@@ -169,20 +168,14 @@ where
             None => return Err(anyhow!("The includes are required.")),
         };
 
-        let serde = match self.serde {
-            Some(serde) => serde,
-            None => false,
-        };
+        let serde = self.serde.unwrap_or(false);
 
         let async_mode = match self.async_mode {
             Some(mode) => mode,
             None => AsyncMode::None,
         };
 
-        let generate_service = match self.generate_service {
-            Some(gen) => gen,
-            None => false,
-        };
+        let generate_service = self.generate_service.unwrap_or(false);
 
         Ok(Codegen {
             out_dir,

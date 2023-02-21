@@ -1,3 +1,5 @@
+export PROTOC=${HOME}/protoc/bin/protoc
+
 all: debug test
 
 #
