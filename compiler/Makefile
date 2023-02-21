@@ -15,13 +15,9 @@ release:
 .PHONY: build
 build: debug
 
-#
-# Tests and linters
-#
-
 .PHONY: test
 test:
-	cargo test --verbose
+	cargo test --all-features --verbose
 
 .PHONY: check
 check:
