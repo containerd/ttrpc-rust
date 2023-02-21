@@ -253,7 +253,7 @@ impl TtrpcServiceGenerator {
             quote!( let streams = HashMap::new(); )
         };
         let method_inserts: Vec<_> = service.methods.iter().map(|method| {
-            let key = format!("{}", method.proto_name);
+            let key = method.proto_name.to_string();
             let mm = format_ident!("{}Method", to_camel_case(&method.proto_name));
             match MethodType::from_method(method) {
                 MethodType::Unary => {
@@ -349,7 +349,7 @@ impl TtrpcServiceGenerator {
         let input = type_token(&method.input_type);
         let output = type_token(&method.output_type);
         let server_str = format!("{}.{}", service.package, service.name);
-        let method_str = format!("{}", method.proto_name);
+        let method_str = method.proto_name.to_string();
 
         match MethodType::from_method(method) {
             MethodType::Unary => {
@@ -373,7 +373,7 @@ impl TtrpcServiceGenerator {
         let input = type_token(&method.input_type);
         let output = type_token(&method.output_type);
         let server_str = format!("{}.{}", service.package, service.name);
-        let method_str = format!("{}", method.proto_name);
+        let method_str = method.proto_name.to_string();
 
         let (mut arg_tokens, ret_token, body_token) = match MethodType::from_method(method) {
             MethodType::Unary => (
@@ -497,7 +497,7 @@ enum Side {
 }
 
 fn async_on(mode: AsyncMode, side: Side) -> bool {
-    return mode == AsyncMode::All
+    mode == AsyncMode::All
         || (side == Side::Server && mode == AsyncMode::Server)
-        || (side == Side::Client && mode == AsyncMode::Client);
+        || (side == Side::Client && mode == AsyncMode::Client)
 }

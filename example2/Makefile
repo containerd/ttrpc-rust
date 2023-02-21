@@ -1,3 +1,5 @@
+export PROTOC=${HOME}/protoc/bin/protoc
+
 #
 # Build
 #
@@ -20,3 +22,4 @@ deps:
 	rustup update stable
 	rustup default stable
 	rustup component add rustfmt clippy
+	../install_protoc.sh
