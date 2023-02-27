@@ -183,7 +183,11 @@ struct WithFileError {
 
 impl fmt::Display for WithFileError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "WithFileError")
+        write!(
+            f,
+            "WithFileError(file: {:?}, error: {:?})",
+            &self.file, &self.error
+        )
     }
 }
 
