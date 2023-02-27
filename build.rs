@@ -9,7 +9,7 @@ fn main() {
 
     protobuf_codegen_pure::Codegen::new()
         .out_dir(out_dir)
-        .inputs(&["src/ttrpc.proto"])
+        .inputs(["src/ttrpc.proto"])
         .include("src")
         .run()
         .expect("Codegen failed.");
