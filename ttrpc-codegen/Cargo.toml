@@ -1,6 +1,6 @@
 [package]
 name = "ttrpc-codegen"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2018"
 authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 license = "Apache-2.0"
@@ -14,7 +14,8 @@ readme = "README.md"
 
 [dependencies]
 protobuf = "2.28.0"
-protobuf-codegen = "2.28.0"
+# protobuf-codegen3 is a protobuf-codegen version that supports proto3 optional fields better
+protobuf-codegen = { package = "protobuf-codegen3", version = "2.28.2" }
 # protobuf-codegen-pure3 is a protobuf-codegen-pure version that supports proto3 optional fields
-protobuf-codegen-pure = { version = "2.28.1", package = "protobuf-codegen-pure3" }
-ttrpc-compiler = "0.4.0"
+protobuf-codegen-pure = { package = "protobuf-codegen-pure3", version = "2.28.2" }
+ttrpc-compiler = "0.4.3"
