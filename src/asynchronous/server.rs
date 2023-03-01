@@ -157,6 +157,9 @@ impl Server {
 
                 self.do_start(incoming).await
             }
+            // It seems that we can use UnixStream to represent both UnixStream and VsockStream.
+            // Whatever, we keep it for now for the compatibility and vsock-specific features maybe
+            // used in the future.
             #[cfg(any(target_os = "linux", target_os = "android"))]
             Some(Domain::Vsock) => {
                 let incoming = unsafe { VsockListener::from_raw_fd(listenfd).incoming() };
@@ -613,11 +616,7 @@ impl HandlerContext {
             })?;
         }
         task.await
-            .unwrap_or_else(|e| {
-                Err(Error::Others(format!(
-                    "stream {path} task got error {e:?}"
-                )))
-            })
+            .unwrap_or_else(|e| Err(Error::Others(format!("stream {path} task got error {e:?}"))))
             .map_err(|e| get_status(Code::UNKNOWN, e))
     }
 
