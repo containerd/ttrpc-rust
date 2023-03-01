@@ -14,10 +14,10 @@
 
 
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
-use crate::sync::sys::{PipeConnection};
+use crate::sync::sys::PipeConnection;
 use crate::proto::{Code, MessageHeader, MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX};
 
-fn read_count (fd: &PipeConnection, count: usize) -> Result<Vec<u8>> {
+fn read_count(conn: &PipeConnection, count: usize) -> Result<Vec<u8>> {
     let mut v: Vec<u8> = vec![0; count];
     let mut len = 0;
 
@@ -26,7 +26,7 @@ fn read_count (fd: &PipeConnection, count: usize) -> Result<Vec<u8>> {
     }
 
     loop {
-        match  fd.read(&mut v[len..]) {
+        match conn.read(&mut v[len..]) {
             Ok(l) => {
                 len += l;
                 // when socket peer closed, it would return 0.
@@ -43,7 +43,7 @@ fn read_count (fd: &PipeConnection, count: usize) -> Result<Vec<u8>> {
     Ok(v[0..len].to_vec())
 }
 
-fn write_count(fd: &PipeConnection, buf: &[u8], count: usize) -> Result<usize> {
+fn write_count(conn: &PipeConnection, buf: &[u8], count: usize) -> Result<usize> {
     let mut len = 0;
 
     if count == 0 {
@@ -51,7 +51,7 @@ fn write_count(fd: &PipeConnection, buf: &[u8], count: usize) -> Result<usize> {
     }
 
     loop {
-        match  fd.write(&buf[len..]){
+        match conn.write(&buf[len..]){
             Ok(l) => {
                 len += l;
                 if len == count {
@@ -67,8 +67,8 @@ fn write_count(fd: &PipeConnection, buf: &[u8], count: usize) -> Result<usize> {
     Ok(len)
 }
 
-fn read_message_header(fd: &PipeConnection) -> Result<MessageHeader> {
-    let buf = read_count(fd, MESSAGE_HEADER_LENGTH)?;
+fn read_message_header(conn: &PipeConnection) -> Result<MessageHeader> {
+    let buf = read_count(conn, MESSAGE_HEADER_LENGTH)?;
     let size = buf.len();
     if size != MESSAGE_HEADER_LENGTH {
         return Err(sock_error_msg(
@@ -82,8 +82,8 @@ fn read_message_header(fd: &PipeConnection) -> Result<MessageHeader> {
     Ok(mh)
 }
 
-pub fn read_message(fd: &PipeConnection) -> Result<(MessageHeader, Vec<u8>)> {
-    let mh = read_message_header(fd)?;
+pub fn read_message(conn: &PipeConnection) -> Result<(MessageHeader, Vec<u8>)> {
+    let mh = read_message_header(conn)?;
     trace!("Got Message header {:?}", mh);
 
     if mh.length > MESSAGE_LENGTH_MAX as u32 {
@@ -96,7 +96,7 @@ pub fn read_message(fd: &PipeConnection) -> Result<(MessageHeader, Vec<u8>)> {
         ));
     }
 
-    let buf = read_count(fd, mh.length as usize)?;
+    let buf = read_count(conn, mh.length as usize)?;
     let size = buf.len();
     if size != mh.length as usize {
         return Err(sock_error_msg(
@@ -109,10 +109,10 @@ pub fn read_message(fd: &PipeConnection) -> Result<(MessageHeader, Vec<u8>)> {
     Ok((mh, buf))
 }
 
-fn write_message_header(fd: &PipeConnection, mh: MessageHeader) -> Result<()> {
+fn write_message_header(conn: &PipeConnection, mh: MessageHeader) -> Result<()> {
     let buf: Vec<u8> = mh.into();
 
-    let size = write_count(fd, &buf, MESSAGE_HEADER_LENGTH)?;
+    let size = write_count(conn, &buf, MESSAGE_HEADER_LENGTH)?;
     if size != MESSAGE_HEADER_LENGTH {
         return Err(sock_error_msg(
             size,
@@ -123,10 +123,10 @@ fn write_message_header(fd: &PipeConnection, mh: MessageHeader) -> Result<()> {
     Ok(())
 }
 
-pub fn write_message(fd: &PipeConnection, mh: MessageHeader, buf: Vec<u8>) -> Result<()> {
-    write_message_header(fd, mh)?;
+pub fn write_message(conn: &PipeConnection, mh: MessageHeader, buf: Vec<u8>) -> Result<()> {
+    write_message_header(conn, mh)?;
 
-    let size = write_count(fd, &buf, buf.len())?;
+    let size = write_count(conn, &buf, buf.len())?;
     if size != buf.len() {
         return Err(sock_error_msg(
             size,

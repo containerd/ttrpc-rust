@@ -15,7 +15,7 @@
 //! Sync server of ttrpc.
 //! 
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
 use protobuf::{CodedInputStream, Message};
@@ -57,30 +57,27 @@ pub struct Server {
     thread_count_max: usize,
 }
 
-struct Connection
- {
-    fd: Arc<PipeConnection>,
+struct Connection {
+    connection: Arc<PipeConnection>,
     quit: Arc<AtomicBool>,
     handler: Option<JoinHandle<()>>,
 }
 
-impl Connection 
- {
+impl Connection {
     fn close (&self) {
-        self.fd.close().unwrap_or(());
+        self.connection.close().unwrap_or(());
     }
 
     fn shutdown(&self) {
         self.quit.store(true, Ordering::SeqCst);
 
         // in case the connection had closed
-        self.fd.shutdown().unwrap_or(());
+        self.connection.shutdown().unwrap_or(());
     }
 }
 
-struct ThreadS<'a> 
-{
-    fd:  &'a Arc<PipeConnection>,
+struct ThreadS<'a> {
+    connection:  &'a Arc<PipeConnection>,
     fdlock: &'a Arc<Mutex<()>>,
     wtc: &'a Arc<AtomicUsize>,
     quit: &'a Arc<AtomicBool>,
@@ -94,7 +91,7 @@ struct ThreadS<'a>
 
 #[allow(clippy::too_many_arguments)]
 fn start_method_handler_thread(
-    fd: Arc<PipeConnection>,
+    connection: Arc<PipeConnection>,
     fdlock: Arc<Mutex<()>>,
     wtc: Arc<AtomicUsize>,
     quit: Arc<AtomicBool>,
@@ -122,7 +119,7 @@ fn start_method_handler_thread(
                         .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
-                result = read_message(&fd);
+                result = read_message(&connection);
             }
 
             if quit.load(Ordering::SeqCst) {
@@ -213,7 +210,7 @@ fn start_method_handler_thread(
                 continue;
             };
             let ctx = TtrpcContext {
-                fd: fd.id(),
+                fd: connection.id(),
                 mh,
                 res_tx: res_tx.clone(),
                 metadata: context::from_pb(&req.metadata),
@@ -234,14 +231,13 @@ fn start_method_handler_thread(
     });
 }
 
-fn start_method_handler_threads(num: usize, ts: &ThreadS) 
- {
+fn start_method_handler_threads(num: usize, ts: &ThreadS) {
     for _ in 0..num {
         if ts.quit.load(Ordering::SeqCst) {
             break;
         }
         start_method_handler_thread(
-            ts.fd.clone(),
+            ts.connection.clone(),
             ts.fdlock.clone(),
             ts.wtc.clone(),
             ts.quit.clone(),
@@ -254,8 +250,7 @@ fn start_method_handler_threads(num: usize, ts: &ThreadS)
     }
 }
 
-fn check_method_handler_threads(ts: &ThreadS)
- {
+fn check_method_handler_threads(ts: &ThreadS) {
     let c = ts.wtc.load(Ordering::SeqCst);
     if c < ts.min {
         start_method_handler_threads(ts.default - c, ts);
@@ -296,6 +291,7 @@ impl Server {
         Ok(self)
     }
 
+    #[cfg(unix)]
     pub fn add_listener(mut self, fd: RawFd) -> Result<Server> {
         if !self.listeners.is_empty() {
             return Err(Error::Others(
@@ -387,10 +383,8 @@ impl Server {
         let handler = thread::Builder::new()
             .name("listener_loop".into())
             .spawn(move || {
-                
-                let listener = listener;
-
                 loop {   
+                    trace!("listening...");
                     let pipe_connection = match listener.accept(&listener_quit_flag) {
                         Ok(None) => {
                             continue;
@@ -403,7 +397,6 @@ impl Server {
                             break;
                         }
                     };
-                   
 
                     let methods = methods.clone();
                     let quit = Arc::new(AtomicBool::new(false));
@@ -436,7 +429,7 @@ impl Server {
                             let (control_tx, control_rx): (SyncSender<()>, Receiver<()>) =
                                 sync_channel(0);
                             let ts = ThreadS {
-                                fd: &pipe,
+                                connection: &pipe,
                                 fdlock: &Arc::new(Mutex::new(())),
                                 wtc: &Arc::new(AtomicUsize::new(0)),
                                 methods: &methods,
@@ -471,10 +464,11 @@ impl Server {
 
                     let mut cns = connections.lock().unwrap();
 
+                    let id = pipe_connection.id();
                     cns.insert(
-                        pipe_connection.id(),
+                        id,
                         Connection {
-                            fd: pipe_connection,
+                            connection: pipe_connection,
                             handler: Some(handler),
                             quit: quit.clone(),
                         },
@@ -500,7 +494,7 @@ impl Server {
         }
         if self.thread_count_default <= self.thread_count_min {
             return Err(Error::Others(
-                "thread_count_default should biger than thread_count_min".to_string(),
+                "thread_count_default should bigger than thread_count_min".to_string(),
             ));
         }
         self.start_listen()?;
@@ -511,7 +505,11 @@ impl Server {
     pub fn stop_listen(mut self) -> Self {
         self.listener_quit_flag.store(true, Ordering::SeqCst);
 
-        self.listeners[0].close().unwrap();
+        self.listeners[0].close().unwrap_or_else(|e| {
+            warn!(
+                "failed to close connection with error: {}", e
+            )
+        });
        
         info!("close monitor");
         if let Some(handler) = self.handler.take() {
@@ -545,14 +543,14 @@ impl Server {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl FromRawFd for Server {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         Self::default().add_listener(fd).unwrap()
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl AsRawFd for Server {
     fn as_raw_fd(&self) -> RawFd {
         self.listeners[0].as_raw_fd()

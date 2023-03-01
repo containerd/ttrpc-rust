@@ -97,7 +97,10 @@ macro_rules! client_request {
 /// The context of ttrpc (sync).
 #[derive(Debug)]
 pub struct TtrpcContext {
+    #[cfg(unix)]
     pub fd: std::os::unix::io::RawFd,
+    #[cfg(windows)]
+    pub fd: i32,
     pub mh: MessageHeader,
     pub res_tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
     pub metadata: HashMap<String, Vec<String>>,
