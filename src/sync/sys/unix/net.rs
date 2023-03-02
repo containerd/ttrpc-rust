@@ -305,8 +305,8 @@ impl ClientConnection {
         Ok(Some(()))
     }
 
-    pub fn get_pipe_connection(&self) -> PipeConnection {
-        PipeConnection::new(self.fd)
+    pub fn get_pipe_connection(&self) -> Result<PipeConnection> {
+        Ok(PipeConnection::new(self.fd))
     }
 
     pub fn close_receiver(&self) -> Result<()> {

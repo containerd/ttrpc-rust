@@ -30,7 +30,7 @@ use windows_sys::Win32::Foundation::{ CloseHandle, ERROR_IO_PENDING, ERROR_PIPE_
 use windows_sys::Win32::Storage::FileSystem::{ ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX };
 use windows_sys::Win32::System::IO::{ GetOverlappedResult, OVERLAPPED };
 use windows_sys::Win32::System::Pipes::{ CreateNamedPipeW, ConnectNamedPipe,DisconnectNamedPipe, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES, PIPE_REJECT_REMOTE_CLIENTS };
-use windows_sys::Win32::System::Threading::CreateEventW;
+use windows_sys::Win32::System::Threading::{CreateEventW, SetEvent};
 
 const PIPE_BUFFER_SIZE: u32 = 65536;
 const WAIT_FOR_EVENT: i32 = 1;
@@ -38,6 +38,7 @@ const WAIT_FOR_EVENT: i32 = 1;
 pub struct PipeListener {
     first_instance: AtomicBool,
     address: String,
+    connection_event: isize,
 }
 
 #[repr(C)]
@@ -54,12 +55,6 @@ impl Overlapped {
         ol
     }
 
-    fn new() -> Overlapped  {
-         Overlapped {
-             inner: UnsafeCell::new(unsafe { std::mem::zeroed() }),
-         }
-     }
-
     fn as_mut_ptr(&self) -> *mut OVERLAPPED {
         self.inner.get()
     }
@@ -67,9 +62,11 @@ impl Overlapped {
 
 impl PipeListener {
     pub(crate) fn new(sockaddr: &str) -> Result<PipeListener> {
+        let connection_event = create_event()?;
         Ok(PipeListener {
             first_instance: AtomicBool::new(true),
             address: sockaddr.to_string(),
+            connection_event
         })
     }
 
@@ -85,11 +82,21 @@ impl PipeListener {
         }
 
         // Create a new pipe instance for every new client
-        let np = self.new_instance().unwrap();
-        let ol = Overlapped::new();
+        let instance = self.new_instance()?;
+        let np = match PipeConnection::new(instance) {
+            Ok(np) => np,
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to create new pipe instance: {:?}", e),
+                ));
+            }
+        };
+        
+        let ol = Overlapped::new_with_event(self.connection_event);
 
         trace!("listening for connection");
-        let result = unsafe { ConnectNamedPipe(np, ol.as_mut_ptr())};
+        let result = unsafe { ConnectNamedPipe(np.named_pipe, ol.as_mut_ptr())};
         if result != 0 {
             return Err(io::Error::last_os_error());
         }
@@ -97,18 +104,18 @@ impl PipeListener {
         match io::Error::last_os_error() {
             e if e.raw_os_error() == Some(ERROR_IO_PENDING as i32) => {
                 let mut bytes_transfered = 0;
-                let res = unsafe {GetOverlappedResult(np, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
+                let res = unsafe {GetOverlappedResult(np.named_pipe, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
                 match res {
                     0 => {
                         return Err(io::Error::last_os_error());
                     }
                     _ => {
-                        Ok(Some(PipeConnection::new(np)))
+                        Ok(Some(np))
                     }
                 }
             }
             e if e.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => {
-                Ok(Some(PipeConnection::new(np)))
+                Ok(Some(np))
             }
             e => {
                 return Err(io::Error::new(
@@ -145,7 +152,9 @@ impl PipeListener {
     }
 
     pub fn close(&self) -> Result<()> {
-        Ok(())
+        // release the ConnectNamedPipe thread by signaling the event and clean up event handle
+        set_event(self.connection_event)?;
+        close_handle(self.connection_event)
     }
 }
 
@@ -170,15 +179,15 @@ pub struct PipeConnection {
 // "It is safer to use an event object because of the confusion that can occur when multiple simultaneous overlapped operations are performed on the same file, named pipe, or communications device." 
 // "In this situation, there is no way to know which operation caused the object's state to be signaled."
 impl PipeConnection {
-    pub(crate) fn new(h: isize) -> PipeConnection {
+    pub(crate) fn new(h: isize) -> Result<PipeConnection> {
         trace!("creating events for thread {:?} on pipe instance {}", std::thread::current().id(), h as i32);
-        let read_event = unsafe { CreateEventW(std::ptr::null_mut(), 0, 1, std::ptr::null_mut()) };
-        let write_event = unsafe { CreateEventW(std::ptr::null_mut(), 0, 1, std::ptr::null_mut()) };
-        PipeConnection {
+        let read_event = create_event()?;
+        let write_event = create_event()?;
+        Ok(PipeConnection {
             named_pipe: h,
             read_event: read_event,
             write_event: write_event,
-        }
+        })
     }
 
     pub(crate) fn id(&self) -> i32 {
@@ -275,6 +284,22 @@ fn close_handle(handle: isize) -> Result<()> {
     }
 }
 
+fn create_event() -> Result<isize> {
+    let result = unsafe { CreateEventW(std::ptr::null_mut(), 0, 1, std::ptr::null_mut()) };
+    match result {
+        0 => Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap())),
+        _ => Ok(result),
+    }
+}
+
+fn set_event(event: isize) -> Result<()> {
+    let result = unsafe { SetEvent(event) };
+    match result {
+        0 => Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap())),
+        _ => Ok(()),
+    }
+}
+
 impl ClientConnection {
     pub fn client_connect(sockaddr: &str) -> Result<ClientConnection> {
         Ok(ClientConnection::new(sockaddr))
@@ -291,14 +316,14 @@ impl ClientConnection {
         Ok(Some(()))
     }
 
-    pub fn get_pipe_connection(&self) -> PipeConnection {
+    pub fn get_pipe_connection(&self) -> Result<PipeConnection> {
         let mut opts = OpenOptions::new();
         opts.read(true)
             .write(true)
             .custom_flags(FILE_FLAG_OVERLAPPED);
         let file = opts.open(self.address.as_str());
 
-        PipeConnection::new(file.unwrap().into_raw_handle() as isize)
+        return PipeConnection::new(file.unwrap().into_raw_handle() as isize)
     }
 
     pub fn close_receiver(&self) -> Result<()> {

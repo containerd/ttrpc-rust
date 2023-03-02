@@ -45,7 +45,7 @@ impl Client {
     pub fn connect(sockaddr: &str) -> Result<Client> {
         let conn = ClientConnection::client_connect(sockaddr)?;
         
-        Ok(Self::new_client(conn))
+        Self::new_client(conn)
     }
 
     #[cfg(unix)]
@@ -53,10 +53,15 @@ impl Client {
     pub fn new(fd: RawFd) -> Client {
         let conn = ClientConnection::new(fd);
 
-        Self::new_client(conn)
+        // TODO: upgrade the API of Client::new and remove this panic for the major version release
+        Self::new_client(conn).unwrap_or_else(|e| {
+            panic!(
+                "client was not successfully initialized: {}", e
+            )
+        })
     }
 
-    fn new_client(pipe_client: ClientConnection) -> Client {
+    fn new_client(pipe_client: ClientConnection) -> Result<Client> {
         let client = Arc::new(pipe_client);
         
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
@@ -64,7 +69,7 @@ impl Client {
 
        
         let receiver_map = recver_map_orig.clone();
-        let connection = Arc::new(client.get_pipe_connection());
+        let connection = Arc::new(client.get_pipe_connection()?);
         let sender_client = connection.clone();
 
         //Sender
@@ -171,10 +176,10 @@ impl Client {
             trace!("Receiver quit");
         });
 
-        Client {
+        Ok(Client {
             _connection: client,
             sender_tx,
-        }
+        })
     }
     pub fn request(&self, req: Request) -> Result<Response> {
         let buf = req.encode().map_err(err_to_others_err!(e, ""))?;
@@ -220,7 +225,11 @@ impl Drop for ClientConnection {
 #[cfg(windows)]
 impl Drop for PipeConnection {
     fn drop(&mut self) {
-        self.close().unwrap();
+        self.close().unwrap_or_else(|e| {
+            trace!(
+                "connection may already be closed: {}", e
+            )
+        });
         trace!("pipe connection is dropped");
     }
 }
