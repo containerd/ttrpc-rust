@@ -1,3 +1,5 @@
+RUST_VERSION = 1.66
+
 all: debug test
 
 #
@@ -30,6 +32,6 @@ check:
 
 .PHONY: deps
 deps:
-	rustup update stable
-	rustup default stable
+	rustup install $(RUST_VERSION)
+	rustup default $(RUST_VERSION)
 	rustup component add rustfmt clippy
