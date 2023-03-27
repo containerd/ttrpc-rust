@@ -45,7 +45,7 @@ fn main() {
             async_all: true,
             ..Default::default()
         })
-        .rust_protobuf_customize(protobuf_customized.clone())
+        .rust_protobuf_customize(protobuf_customized)
         .run()
         .expect("Gen async code failed.");
 
@@ -75,7 +75,7 @@ fn replace_text_in_file(file_name: &str, from: &str, to: &str) -> Result<(), std
 
     let new_contents = contents.replace(from, to);
 
-    let mut dst = File::create(&file_name)?;
+    let mut dst = File::create(file_name)?;
     dst.write(new_contents.as_bytes())?;
 
     Ok(())

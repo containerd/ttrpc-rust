@@ -13,17 +13,22 @@ use std::sync::Arc;
 
 use log::LevelFilter;
 
+#[cfg(unix)]
 use protocols::r#async::{agent, agent_ttrpc, health, health_ttrpc, types};
+#[cfg(unix)]
 use ttrpc::asynchronous::Server;
 use ttrpc::error::{Error, Result};
 use ttrpc::proto::{Code, Status};
 
+#[cfg(unix)]
 use async_trait::async_trait;
+#[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::time::sleep;
 
 struct HealthService;
 
+#[cfg(unix)]
 #[async_trait]
 impl health_ttrpc::Health for HealthService {
     async fn check(
@@ -58,7 +63,7 @@ impl health_ttrpc::Health for HealthService {
 }
 
 struct AgentService;
-
+#[cfg(unix)]
 #[async_trait]
 impl agent_ttrpc::AgentService for AgentService {
     async fn list_interfaces(
@@ -82,6 +87,12 @@ impl agent_ttrpc::AgentService for AgentService {
     }
 }
 
+#[cfg(windows)]
+fn main() {
+    println!("This example only works on Unix-like OSes");
+}
+
+#[cfg(unix)]
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);

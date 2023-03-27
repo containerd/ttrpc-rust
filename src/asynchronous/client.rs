@@ -294,7 +294,7 @@ impl ReaderDelegate for ClientReader {
                     };
                     resp_tx
                         .send(Err(Error::Others(format!(
-                            "Recver got malformed packet {msg:?}"
+                            "Receiver got malformed packet {msg:?}"
                         ))))
                         .await
                         .unwrap_or_else(|_e| error!("The request has returned"));

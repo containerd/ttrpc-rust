@@ -311,7 +311,7 @@ where
 async fn _recv(rx: &mut ResultReceiver) -> Result<GenMessage> {
     rx.recv().await.unwrap_or_else(|| {
         Err(Error::Others(
-            "Receive packet from recver error".to_string(),
+            "Receive packet from Receiver error".to_string(),
         ))
     })
 }

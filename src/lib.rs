@@ -49,6 +49,9 @@ pub mod error;
 #[macro_use]
 mod common;
 
+#[macro_use]
+mod macros;
+
 pub mod context;
 
 pub mod proto;

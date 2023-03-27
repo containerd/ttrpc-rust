@@ -1,9 +1,10 @@
+#![cfg(not(windows))]
 // Copyright (c) 2020 Ant Financial
 //
 // SPDX-License-Identifier: Apache-2.0
 //
 
-//! Common functions and macros.
+//! Common functions.
 
 use crate::error::{Error, Result};
 #[cfg(any(
@@ -171,26 +172,6 @@ pub(crate) unsafe fn client_connect(sockaddr: &str) -> Result<RawFd> {
     connect(fd, &sockaddr)?;
 
     Ok(fd)
-}
-
-macro_rules! cfg_sync {
-    ($($item:item)*) => {
-        $(
-            #[cfg(feature = "sync")]
-            #[cfg_attr(docsrs, doc(cfg(feature = "sync")))]
-            $item
-        )*
-    }
-}
-
-macro_rules! cfg_async {
-    ($($item:item)*) => {
-        $(
-            #[cfg(feature = "async")]
-            #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
-            $item
-        )*
-    }
 }
 
 #[cfg(test)]

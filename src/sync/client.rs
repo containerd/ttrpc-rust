@@ -14,21 +14,22 @@
 
 //! Sync client of ttrpc.
 
-use nix::sys::socket::*;
-use nix::unistd::close;
-use std::collections::HashMap;
+#[cfg(unix)]
 use std::os::unix::io::RawFd;
+
+use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::{io, thread};
+use std::{thread};
+use std::time::Duration;
 
-#[cfg(target_os = "macos")]
-use crate::common::set_fd_close_exec;
-use crate::common::{client_connect, SOCK_CLOEXEC};
 use crate::error::{Error, Result};
+use crate::sync::sys::{ClientConnection};
 use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 use crate::sync::channel::{read_message, write_message};
-use std::time::Duration;
+
+#[cfg(windows)]
+use super::sys::PipeConnection;
 
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
@@ -36,38 +37,42 @@ type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 /// A ttrpc Client (sync).
 #[derive(Clone)]
 pub struct Client {
-    _fd: RawFd,
+    _connection: Arc<ClientConnection>,
     sender_tx: Sender,
-    _client_close: Arc<ClientClose>,
 }
 
 impl Client {
     pub fn connect(sockaddr: &str) -> Result<Client> {
-        let fd = unsafe { client_connect(sockaddr)? };
-        Ok(Self::new(fd))
+        let conn = ClientConnection::client_connect(sockaddr)?;
+        
+        Self::new_client(conn)
     }
 
+    #[cfg(unix)]
     /// Initialize a new [`Client`] from raw file descriptor.
     pub fn new(fd: RawFd) -> Client {
+        let conn = ClientConnection::new(fd);
+
+        // TODO: upgrade the API of Client::new and remove this panic for the major version release
+        Self::new_client(conn).unwrap_or_else(|e| {
+            panic!(
+                "client was not successfully initialized: {}", e
+            )
+        })
+    }
+
+    fn new_client(pipe_client: ClientConnection) -> Result<Client> {
+        let client = Arc::new(pipe_client);
+        
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
-
-        let (recver_fd, close_fd) =
-            socketpair(AddressFamily::Unix, SockType::Stream, None, SOCK_CLOEXEC).unwrap();
-
-        // MacOS doesn't support descriptor creation with SOCK_CLOEXEC automically,
-        // so there is a chance of leak if fork + exec happens in between of these calls.
-        #[cfg(target_os = "macos")]
-        {
-            set_fd_close_exec(recver_fd).unwrap();
-            set_fd_close_exec(close_fd).unwrap();
-        }
-
-        let client_close = Arc::new(ClientClose { fd, close_fd });
-
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
 
+       
+        let receiver_map = recver_map_orig.clone();
+        let connection = Arc::new(client.get_pipe_connection()?);
+        let sender_client = connection.clone();
+
         //Sender
-        let recver_map = recver_map_orig.clone();
         thread::spawn(move || {
             let mut stream_id: u32 = 1;
             for (buf, recver_tx) in rx.iter() {
@@ -75,15 +80,16 @@ impl Client {
                 stream_id += 2;
                 //Put current_stream_id and recver_tx to recver_map
                 {
-                    let mut map = recver_map.lock().unwrap();
+                    let mut map = receiver_map.lock().unwrap();
                     map.insert(current_stream_id, recver_tx.clone());
                 }
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
-                if let Err(e) = write_message(fd, mh, buf) {
+
+                if let Err(e) = write_message(&sender_client, mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
-                        let mut map = recver_map.lock().unwrap();
+                        let mut map = receiver_map.lock().unwrap();
                         map.remove(&current_stream_id);
                     }
                     recver_tx
@@ -95,53 +101,24 @@ impl Client {
         });
 
         //Recver
+        let receiver_connection = connection;
+        let receiver_client = client.clone();
         thread::spawn(move || {
-            let mut pollers = vec![
-                libc::pollfd {
-                    fd: recver_fd,
-                    events: libc::POLLIN,
-                    revents: 0,
-                },
-                libc::pollfd {
-                    fd,
-                    events: libc::POLLIN,
-                    revents: 0,
-                },
-            ];
-
             loop {
-                let returned = unsafe {
-                    let pollers: &mut [libc::pollfd] = &mut pollers;
-                    libc::poll(
-                        pollers as *mut _ as *mut libc::pollfd,
-                        pollers.len() as _,
-                        -1,
-                    )
-                };
-
-                if returned == -1 {
-                    let err = io::Error::last_os_error();
-                    if err.raw_os_error() == Some(libc::EINTR) {
+                match receiver_client.ready() {
+                    Ok(None) => {
                         continue;
                     }
-
-                    error!("fatal error in process reaper:{}", err);
-                    break;
-                } else if returned < 1 {
-                    continue;
-                }
-
-                if pollers[0].revents != 0 {
-                    break;
-                }
-
-                if pollers[pollers.len() - 1].revents == 0 {
-                    continue;
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("pipeConnection ready error {:?}", e);
+                        break;
+                    }
                 }
 
                 let mh;
                 let buf;
-                match read_message(fd) {
+                match read_message(&receiver_connection) {
                     Ok((x, y)) => {
                         mh = x;
                         buf = y;
@@ -170,14 +147,14 @@ impl Client {
                 let recver_tx = match map.get(&mh.stream_id) {
                     Some(tx) => tx,
                     None => {
-                        debug!("Recver got unknown packet {:?} {:?}", mh, buf);
+                        debug!("Receiver got unknown packet {:?} {:?}", mh, buf);
                         continue;
                     }
                 };
                 if mh.type_ != MESSAGE_TYPE_RESPONSE {
                     recver_tx
                         .send(Err(Error::Others(format!(
-                            "Recver got malformed packet {mh:?} {buf:?}"
+                            "Receiver got malformed packet {mh:?} {buf:?}"
                         ))))
                         .unwrap_or_else(|_e| error!("The request has returned"));
                     continue;
@@ -190,21 +167,19 @@ impl Client {
                 map.remove(&mh.stream_id);
             }
 
-            let _ = close(recver_fd).map_err(|e| {
+            let _ = receiver_client.close_receiver().map_err(|e| {
                 warn!(
-                    "failed to close recver_fd: {} with error: {:?}",
-                    recver_fd, e
+                    "failed to close with error: {:?}", e
                 )
             });
 
-            trace!("Recver quit");
+            trace!("Receiver quit");
         });
 
-        Client {
-            _fd: fd,
+        Ok(Client {
+            _connection: client,
             sender_tx,
-            _client_close: client_close,
-        }
+        })
     }
     pub fn request(&self, req: Request) -> Result<Response> {
         let buf = req.encode().map_err(err_to_others_err!(e, ""))?;
@@ -217,12 +192,12 @@ impl Client {
 
         let result = if req.timeout_nano == 0 {
             rx.recv()
-                .map_err(err_to_others_err!(e, "Receive packet from recver error: "))?
+                .map_err(err_to_others_err!(e, "Receive packet from Receiver error: "))?
         } else {
             rx.recv_timeout(Duration::from_nanos(req.timeout_nano as u64))
                 .map_err(err_to_others_err!(
                     e,
-                    "Receive packet from recver timeout: "
+                    "Receive packet from Receiver timeout: "
                 ))?
         };
 
@@ -239,15 +214,22 @@ impl Client {
     }
 }
 
-struct ClientClose {
-    fd: RawFd,
-    close_fd: RawFd,
+impl Drop for ClientConnection {
+    fn drop(&mut self) {
+        self.close().unwrap();
+        trace!("Client is dropped");
+    }
 }
 
-impl Drop for ClientClose {
+// close everything up from the pipe connection on Windows
+#[cfg(windows)]
+impl Drop for PipeConnection {
     fn drop(&mut self) {
-        close(self.close_fd).unwrap();
-        close(self.fd).unwrap();
-        trace!("All client is droped");
+        self.close().unwrap_or_else(|e| {
+            trace!(
+                "connection may already be closed: {}", e
+            )
+        });
+        trace!("pipe connection is dropped");
     }
 }

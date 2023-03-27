@@ -27,8 +27,13 @@ pub enum Error {
     #[error("rpc status: {0:?}")]
     RpcStatus(Status),
 
+    #[cfg(unix)]
     #[error("Nix error: {0}")]
     Nix(#[from] nix::Error),
+
+    #[cfg(windows)]
+    #[error("Windows error: {0}")]
+    Windows(i32),
 
     #[error("ttrpc err: local stream closed")]
     LocalClosed,

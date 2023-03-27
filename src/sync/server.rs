@@ -13,27 +13,26 @@
 // limitations under the License.
 
 //! Sync server of ttrpc.
+//! 
 
-use nix::sys::socket::{self, *};
-use nix::unistd::*;
+#[cfg(unix)]
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+
 use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::{io, thread};
+use std::{thread};
 
 use super::utils::response_to_channel;
-use crate::common;
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-use crate::common::set_fd_close_exec;
 use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
 use crate::{MethodHandler, TtrpcContext};
+use crate::sync::sys::{PipeListener, PipeConnection};
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -47,10 +46,9 @@ type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
 
 /// A ttrpc Server (sync).
 pub struct Server {
-    listeners: Vec<RawFd>,
-    monitor_fd: (RawFd, RawFd),
+    listeners: Vec<Arc<PipeListener>>,
     listener_quit_flag: Arc<AtomicBool>,
-    connections: Arc<Mutex<HashMap<RawFd, Connection>>>,
+    connections: Arc<Mutex<HashMap<i32, Connection>>>,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
     handler: Option<JoinHandle<()>>,
     reaper: Option<(Sender<i32>, JoinHandle<()>)>,
@@ -60,21 +58,26 @@ pub struct Server {
 }
 
 struct Connection {
-    fd: RawFd,
+    connection: Arc<PipeConnection>,
     quit: Arc<AtomicBool>,
     handler: Option<JoinHandle<()>>,
 }
 
 impl Connection {
-    fn close(&self) {
+    fn close (&self) {
+        self.connection.close().unwrap_or(());
+    }
+
+    fn shutdown(&self) {
         self.quit.store(true, Ordering::SeqCst);
+
         // in case the connection had closed
-        socket::shutdown(self.fd, Shutdown::Read).unwrap_or(());
+        self.connection.shutdown().unwrap_or(());
     }
 }
 
 struct ThreadS<'a> {
-    fd: RawFd,
+    connection:  &'a Arc<PipeConnection>,
     fdlock: &'a Arc<Mutex<()>>,
     wtc: &'a Arc<AtomicUsize>,
     quit: &'a Arc<AtomicBool>,
@@ -88,7 +91,7 @@ struct ThreadS<'a> {
 
 #[allow(clippy::too_many_arguments)]
 fn start_method_handler_thread(
-    fd: RawFd,
+    connection: Arc<PipeConnection>,
     fdlock: Arc<Mutex<()>>,
     wtc: Arc<AtomicUsize>,
     quit: Arc<AtomicBool>,
@@ -116,7 +119,7 @@ fn start_method_handler_thread(
                         .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
-                result = read_message(fd);
+                result = read_message(&connection);
             }
 
             if quit.load(Ordering::SeqCst) {
@@ -207,7 +210,7 @@ fn start_method_handler_thread(
                 continue;
             };
             let ctx = TtrpcContext {
-                fd,
+                fd: connection.id(),
                 mh,
                 res_tx: res_tx.clone(),
                 metadata: context::from_pb(&req.metadata),
@@ -234,7 +237,7 @@ fn start_method_handler_threads(num: usize, ts: &ThreadS) {
             break;
         }
         start_method_handler_thread(
-            ts.fd,
+            ts.connection.clone(),
             ts.fdlock.clone(),
             ts.wtc.clone(),
             ts.quit.clone(),
@@ -258,7 +261,6 @@ impl Default for Server {
     fn default() -> Self {
         Server {
             listeners: Vec::with_capacity(1),
-            monitor_fd: (-1, -1),
             listener_quit_flag: Arc::new(AtomicBool::new(false)),
             connections: Arc::new(Mutex::new(HashMap::new())),
             methods: Arc::new(HashMap::new()),
@@ -283,15 +285,23 @@ impl Server {
             ));
         }
 
-        let (fd, _) = common::do_bind(sockaddr)?;
-        common::do_listen(fd)?;
+        let listener = PipeListener::new(sockaddr)?;
 
-        self.listeners.push(fd);
+        self.listeners.push(Arc::new(listener));
         Ok(self)
     }
 
+    #[cfg(unix)]
     pub fn add_listener(mut self, fd: RawFd) -> Result<Server> {
-        self.listeners.push(fd);
+        if !self.listeners.is_empty() {
+            return Err(Error::Others(
+                "ttrpc-rust just support 1 sockaddr now".to_string(),
+            ));
+        }
+
+        let listener = PipeListener::new_from_fd(fd)?;
+        
+        self.listeners.push(Arc::new(listener));
 
         Ok(self)
     }
@@ -329,27 +339,14 @@ impl Server {
 
         self.listener_quit_flag.store(false, Ordering::SeqCst);
 
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        let fds = pipe2(nix::fcntl::OFlag::O_CLOEXEC)?;
+       
 
-        #[cfg(not(any(target_os = "linux", target_os = "android")))]
-        let fds = {
-            let (rfd, wfd) = pipe()?;
-            set_fd_close_exec(rfd)?;
-            set_fd_close_exec(wfd)?;
-            (rfd, wfd)
-        };
-
-        self.monitor_fd = fds;
-
-        let listener = self.listeners[0];
-
+        let listener = self.listeners[0].clone();
         let methods = self.methods.clone();
         let default = self.thread_count_default;
         let min = self.thread_count_min;
         let max = self.thread_count_max;
         let listener_quit_flag = self.listener_quit_flag.clone();
-        let monitor_fd = self.monitor_fd.0;
 
         let reaper_tx = match self.reaper.take() {
             None => {
@@ -366,7 +363,7 @@ impl Server {
                                 .map(|mut cn| {
                                     cn.handler.take().map(|handler| {
                                         handler.join().unwrap();
-                                        close(fd).unwrap();
+                                        cn.close()
                                     })
                                 });
                         }
@@ -386,78 +383,17 @@ impl Server {
         let handler = thread::Builder::new()
             .name("listener_loop".into())
             .spawn(move || {
-                let mut pollers = vec![
-                    libc::pollfd {
-                        fd: monitor_fd,
-                        events: libc::POLLIN,
-                        revents: 0,
-                    },
-                    libc::pollfd {
-                        fd: listener,
-                        events: libc::POLLIN,
-                        revents: 0,
-                    },
-                ];
-
-                loop {
-                    if listener_quit_flag.load(Ordering::SeqCst) {
-                        info!("listener shutdown for quit flag");
-                        break;
-                    }
-
-                    let returned = unsafe {
-                        let pollers: &mut [libc::pollfd] = &mut pollers;
-                        libc::poll(
-                            pollers as *mut _ as *mut libc::pollfd,
-                            pollers.len() as _,
-                            -1,
-                        )
-                    };
-
-                    if returned == -1 {
-                        let err = io::Error::last_os_error();
-                        if err.raw_os_error() == Some(libc::EINTR) {
+                loop {   
+                    trace!("listening...");
+                    let pipe_connection = match listener.accept(&listener_quit_flag) {
+                        Ok(None) => {
                             continue;
                         }
-
-                        error!("fatal error in listener_loop:{:?}", err);
-                        break;
-                    } else if returned < 1 {
-                        continue;
-                    }
-
-                    if pollers[0].revents != 0 || pollers[pollers.len() - 1].revents == 0 {
-                        continue;
-                    }
-
-                    if listener_quit_flag.load(Ordering::SeqCst) {
-                        info!("listener shutdown for quit flag");
-                        break;
-                    }
-
-                    #[cfg(any(target_os = "linux", target_os = "android"))]
-                    let fd = match accept4(listener, SockFlag::SOCK_CLOEXEC) {
-                        Ok(fd) => fd,
-                        Err(e) => {
-                            error!("failed to accept error {:?}", e);
-                            break;
-                        }
-                    };
-
-                    // Non Linux platforms do not support accept4 with SOCK_CLOEXEC flag, so instead
-                    // use accept and call fcntl separately to set SOCK_CLOEXEC.
-                    // Because of this there is chance of the descriptor leak if fork + exec happens in between.
-                    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-                    let fd = match accept(listener) {
-                        Ok(fd) => {
-                            if let Err(err) = set_fd_close_exec(fd) {
-                                error!("fcntl failed after accept: {:?}", err);
-                                break;
-                            };
-                            fd
+                        Ok(Some(conn)) => {
+                           Arc::new(conn)
                         }
                         Err(e) => {
-                            error!("failed to accept error {:?}", e);
+                            error!("listener accept got {:?}", e);
                             break;
                         }
                     };
@@ -466,6 +402,7 @@ impl Server {
                     let quit = Arc::new(AtomicBool::new(false));
                     let child_quit = quit.clone();
                     let reaper_tx_child = reaper_tx.clone();
+                    let pipe_connection_child = pipe_connection.clone();
 
                     let handler = thread::Builder::new()
                         .name("client_handler".into())
@@ -473,11 +410,12 @@ impl Server {
                             debug!("Got new client");
                             // Start response thread
                             let quit_res = child_quit.clone();
+                            let pipe = pipe_connection_child.clone();
                             let (res_tx, res_rx): (MessageSender, MessageReceiver) = channel();
                             let handler = thread::spawn(move || {
                                 for r in res_rx.iter() {
                                     trace!("response thread get {:?}", r);
-                                    if let Err(e) = write_message(fd, r.0, r.1) {
+                                    if let Err(e) = write_message(&pipe, r.0, r.1) {
                                         error!("write_message got {:?}", e);
                                         quit_res.store(true, Ordering::SeqCst);
                                         break;
@@ -487,10 +425,11 @@ impl Server {
                                 trace!("response thread quit");
                             });
 
+                            let pipe = pipe_connection_child.clone();
                             let (control_tx, control_rx): (SyncSender<()>, Receiver<()>) =
                                 sync_channel(0);
                             let ts = ThreadS {
-                                fd,
+                                connection: &pipe,
                                 fdlock: &Arc::new(Mutex::new(())),
                                 wtc: &Arc::new(AtomicUsize::new(0)),
                                 methods: &methods,
@@ -517,17 +456,19 @@ impl Server {
                             handler.join().unwrap_or(());
                             // client_handler should not close fd before exit
                             // , which prevent fd reuse issue.
-                            reaper_tx_child.send(fd).unwrap();
+                            reaper_tx_child.send(pipe.id()).unwrap();
 
                             debug!("client thread quit");
                         })
                         .unwrap();
 
                     let mut cns = connections.lock().unwrap();
+
+                    let id = pipe_connection.id();
                     cns.insert(
-                        fd,
+                        id,
                         Connection {
-                            fd,
+                            connection: pipe_connection,
                             handler: Some(handler),
                             quit: quit.clone(),
                         },
@@ -553,7 +494,7 @@ impl Server {
         }
         if self.thread_count_default <= self.thread_count_min {
             return Err(Error::Others(
-                "thread_count_default should biger than thread_count_min".to_string(),
+                "thread_count_default should bigger than thread_count_min".to_string(),
             ));
         }
         self.start_listen()?;
@@ -563,12 +504,13 @@ impl Server {
 
     pub fn stop_listen(mut self) -> Self {
         self.listener_quit_flag.store(true, Ordering::SeqCst);
-        close(self.monitor_fd.1).unwrap_or_else(|e| {
+
+        self.listeners[0].close().unwrap_or_else(|e| {
             warn!(
-                "failed to close notify fd: {} with error: {}",
-                self.monitor_fd.1, e
+                "failed to close connection with error: {}", e
             )
         });
+       
         info!("close monitor");
         if let Some(handler) = self.handler.take() {
             handler.join().unwrap();
@@ -582,7 +524,7 @@ impl Server {
         let connections = self.connections.lock().unwrap();
 
         for (_fd, c) in connections.iter() {
-            c.close();
+            c.shutdown();
         }
         // release connections's lock, since the following handler.join()
         // would wait on the other thread's exit in which would take the lock.
@@ -601,14 +543,16 @@ impl Server {
     }
 }
 
+#[cfg(unix)]
 impl FromRawFd for Server {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         Self::default().add_listener(fd).unwrap()
     }
 }
 
+#[cfg(unix)]
 impl AsRawFd for Server {
     fn as_raw_fd(&self) -> RawFd {
-        self.listeners[0]
+        self.listeners[0].as_raw_fd()
     }
 }
