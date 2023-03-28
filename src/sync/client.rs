@@ -50,15 +50,23 @@ impl Client {
 
     #[cfg(unix)]
     /// Initialize a new [`Client`] from raw file descriptor.
+    #[deprecated(since="0.8.0", note="please use `new_from_fd` instead")]
     pub fn new(fd: RawFd) -> Client {
         let conn = ClientConnection::new(fd);
 
-        // TODO: upgrade the API of Client::new and remove this panic for the major version release
         Self::new_client(conn).unwrap_or_else(|e| {
             panic!(
                 "client was not successfully initialized: {}", e
             )
         })
+    }
+
+    #[cfg(unix)]
+    /// Initialize a new [`Client`] from raw file descriptor.
+    pub fn new_from_fd(fd: RawFd) -> Result<Client> {
+        let conn = ClientConnection::new(fd);
+
+        Self::new_client(conn)
     }
 
     fn new_client(pipe_client: ClientConnection) -> Result<Client> {
