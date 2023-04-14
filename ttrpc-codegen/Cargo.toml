@@ -1,6 +1,6 @@
 [package]
 name = "ttrpc-codegen"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2018"
 authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 license = "Apache-2.0"
