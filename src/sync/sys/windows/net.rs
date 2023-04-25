@@ -100,12 +100,8 @@ impl PipeListener {
         trace!("listening for connection");
         let result = unsafe { ConnectNamedPipe(np.named_pipe, ol.as_mut_ptr())};
         if result != 0 {
-            if self.shutting_down.load(Ordering::SeqCst) {
-                np.close().unwrap_or_else(|err| trace!("Failed to close the pipe {:?}", err));
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "closing pipe",
-                ));
+            if let Some(error) = self.handle_shutdown(&np) {
+                return Err(error);
             }
             return Err(io::Error::last_os_error());
         }
@@ -119,24 +115,16 @@ impl PipeListener {
                         return Err(io::Error::last_os_error());
                     }
                     _ => {
-                        if self.shutting_down.load(Ordering::SeqCst) {
-                            np.close().unwrap_or_else(|err| trace!("Failed to close the pipe {:?}", err));
-                            return Err(io::Error::new(
-                                io::ErrorKind::Other,
-                                "closing pipe",
-                            ));
+                        if let Some(shutdown_signal) = self.handle_shutdown(&np) {
+                            return Err(shutdown_signal);
                         }
                         Ok(Some(np))
                     }
                 }
             }
             e if e.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => {
-                if self.shutting_down.load(Ordering::SeqCst) {
-                    np.close().unwrap_or_else(|err| trace!("Failed to close the pipe {:?}", err));
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "closing pipe",
-                    ));
+                if let Some(error) = self.handle_shutdown(&np) {
+                    return Err(error);
                 }
                 Ok(Some(np))
             }
@@ -147,6 +135,17 @@ impl PipeListener {
                 ));
             }
         }
+    }
+
+    fn handle_shutdown(&self, np: &PipeConnection) -> Option<io::Error> {
+        if self.shutting_down.load(Ordering::SeqCst) {
+            np.close().unwrap_or_else(|err| trace!("Failed to close the pipe {:?}", err));
+            return Some(io::Error::new(
+                io::ErrorKind::Other,
+                "closing pipe",
+            ));
+        }
+        None
     }
 
     fn new_instance(&self) -> io::Result<isize> {
@@ -386,7 +385,8 @@ mod test {
 
     #[test]
     fn should_accept_new_client() {
-        let listener = Arc::new(PipeListener::new(r"\\.\pipe\ttrpc-test-accept").unwrap());
+        let address = r"\\.\pipe\ttrpc-test-accept";
+        let listener = Arc::new(PipeListener::new(address).unwrap());
 
         let listener_server = listener.clone();
         let thread = std::thread::spawn(move || {
@@ -404,7 +404,7 @@ mod test {
             }
         });
 
-        wait_socket_working(r"\\.\pipe\ttrpc-test-accept", 10, 5).unwrap();
+        wait_socket_working(address, 10, 5).unwrap();
         thread.join().unwrap();
     }
 
