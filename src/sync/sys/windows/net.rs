@@ -213,7 +213,7 @@ impl PipeConnection {
                 let res = unsafe {GetOverlappedResult(self.named_pipe, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
                 match res {
                     0 => {
-                        return Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap()))
+                        return Err(handle_windows_error(io::Error::last_os_error()))
                     }
                     _ => {
                         return Ok(bytes_transfered as usize)
@@ -244,7 +244,7 @@ impl PipeConnection {
                 let res = unsafe {GetOverlappedResult(self.named_pipe, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
                 match res {
                     0 => {
-                        return Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap()))
+                        return Err(handle_windows_error(io::Error::last_os_error()))
                     }
                     _ => {
                         return Ok(bytes_transfered as usize)
@@ -266,7 +266,7 @@ impl PipeConnection {
     pub fn shutdown(&self) -> Result<()> {
         let result = unsafe { DisconnectNamedPipe(self.named_pipe) };
         match result {
-            0 => Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap())),
+            0 => Err(handle_windows_error(io::Error::last_os_error())),
             _ => Ok(()),
         }
     }
@@ -279,7 +279,7 @@ pub struct ClientConnection {
 fn close_handle(handle: isize) -> Result<()> {
     let result = unsafe { CloseHandle(handle) };
     match result {
-        0 => Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap())),
+        0 => Err(handle_windows_error(io::Error::last_os_error())),
         _ => Ok(()),
     }
 }
@@ -287,7 +287,7 @@ fn close_handle(handle: isize) -> Result<()> {
 fn create_event() -> Result<isize> {
     let result = unsafe { CreateEventW(std::ptr::null_mut(), 0, 1, std::ptr::null_mut()) };
     match result {
-        0 => Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap())),
+        0 => Err(handle_windows_error(io::Error::last_os_error())),
         _ => Ok(result),
     }
 }
@@ -295,7 +295,7 @@ fn create_event() -> Result<isize> {
 fn set_event(event: isize) -> Result<()> {
     let result = unsafe { SetEvent(event) };
     match result {
-        0 => Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap())),
+        0 => Err(handle_windows_error(io::Error::last_os_error())),
         _ => Ok(()),
     }
 }
@@ -326,7 +326,7 @@ impl ClientConnection {
                 return PipeConnection::new(file.into_raw_handle() as isize)
             }
             Err(e) => {
-                return Err(Error::Windows(e.raw_os_error().unwrap()))
+                return Err(handle_windows_error(e))
             }
         }
     }
@@ -339,6 +339,14 @@ impl ClientConnection {
     pub fn close(&self) -> Result<()> {
         // close the pipe from the pipe connection
         Ok(())
+    }
+}
+
+fn handle_windows_error(e: io::Error) -> Error {
+    if let Some(raw_os_err) = e.raw_os_error() {
+        Error::Windows(raw_os_err)
+    } else {
+        Error::Others(e.to_string())
     }
 }
 
