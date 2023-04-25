@@ -37,6 +37,7 @@ const WAIT_FOR_EVENT: i32 = 1;
 
 pub struct PipeListener {
     first_instance: AtomicBool,
+    shutting_down: AtomicBool,
     address: String,
     connection_event: isize,
 }
@@ -65,6 +66,7 @@ impl PipeListener {
         let connection_event = create_event()?;
         Ok(PipeListener {
             first_instance: AtomicBool::new(true),
+            shutting_down: AtomicBool::new(false),
             address: sockaddr.to_string(),
             connection_event
         })
@@ -98,6 +100,13 @@ impl PipeListener {
         trace!("listening for connection");
         let result = unsafe { ConnectNamedPipe(np.named_pipe, ol.as_mut_ptr())};
         if result != 0 {
+            if self.shutting_down.load(Ordering::SeqCst) {
+                np.close().unwrap_or_else(|err| trace!("Failed to close the pipe {:?}", err));
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "closing pipe",
+                ));
+            }
             return Err(io::Error::last_os_error());
         }
 
@@ -110,11 +119,25 @@ impl PipeListener {
                         return Err(io::Error::last_os_error());
                     }
                     _ => {
+                        if self.shutting_down.load(Ordering::SeqCst) {
+                            np.close().unwrap_or_else(|err| trace!("Failed to close the pipe {:?}", err));
+                            return Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                "closing pipe",
+                            ));
+                        }
                         Ok(Some(np))
                     }
                 }
             }
             e if e.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => {
+                if self.shutting_down.load(Ordering::SeqCst) {
+                    np.close().unwrap_or_else(|err| trace!("Failed to close the pipe {:?}", err));
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "closing pipe",
+                    ));
+                }
                 Ok(Some(np))
             }
             e => {
@@ -153,6 +176,7 @@ impl PipeListener {
 
     pub fn close(&self) -> Result<()> {
         // release the ConnectNamedPipe thread by signaling the event and clean up event handle
+        self.shutting_down.store(true, Ordering::SeqCst);
         set_event(self.connection_event)?;
         close_handle(self.connection_event)
     }
@@ -359,4 +383,76 @@ mod test {
             }
         }
     }
+
+    #[test]
+    fn should_accept_new_client() {
+        let listener = Arc::new(PipeListener::new(r"\\.\pipe\ttrpc-test-accept").unwrap());
+
+        let listener_server = listener.clone();
+        let thread = std::thread::spawn(move || {
+            let quit_flag = Arc::new(AtomicBool::new(false));
+            match listener_server.accept(&quit_flag) {
+                Ok(Some(_)) => {
+                    // pipe is working
+                }
+                Ok(None) => {
+                    assert!(false, "should get a working pipe")
+                }
+                Err(e) => {
+                    assert!(false, "should not get error {}", e.to_string())
+                }
+            }
+        });
+
+        wait_socket_working(r"\\.\pipe\ttrpc-test-accept", 10, 5).unwrap();
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn close_should_cancel_accept() {
+        let listener = Arc::new(PipeListener::new(r"\\.\pipe\ttrpc-test-close").unwrap());
+
+        let listener_server = listener.clone();
+        let thread = std::thread::spawn(move || {
+            let quit_flag = Arc::new(AtomicBool::new(false));
+            match listener_server.accept(&quit_flag) {
+                Ok(_) => {
+                    assert!(false, "should not get pipe on close")
+                }
+                Err(e) => {
+                    assert_eq!(e.to_string(), "closing pipe")
+                }
+            }
+        });
+
+        // sleep for a moment to allow the pipe to start initialize and be ready to accept new connection.
+        // this simulates scenario where the thread is asleep and awaiting a connection
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        listener.close().unwrap();
+        thread.join().unwrap();
+    }
+
+    fn wait_socket_working(address: &str, interval_in_ms: u64, count: u32) -> Result<()> {
+        for _i in 0..count {
+            let client = match ClientConnection::client_connect(address) {
+                Ok(c) => {
+                    c
+                }
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_millis(interval_in_ms));
+                    continue;
+                }
+            };
+
+            match client.get_pipe_connection() {
+                Ok(_) => {
+                    return Ok(());
+                }
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_millis(interval_in_ms));
+                }
+            }
+        }
+        Err(Error::Others("timed out".to_string()))
+    }    
 }
