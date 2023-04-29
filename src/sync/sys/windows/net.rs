@@ -321,9 +321,14 @@ impl ClientConnection {
         opts.read(true)
             .write(true)
             .custom_flags(FILE_FLAG_OVERLAPPED);
-        let file = opts.open(self.address.as_str());
-
-        return PipeConnection::new(file.unwrap().into_raw_handle() as isize)
+        match opts.open(self.address.as_str()) {
+            Ok(file) => {
+                return PipeConnection::new(file.into_raw_handle() as isize)
+            }
+            Err(e) => {
+                return Err(Error::Windows(e.raw_os_error().unwrap()))
+            }
+        }
     }
 
     pub fn close_receiver(&self) -> Result<()> {
@@ -334,5 +339,24 @@ impl ClientConnection {
     pub fn close(&self) -> Result<()> {
         // close the pipe from the pipe connection
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+
+    #[test]
+    fn test_pipe_connection() {
+        let client = ClientConnection::new("non_existent_pipe");
+        match client.get_pipe_connection() {
+            Ok(_) => {
+                assert!(false, "should not be able to get a connection to a non existent pipe");
+            }
+            Err(e) => {
+                assert_eq!(e, Error::Windows(ERROR_FILE_NOT_FOUND as i32));
+            }
+        }
     }
 }

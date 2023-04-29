@@ -19,7 +19,7 @@ use std::result;
 use thiserror::Error;
 
 /// The error type for ttrpc.
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug, Clone, PartialEq)]
 pub enum Error {
     #[error("socket err: {0}")]
     Socket(String),
