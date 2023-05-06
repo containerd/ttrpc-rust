@@ -1,6 +1,11 @@
 # ttrpc-rust project maintainers
 #
-# MAINTAINERS
+# COMMITTERS
 # GitHub ID, Name, Email address
 teawater, Hui Zhu, teawater@antfin.com
 lifupan, Fupan Li, fupan.lfp@alibaba-inc.com
+Tim-Zhang, Tim Zhang, tim@hyper.sh
+
+# REVIEWERS
+# GitHub ID, Name, Email address
+wllenyj, Lei Wang, wllenyj@linux.alibaba.com
