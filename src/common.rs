@@ -100,11 +100,11 @@ fn make_addr(_domain: Domain, sockaddr: &str) -> Result<UnixAddr> {
     UnixAddr::new(sockaddr).map_err(err_to_others_err!(e, ""))
 }
 
-fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, SockAddr)> {
+fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, Box<dyn SockaddrLike>)> {
     let (sockaddr, _) = addr;
     let (domain, sockaddrv) = parse_sockaddr(sockaddr)?;
 
-    let get_sock_addr = |domain, sockaddr| -> Result<(RawFd, SockAddr)> {
+    let get_sock_addr = |domain, sockaddr| -> Result<(RawFd, Box<dyn SockaddrLike>)> {
         let fd = socket(AddressFamily::Unix, SockType::Stream, SOCK_CLOEXEC, None)
             .map_err(|e| Error::Socket(e.to_string()))?;
 
@@ -112,12 +112,11 @@ fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, SockAddr)> {
         // so there is a chance of leak if fork + exec happens in between of these calls.
         #[cfg(target_os = "macos")]
         set_fd_close_exec(fd)?;
-
-        let sockaddr = SockAddr::Unix(make_addr(domain, sockaddr)?);
-        Ok((fd, sockaddr))
+        let sockaddr = make_addr(domain, sockaddr)?;
+        Ok((fd, Box::new(sockaddr)))
     };
 
-    let (fd, sockaddr) = match domain {
+    let (fd, sockaddr): (i32, Box<dyn SockaddrLike>) = match domain {
         Domain::Unix => get_sock_addr(domain, sockaddrv)?,
         #[cfg(any(target_os = "linux", target_os = "android"))]
         Domain::Vsock => {
@@ -138,8 +137,8 @@ fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, SockAddr)> {
             )
             .map_err(|e| Error::Socket(e.to_string()))?;
             let cid = addr.1;
-            let sockaddr = SockAddr::new_vsock(cid, port);
-            (fd, sockaddr)
+            let sockaddr = VsockAddr::new(cid, port);
+            (fd, Box::new(sockaddr))
         }
     };
 
@@ -160,7 +159,7 @@ pub(crate) fn do_bind(sockaddr: &str) -> Result<(RawFd, Domain)> {
     let (fd, domain, sockaddr) = make_socket((sockaddr, VMADDR_CID_ANY))?;
 
     setsockopt(fd, sockopt::ReusePort, &true)?;
-    bind(fd, &sockaddr).map_err(err_to_others_err!(e, ""))?;
+    bind(fd, sockaddr.as_ref()).map_err(err_to_others_err!(e, ""))?;
 
     Ok((fd, domain))
 }
@@ -169,7 +168,7 @@ pub(crate) fn do_bind(sockaddr: &str) -> Result<(RawFd, Domain)> {
 pub(crate) unsafe fn client_connect(sockaddr: &str) -> Result<RawFd> {
     let (fd, _, sockaddr) = make_socket((sockaddr, VMADDR_CID_HOST))?;
 
-    connect(fd, &sockaddr)?;
+    connect(fd, sockaddr.as_ref())?;
 
     Ok(fd)
 }
