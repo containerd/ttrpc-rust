@@ -13,7 +13,7 @@ description = "A Rust version of ttrpc."
 [dependencies]
 protobuf = { version = "3.1.0" }
 libc = { version = "0.2.59", features = [ "extra_traits" ] }
-nix = "0.23.0"
+nix = "0.26.2"
 log = "0.4"
 byteorder = "1.3.2"
 thiserror = "1.0"
@@ -22,10 +22,10 @@ tokio = { version = "1", features = ["rt", "sync", "io-util", "macros", "time"],
 futures = { version = "0.3", optional = true }
 
 [target.'cfg(windows)'.dependencies] 
-windows-sys = {version = "0.45", features = [ "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_Security", "Win32_System_Threading"]}
+windows-sys = {version = "0.48", features = [ "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_Security", "Win32_System_Threading"]}
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
-tokio-vsock = { version = "0.3.1", optional = true }
+tokio-vsock = { version = "0.4.0", optional = true }
 
 [build-dependencies]
 protobuf-codegen = "3.1.0"
