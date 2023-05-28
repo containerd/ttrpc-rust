@@ -20,6 +20,7 @@ thiserror = "1.0"
 async-trait = { version = "0.1.31", optional = true }
 tokio = { version = "1", features = ["rt", "sync", "io-util", "macros", "time"], optional = true }
 futures = { version = "0.3", optional = true }
+crossbeam = "0.8.0"
 
 [target.'cfg(windows)'.dependencies] 
 windows-sys = {version = "0.48", features = [ "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_Security", "Win32_System_Threading"]}
