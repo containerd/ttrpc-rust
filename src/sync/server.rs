@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Sync server of ttrpc.
-//! 
+//!
 
 #[cfg(unix)]
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -23,16 +23,16 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::thread::JoinHandle;
-use std::{thread};
 
 use super::utils::response_to_channel;
 use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
+use crate::sync::sys::{PipeConnection, PipeListener};
 use crate::{MethodHandler, TtrpcContext};
-use crate::sync::sys::{PipeListener, PipeConnection};
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -64,7 +64,7 @@ struct Connection {
 }
 
 impl Connection {
-    fn close (&self) {
+    fn close(&self) {
         self.connection.close().unwrap_or(());
     }
 
@@ -77,7 +77,7 @@ impl Connection {
 }
 
 struct ThreadS<'a> {
-    connection:  &'a Arc<PipeConnection>,
+    connection: &'a Arc<PipeConnection>,
     fdlock: &'a Arc<Mutex<()>>,
     wtc: &'a Arc<AtomicUsize>,
     quit: &'a Arc<AtomicBool>,
@@ -300,7 +300,7 @@ impl Server {
         }
 
         let listener = PipeListener::new_from_fd(fd)?;
-        
+
         self.listeners.push(Arc::new(listener));
 
         Ok(self)
@@ -338,8 +338,6 @@ impl Server {
         }
 
         self.listener_quit_flag.store(false, Ordering::SeqCst);
-
-       
 
         let listener = self.listeners[0].clone();
         let methods = self.methods.clone();
@@ -383,15 +381,13 @@ impl Server {
         let handler = thread::Builder::new()
             .name("listener_loop".into())
             .spawn(move || {
-                loop {   
+                loop {
                     trace!("listening...");
                     let pipe_connection = match listener.accept(&listener_quit_flag) {
                         Ok(None) => {
                             continue;
                         }
-                        Ok(Some(conn)) => {
-                           Arc::new(conn)
-                        }
+                        Ok(Some(conn)) => Arc::new(conn),
                         Err(e) => {
                             error!("listener accept got {:?}", e);
                             break;
@@ -505,12 +501,10 @@ impl Server {
     pub fn stop_listen(mut self) -> Self {
         self.listener_quit_flag.store(true, Ordering::SeqCst);
 
-        self.listeners[0].close().unwrap_or_else(|e| {
-            warn!(
-                "failed to close connection with error: {}", e
-            )
-        });
-       
+        self.listeners[0]
+            .close()
+            .unwrap_or_else(|e| warn!("failed to close connection with error: {}", e));
+
         info!("close monitor");
         if let Some(handler) = self.handler.take() {
             handler.join().unwrap();
