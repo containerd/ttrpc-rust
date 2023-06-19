@@ -12,11 +12,11 @@ use ttrpc::r#async::Client;
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let c = Client::connect("unix:///tmp/1").unwrap();
-    let mut hc = health_ttrpc::HealthClient::new(c.clone());
-    let mut ac = agent_ttrpc::AgentServiceClient::new(c);
+    let hc = health_ttrpc::HealthClient::new(c.clone());
+    let ac = agent_ttrpc::AgentServiceClient::new(c);
 
-    let mut thc = hc.clone();
-    let mut tac = ac.clone();
+    let thc = hc.clone();
+    let tac = ac.clone();
 
     let now = std::time::Instant::now();
 
