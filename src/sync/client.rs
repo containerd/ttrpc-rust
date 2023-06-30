@@ -20,19 +20,20 @@ use std::os::unix::io::RawFd;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::{thread};
+use std::thread;
 use std::time::Duration;
 
 use crate::error::{Error, Result};
-use crate::sync::sys::{ClientConnection};
 use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 use crate::sync::channel::{read_message, write_message};
+use crate::sync::sys::ClientConnection;
 
 #[cfg(windows)]
 use super::sys::PipeConnection;
 
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
+type ReciverMap = Arc<Mutex<HashMap<u32, mpsc::SyncSender<Result<Vec<u8>>>>>>;
 
 /// A ttrpc Client (sync).
 #[derive(Clone)]
@@ -44,7 +45,7 @@ pub struct Client {
 impl Client {
     pub fn connect(sockaddr: &str) -> Result<Client> {
         let conn = ClientConnection::client_connect(sockaddr)?;
-        
+
         Self::new_client(conn)
     }
 
@@ -58,11 +59,10 @@ impl Client {
 
     fn new_client(pipe_client: ClientConnection) -> Result<Client> {
         let client = Arc::new(pipe_client);
-        
+
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
 
-       
         let receiver_map = recver_map_orig.clone();
         let connection = Arc::new(client.get_pipe_connection()?);
         let sender_client = connection.clone();
@@ -138,35 +138,13 @@ impl Client {
                         }
                     },
                 };
-                let mut map = recver_map_orig.lock().unwrap();
-                let recver_tx = match map.get(&mh.stream_id) {
-                    Some(tx) => tx,
-                    None => {
-                        debug!("Receiver got unknown packet {:?} {:?}", mh, buf);
-                        continue;
-                    }
-                };
-                if mh.type_ != MESSAGE_TYPE_RESPONSE {
-                    recver_tx
-                        .send(Err(Error::Others(format!(
-                            "Receiver got malformed packet {mh:?} {buf:?}"
-                        ))))
-                        .unwrap_or_else(|_e| error!("The request has returned"));
-                    continue;
-                }
 
-                recver_tx
-                    .send(Ok(buf))
-                    .unwrap_or_else(|_e| error!("The request has returned"));
-
-                map.remove(&mh.stream_id);
+                trans_resp(recver_map_orig.clone(), mh, Ok(buf));
             }
 
-            let _ = receiver_client.close_receiver().map_err(|e| {
-                warn!(
-                    "failed to close with error: {:?}", e
-                )
-            });
+            let _ = receiver_client
+                .close_receiver()
+                .map_err(|e| warn!("failed to close with error: {:?}", e));
 
             trace!("Receiver quit");
         });
@@ -186,8 +164,10 @@ impl Client {
             .map_err(err_to_others_err!(e, "Send packet to sender error "))?;
 
         let result = if req.timeout_nano == 0 {
-            rx.recv()
-                .map_err(err_to_others_err!(e, "Receive packet from Receiver error: "))?
+            rx.recv().map_err(err_to_others_err!(
+                e,
+                "Receive packet from Receiver error: "
+            ))?
         } else {
             rx.recv_timeout(Duration::from_nanos(req.timeout_nano as u64))
                 .map_err(err_to_others_err!(
@@ -197,8 +177,7 @@ impl Client {
         };
 
         let buf = result?;
-        let res =
-            Response::decode(buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
+        let res = Response::decode(buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
 
         let status = res.status();
         if status.code() != Code::OK {
@@ -220,11 +199,35 @@ impl Drop for ClientConnection {
 #[cfg(windows)]
 impl Drop for PipeConnection {
     fn drop(&mut self) {
-        self.close().unwrap_or_else(|e| {
-            trace!(
-                "connection may already be closed: {}", e
-            )
-        });
+        self.close()
+            .unwrap_or_else(|e| trace!("connection may already be closed: {}", e));
         trace!("pipe connection is dropped");
     }
+}
+
+/// Transfer the response
+fn trans_resp(recver_map_orig: ReciverMap, mh: MessageHeader, buf: Result<Vec<u8>>) {
+    let mut map = recver_map_orig.lock().unwrap();
+    let recver_tx = match map.get(&mh.stream_id) {
+        Some(tx) => tx,
+        None => {
+            debug!("Recver got unknown packet {:?} {:?}", mh, buf);
+            return;
+        }
+    };
+    if mh.type_ != MESSAGE_TYPE_RESPONSE {
+        recver_tx
+            .send(Err(Error::Others(format!(
+                "Recver got malformed packet {:?} {:?}",
+                mh, buf
+            ))))
+            .unwrap_or_else(|_e| error!("The request has returned"));
+        return;
+    }
+
+    recver_tx
+        .send(buf)
+        .unwrap_or_else(|_e| error!("The request has returned"));
+
+    map.remove(&mh.stream_id);
 }
