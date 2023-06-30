@@ -34,6 +34,7 @@ use std::time::Duration;
 
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
+type ReciverMap = Arc<Mutex<HashMap<u32, mpsc::SyncSender<Result<Vec<u8>>>>>>;
 
 /// A ttrpc Client (sync).
 #[derive(Clone)]
@@ -172,29 +173,8 @@ impl Client {
                         }
                     },
                 };
-                let mut map = recver_map_orig.lock().unwrap();
-                let recver_tx = match map.get(&mh.stream_id) {
-                    Some(tx) => tx,
-                    None => {
-                        debug!("Recver got unknown packet {:?} {:?}", mh, buf);
-                        continue;
-                    }
-                };
-                if mh.type_ != MESSAGE_TYPE_RESPONSE {
-                    recver_tx
-                        .send(Err(Error::Others(format!(
-                            "Recver got malformed packet {:?} {:?}",
-                            mh, buf
-                        ))))
-                        .unwrap_or_else(|_e| error!("The request has returned"));
-                    continue;
-                }
 
-                recver_tx
-                    .send(Ok(buf))
-                    .unwrap_or_else(|_e| error!("The request has returned"));
-
-                map.remove(&mh.stream_id);
+                trans_resp(recver_map_orig.clone(), mh, Ok(buf));
             }
 
             let _ = close(recver_fd).map_err(|e| {
@@ -262,4 +242,31 @@ impl Drop for ClientClose {
         close(self.fd).unwrap();
         trace!("All client is droped");
     }
+}
+
+/// Transfer the response
+fn trans_resp(recver_map_orig: ReciverMap, mh: MessageHeader, buf: Result<Vec<u8>>) {
+    let mut map = recver_map_orig.lock().unwrap();
+    let recver_tx = match map.get(&mh.stream_id) {
+        Some(tx) => tx,
+        None => {
+            debug!("Recver got unknown packet {:?} {:?}", mh, buf);
+            return;
+        }
+    };
+    if mh.type_ != MESSAGE_TYPE_RESPONSE {
+        recver_tx
+            .send(Err(Error::Others(format!(
+                "Recver got malformed packet {:?} {:?}",
+                mh, buf
+            ))))
+            .unwrap_or_else(|_e| error!("The request has returned"));
+        return;
+    }
+
+    recver_tx
+        .send(buf)
+        .unwrap_or_else(|_e| error!("The request has returned"));
+
+    map.remove(&mh.stream_id);
 }
