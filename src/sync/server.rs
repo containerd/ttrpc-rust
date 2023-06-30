@@ -25,6 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{io, thread};
 
+use super::utils::response_error_to_channel;
 #[cfg(not(target_os = "linux"))]
 use crate::common::set_fd_close_exec;
 use crate::common::{self, MESSAGE_TYPE_REQUEST};
@@ -137,20 +138,22 @@ fn start_method_handler_thread(
             let mh;
             let buf;
             match result {
-                Ok((x, y)) => {
+                Ok((x, Ok(y))) => {
                     mh = x;
                     buf = y;
+                }
+                Ok((mh, Err(e))) => {
+                    if let Err(x) = response_error_to_channel(mh.stream_id, e, res_tx.clone()) {
+                        debug!("response_error_to_channel get error {:?}", x);
+                        quit_connection(quit, control_tx);
+                        break;
+                    }
+                    continue;
                 }
                 Err(x) => match x {
                     Error::Socket(y) => {
                         trace!("Socket error {}", y);
-                        quit.store(true, Ordering::SeqCst);
-                        // the client connection would be closed and
-                        // the connection dealing main thread would
-                        // have exited.
-                        control_tx
-                            .send(())
-                            .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                        quit_connection(quit, control_tx);
                         trace!("Socket error send control_tx");
                         break;
                     }
@@ -172,13 +175,7 @@ fn start_method_handler_thread(
                 res.set_status(status);
                 if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                     debug!("response_to_channel get error {:?}", x);
-                    quit.store(true, Ordering::SeqCst);
-                    // the client connection would be closed and
-                    // the connection dealing main thread would have
-                    // exited.
-                    control_tx
-                        .send(())
-                        .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                    quit_connection(quit, control_tx);
                     break;
                 }
                 continue;
@@ -194,13 +191,7 @@ fn start_method_handler_thread(
                 res.set_status(status);
                 if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                     info!("response_to_channel get error {:?}", x);
-                    quit.store(true, Ordering::SeqCst);
-                    // the client connection would be closed and
-                    // the connection dealing main thread would have
-                    // exited.
-                    control_tx
-                        .send(())
-                        .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                    quit_connection(quit, control_tx);
                     break;
                 }
                 continue;
@@ -214,13 +205,7 @@ fn start_method_handler_thread(
             };
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);
-                quit.store(true, Ordering::SeqCst);
-                // the client connection would be closed and
-                // the connection dealing main thread would have
-                // exited.
-                control_tx
-                    .send(())
-                    .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
+                quit_connection(quit, control_tx);
                 break;
             }
         }
@@ -610,4 +595,14 @@ impl AsRawFd for Server {
     fn as_raw_fd(&self) -> RawFd {
         self.listeners[0]
     }
+}
+
+fn quit_connection(quit: Arc<AtomicBool>, control_tx: SyncSender<()>) {
+    quit.store(true, Ordering::SeqCst);
+    // the client connection would be closed and
+    // the connection dealing main thread would
+    // have exited.
+    control_tx
+        .send(())
+        .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
 }

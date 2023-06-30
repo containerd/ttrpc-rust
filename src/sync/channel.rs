@@ -14,9 +14,9 @@
 
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use nix::sys::socket::*;
-use std::os::unix::io::RawFd;
+use std::{cmp, os::unix::io::RawFd};
 
-use crate::common::{MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX};
+use crate::common::{check_oversize, DEFAULT_PAGE_SIZE, MESSAGE_HEADER_LENGTH};
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
 use crate::ttrpc::Code;
 use crate::MessageHeader;
@@ -86,6 +86,18 @@ fn write_count(fd: RawFd, buf: &[u8], count: usize) -> Result<usize> {
     Ok(len)
 }
 
+fn discard_count(fd: RawFd, count: usize) -> Result<()> {
+    let mut need_discard = count;
+
+    while need_discard > 0 {
+        let once_discard = cmp::min(DEFAULT_PAGE_SIZE, need_discard);
+        read_count(fd, once_discard)?;
+        need_discard -= once_discard;
+    }
+
+    Ok(())
+}
+
 fn read_message_header(fd: RawFd) -> Result<MessageHeader> {
     let buf = read_count(fd, MESSAGE_HEADER_LENGTH)?;
     let size = buf.len();
@@ -113,18 +125,14 @@ fn read_message_header(fd: RawFd) -> Result<MessageHeader> {
     Ok(mh)
 }
 
-pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
+pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Result<Vec<u8>>)> {
     let mh = read_message_header(fd)?;
     trace!("Got Message header {:?}", mh);
 
-    if mh.length > MESSAGE_LENGTH_MAX as u32 {
-        return Err(get_rpc_status(
-            Code::INVALID_ARGUMENT,
-            format!(
-                "message length {} exceed maximum message size of {}",
-                mh.length, MESSAGE_LENGTH_MAX
-            ),
-        ));
+    let mh_len = mh.length as usize;
+    if let Err(e) = check_oversize(mh_len, true) {
+        discard_count(fd, mh_len)?;
+        return Ok((mh, Err(e)));
     }
 
     let buf = read_count(fd, mh.length as usize)?;
@@ -137,7 +145,7 @@ pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
     }
     trace!("Got Message body {:?}", buf);
 
-    Ok((mh, buf))
+    Ok((mh, Ok(buf)))
 }
 
 fn write_message_header(fd: RawFd, mh: MessageHeader) -> Result<()> {

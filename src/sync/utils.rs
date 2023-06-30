@@ -4,8 +4,8 @@
 //
 
 use crate::common::{MessageHeader, MESSAGE_TYPE_RESPONSE};
-use crate::error::{Error, Result};
-use crate::ttrpc::{Request, Response};
+use crate::error::{get_status, Error, Result};
+use crate::ttrpc::{Code, Request, Response};
 use protobuf::Message;
 use std::collections::HashMap;
 
@@ -30,6 +30,23 @@ pub fn response_to_channel(
     tx.send((mh, buf)).map_err(err_to_others_err!(e, ""))?;
 
     Ok(())
+}
+
+pub fn response_error_to_channel(
+    stream_id: u32,
+    e: Error,
+    tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+) -> Result<()> {
+    let status = if let Error::RpcStatus(stat) = e {
+        stat
+    } else {
+        get_status(Code::UNKNOWN, e)
+    };
+
+    let mut res = Response::new();
+    res.set_status(status);
+
+    response_to_channel(stream_id, res, tx)
 }
 
 /// Handle request in sync mode.

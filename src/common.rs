@@ -7,10 +7,13 @@
 
 #![allow(unused_macros)]
 
-use crate::error::{Error, Result};
+use std::os::unix::io::RawFd;
+
 use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
 use nix::sys::socket::*;
-use std::os::unix::io::RawFd;
+
+use crate::error::{get_rpc_status, Error, Result};
+use crate::ttrpc::Code;
 
 #[derive(Debug)]
 pub enum Domain {
@@ -155,6 +158,24 @@ pub(crate) unsafe fn client_connect(host: &str) -> Result<RawFd> {
     Ok(fd)
 }
 
+pub fn check_oversize(len: usize, return_rpc_error: bool) -> Result<()> {
+    if len > MESSAGE_LENGTH_MAX {
+        let msg = format!(
+            "message length {} exceed maximum message size of {}",
+            len, MESSAGE_LENGTH_MAX
+        );
+        let e = if return_rpc_error {
+            get_rpc_status(Code::INVALID_ARGUMENT, msg)
+        } else {
+            Error::Others(msg)
+        };
+
+        return Err(e);
+    }
+
+    Ok(())
+}
+
 macro_rules! cfg_sync {
     ($($item:item)*) => {
         $(
@@ -180,3 +201,5 @@ pub const MESSAGE_LENGTH_MAX: usize = 4 << 20;
 
 pub const MESSAGE_TYPE_REQUEST: u8 = 0x1;
 pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
+
+pub const DEFAULT_PAGE_SIZE: usize = 4 << 10;
