@@ -111,12 +111,9 @@ impl Client {
                     }
                 }
 
-                let mh;
-                let buf;
                 match read_message(&receiver_connection) {
-                    Ok((x, y)) => {
-                        mh = x;
-                        buf = y;
+                    Ok((mh, buf)) => {
+                        trans_resp(recver_map_orig.clone(), mh, buf);
                     }
                     Err(x) => match x {
                         Error::Socket(y) => {
@@ -138,8 +135,6 @@ impl Client {
                         }
                     },
                 };
-
-                trans_resp(recver_map_orig.clone(), mh, Ok(buf));
             }
 
             let _ = receiver_client

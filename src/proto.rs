@@ -13,11 +13,11 @@ pub use compiled::ttrpc::*;
 use byteorder::{BigEndian, ByteOrder};
 use protobuf::{CodedInputStream, CodedOutputStream};
 
-#[cfg(feature = "async")]
 use crate::error::{get_rpc_status, Error, Result as TtResult};
 
 pub const MESSAGE_HEADER_LENGTH: usize = 10;
 pub const MESSAGE_LENGTH_MAX: usize = 4 << 20;
+pub const DEFAULT_PAGE_SIZE: usize = 4 << 10;
 
 pub const MESSAGE_TYPE_REQUEST: u8 = 0x1;
 pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
@@ -26,6 +26,24 @@ pub const MESSAGE_TYPE_DATA: u8 = 0x3;
 pub const FLAG_REMOTE_CLOSED: u8 = 0x1;
 pub const FLAG_REMOTE_OPEN: u8 = 0x2;
 pub const FLAG_NO_DATA: u8 = 0x4;
+
+pub(crate) fn check_oversize(len: usize, return_rpc_error: bool) -> TtResult<()> {
+    if len > MESSAGE_LENGTH_MAX {
+        let msg = format!(
+            "message length {} exceed maximum message size of {}",
+            len, MESSAGE_LENGTH_MAX
+        );
+        let e = if return_rpc_error {
+            get_rpc_status(Code::INVALID_ARGUMENT, msg)
+        } else {
+            Error::Others(msg)
+        };
+
+        return Err(e);
+    }
+
+    Ok(())
+}
 
 /// Message header of ttrpc.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]

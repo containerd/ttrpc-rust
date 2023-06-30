@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 
-use super::utils::response_to_channel;
+use super::utils::{response_error_to_channel, response_to_channel};
 use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
@@ -43,8 +43,8 @@ const DEFAULT_WAIT_THREAD_COUNT_MAX: usize = 5;
 
 type MessageSender = Sender<(MessageHeader, Vec<u8>)>;
 type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
-type WorkloadSender = crossbeam::channel::Sender<(MessageHeader, Vec<u8>)>;
-type WorkloadReceiver = crossbeam::channel::Receiver<(MessageHeader, Vec<u8>)>;
+type WorkloadSender = crossbeam::channel::Sender<(MessageHeader, Result<Vec<u8>>)>;
+type WorkloadReceiver = crossbeam::channel::Receiver<(MessageHeader, Result<Vec<u8>>)>;
 
 /// A ttrpc Server (sync).
 pub struct Server {
@@ -134,20 +134,22 @@ fn start_method_handler_thread(
             let mh;
             let buf;
             match result {
-                Ok((x, y)) => {
+                Ok((x, Ok(y))) => {
                     mh = x;
                     buf = y;
+                }
+                Ok((mh, Err(e))) => {
+                    if let Err(x) = response_error_to_channel(mh.stream_id, e, res_tx.clone()) {
+                        debug!("response_error_to_channel get error {:?}", x);
+                        quit_connection(quit, control_tx);
+                        break;
+                    }
+                    continue;
                 }
                 Err(x) => match x {
                     crossbeam::channel::RecvError => {
                         trace!("workload_rx recv error");
-                        quit.store(true, Ordering::SeqCst);
-                        // the workload tx would be dropped and
-                        // the connection dealing main thread would
-                        // have exited.
-                        control_tx
-                            .send(())
-                            .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
+                        quit_connection(quit, control_tx);
                         trace!("workload_rx recv error, send control_tx");
                         break;
                     }
@@ -165,13 +167,7 @@ fn start_method_handler_thread(
                 res.set_status(status);
                 if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                     debug!("response_to_channel get error {:?}", x);
-                    quit.store(true, Ordering::SeqCst);
-                    // the client connection would be closed and
-                    // the connection dealing main thread would have
-                    // exited.
-                    control_tx
-                        .send(())
-                        .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
+                    quit_connection(quit, control_tx);
                     break;
                 }
                 continue;
@@ -187,13 +183,7 @@ fn start_method_handler_thread(
                 res.set_status(status);
                 if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                     info!("response_to_channel get error {:?}", x);
-                    quit.store(true, Ordering::SeqCst);
-                    // the client connection would be closed and
-                    // the connection dealing main thread would have
-                    // exited.
-                    control_tx
-                        .send(())
-                        .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
+                    quit_connection(quit, control_tx);
                     break;
                 }
                 continue;
@@ -208,13 +198,7 @@ fn start_method_handler_thread(
             };
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);
-                quit.store(true, Ordering::SeqCst);
-                // the client connection would be closed and
-                // the connection dealing main thread would have
-                // exited.
-                control_tx
-                    .send(())
-                    .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
+                quit_connection(quit, control_tx);
                 break;
             }
         }
@@ -594,4 +578,14 @@ impl AsRawFd for Server {
     fn as_raw_fd(&self) -> RawFd {
         self.listeners[0].as_raw_fd()
     }
+}
+
+fn quit_connection(quit: Arc<AtomicBool>, control_tx: SyncSender<()>) {
+    quit.store(true, Ordering::SeqCst);
+    // the client connection would be closed and
+    // the connection dealing main thread would
+    // have exited.
+    control_tx
+        .send(())
+        .unwrap_or_else(|err| debug!("Failed to send {:?}", err));
 }
