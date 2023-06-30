@@ -101,7 +101,7 @@ impl Client {
                     res = receive(&mut reader) => {
                         match res {
                             Ok((header, body)) => {
-                                spawn_trans_resp(req_map, header, Ok(body));
+                                spawn_trans_resp(req_map, header, body);
                             }
                             Err(e) => {
                                 trace!("error {:?}", e);
