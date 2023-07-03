@@ -231,6 +231,11 @@ impl Server {
         self.stop_listen().await;
         self.disconnect().await;
 
+        while let Some(fd) = self.listeners.pop() {
+            unistd::close(fd).unwrap_or_else(|e| {
+                warn!("failed to close listener fd: {}", e);
+            });
+        }
         Ok(())
     }
 
