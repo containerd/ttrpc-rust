@@ -25,16 +25,16 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{io, thread};
 
-use super::utils::response_error_to_channel;
+use super::utils::{response_error_to_channel, response_status_to_channel};
 #[cfg(not(target_os = "linux"))]
 use crate::common::set_fd_close_exec;
 use crate::common::{self, MESSAGE_TYPE_REQUEST};
 use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::sync::channel::{read_message, write_message};
-use crate::ttrpc::{Code, Request, Response};
+use crate::ttrpc::{Code, Request};
 use crate::MessageHeader;
-use crate::{response_to_channel, MethodHandler, TtrpcContext};
+use crate::{MethodHandler, TtrpcContext};
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -171,10 +171,8 @@ fn start_method_handler_thread(
             let mut req = Request::new();
             if let Err(x) = req.merge_from(&mut s) {
                 let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
-                let mut res = Response::new();
-                res.set_status(status);
-                if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
-                    debug!("response_to_channel get error {:?}", x);
+                if let Err(x) = response_status_to_channel(mh.stream_id, status, res_tx.clone()) {
+                    debug!("response_status_to_channel get error {:?}", x);
                     quit_connection(quit, control_tx);
                     break;
                 }
@@ -187,10 +185,8 @@ fn start_method_handler_thread(
                 x
             } else {
                 let status = get_status(Code::INVALID_ARGUMENT, format!("{} does not exist", path));
-                let mut res = Response::new();
-                res.set_status(status);
-                if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
-                    info!("response_to_channel get error {:?}", x);
+                if let Err(x) = response_status_to_channel(mh.stream_id, status, res_tx.clone()) {
+                    info!("response_status_to_channel get error {:?}", x);
                     quit_connection(quit, control_tx);
                     break;
                 }

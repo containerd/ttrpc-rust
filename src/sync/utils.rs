@@ -5,7 +5,7 @@
 
 use crate::common::{check_oversize, convert_msg_to_buf, MessageHeader, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
-use crate::ttrpc::{Request, Response};
+use crate::ttrpc::{Request, Response, Status};
 use std::collections::HashMap;
 
 /// Response message through a channel.
@@ -40,6 +40,16 @@ pub fn response_error_to_channel(
     tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
 ) -> Result<()> {
     response_to_channel(stream_id, e.into(), tx)
+}
+
+pub fn response_status_to_channel(
+    stream_id: u32,
+    status: Status,
+    tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+) -> Result<()> {
+    let mut res = Response::new();
+    res.set_status(status);
+    response_to_channel(stream_id, res, tx)
 }
 
 /// Handle request in sync mode.
