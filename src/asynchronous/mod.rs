@@ -16,8 +16,9 @@ pub mod shutdown;
 mod unix_incoming;
 
 pub use self::stream::{
-    ClientStream, ClientStreamReceiver, ClientStreamSender, Kind, ServerStream,
-    ServerStreamReceiver, ServerStreamSender, StreamInner,
+    CSReceiver, CSSender, ClientStream, ClientStreamReceiver, ClientStreamSender, Kind, SSReceiver,
+    SSSender, ServerStream, ServerStreamReceiver, ServerStreamSender, StreamInner, StreamReceiver,
+    StreamSender,
 };
 #[doc(inline)]
 pub use crate::r#async::client::Client;
