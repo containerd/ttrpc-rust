@@ -8,13 +8,13 @@ use std::cmp;
 use byteorder::{BigEndian, ByteOrder};
 
 use crate::common::{
-    check_oversize, DEFAULT_PAGE_SIZE, MESSAGE_HEADER_LENGTH, MESSAGE_TYPE_RESPONSE,
+    check_oversize, convert_msg_to_buf, DEFAULT_PAGE_SIZE, MESSAGE_HEADER_LENGTH,
+    MESSAGE_TYPE_RESPONSE,
 };
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
 use crate::r#async::utils;
 use crate::ttrpc::{Code, Response, Status};
 use crate::MessageHeader;
-use protobuf::Message;
 use tokio::io::AsyncReadExt;
 
 async fn receive_count<T>(reader: &mut T, count: usize) -> Result<Vec<u8>>
@@ -125,15 +125,6 @@ pub fn to_res_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
     buf
 }
 
-fn get_response_body(res: &Response) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(res.compute_size() as usize);
-    let mut s = protobuf::CodedOutputStream::vec(&mut buf);
-    res.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-    s.flush().map_err(err_to_others_err!(e, ""))?;
-
-    Ok(buf)
-}
-
 pub async fn respond(
     tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     stream_id: u32,
@@ -153,7 +144,7 @@ pub async fn respond_with_status(
 ) -> Result<()> {
     let mut res = Response::new();
     res.set_status(status);
-    let mut body = get_response_body(&res)?;
+    let mut body = convert_msg_to_buf(&res)?;
 
     let mh = MessageHeader {
         length: body.len() as u32,
