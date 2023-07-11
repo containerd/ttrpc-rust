@@ -4,12 +4,14 @@
 //
 
 use nix::unistd::close;
-use protobuf::{CodedInputStream, CodedOutputStream, Message};
+use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
 
-use crate::common::{client_connect, MessageHeader, MESSAGE_TYPE_RESPONSE};
+use crate::common::{
+    check_oversize, client_connect, convert_msg_to_buf, MessageHeader, MESSAGE_TYPE_RESPONSE,
+};
 use crate::error::{Error, Result};
 use crate::ttrpc::{Code, Request, Response};
 
@@ -117,12 +119,9 @@ impl Client {
     }
 
     pub async fn request(&self, req: Request) -> Result<Response> {
-        let mut buf = Vec::with_capacity(req.compute_size() as usize);
-        {
-            let mut s = CodedOutputStream::vec(&mut buf);
-            req.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-            s.flush().map_err(err_to_others_err!(e, ""))?;
-        }
+        let buf = convert_msg_to_buf(&req)?;
+        // NOTE: pure client problem can't be rpc error, so we use false here.
+        check_oversize(buf.len(), false)?;
 
         let (tx, mut rx): (ResponseSender, ResponseReceiver) = channel(100);
         self.req_tx

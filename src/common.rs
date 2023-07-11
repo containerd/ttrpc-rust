@@ -13,8 +13,8 @@ use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
 use nix::sys::socket::*;
 use protobuf::Message;
 
-use crate::error::{get_rpc_status, Error, Result};
-use crate::ttrpc::Code;
+use crate::error::{get_rpc_status, get_status, Error, Result};
+use crate::ttrpc::{Code, Response};
 
 #[derive(Debug)]
 pub enum Domain {
@@ -184,6 +184,18 @@ pub fn convert_msg_to_buf(msg: &impl Message) -> Result<Vec<u8>> {
     s.flush().map_err(err_to_others_err!(e, ""))?;
 
     Ok(buf)
+}
+
+pub fn convert_error_to_response(e: Error) -> Response {
+    let status = if let Error::RpcStatus(stat) = e {
+        stat
+    } else {
+        get_status(Code::UNKNOWN, e)
+    };
+
+    let mut res = Response::new();
+    res.set_status(status);
+    res
 }
 
 macro_rules! cfg_sync {
