@@ -16,7 +16,7 @@
 
 use nix::sys::socket::*;
 use nix::unistd::close;
-use protobuf::{CodedInputStream, CodedOutputStream, Message};
+use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::mpsc;
@@ -25,7 +25,10 @@ use std::{io, thread};
 
 #[cfg(target_os = "macos")]
 use crate::common::set_fd_close_exec;
-use crate::common::{client_connect, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE, SOCK_CLOEXEC};
+use crate::common::{
+    check_oversize, client_connect, convert_msg_to_buf, MESSAGE_TYPE_REQUEST,
+    MESSAGE_TYPE_RESPONSE, SOCK_CLOEXEC,
+};
 use crate::error::{Error, Result};
 use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
@@ -189,10 +192,9 @@ impl Client {
         }
     }
     pub fn request(&self, req: Request) -> Result<Response> {
-        let mut buf = Vec::with_capacity(req.compute_size() as usize);
-        let mut s = CodedOutputStream::vec(&mut buf);
-        req.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-        s.flush().map_err(err_to_others_err!(e, ""))?;
+        let buf = convert_msg_to_buf(&req)?;
+        // NOTE: pure client problem can't be rpc error, so we use false here.
+        check_oversize(buf.len(), false)?;
 
         let (tx, rx) = mpsc::sync_channel(0);
 

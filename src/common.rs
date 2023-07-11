@@ -11,6 +11,7 @@ use std::os::unix::io::RawFd;
 
 use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
 use nix::sys::socket::*;
+use protobuf::Message;
 
 use crate::error::{get_rpc_status, Error, Result};
 use crate::ttrpc::Code;
@@ -174,6 +175,15 @@ pub fn check_oversize(len: usize, return_rpc_error: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub fn convert_msg_to_buf(msg: &impl Message) -> Result<Vec<u8>> {
+    let mut buf = Vec::with_capacity(msg.compute_size() as usize);
+    let mut s = protobuf::CodedOutputStream::vec(&mut buf);
+    msg.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
+    s.flush().map_err(err_to_others_err!(e, ""))?;
+
+    Ok(buf)
 }
 
 macro_rules! cfg_sync {

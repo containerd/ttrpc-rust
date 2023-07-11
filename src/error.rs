@@ -14,7 +14,7 @@
 
 //! Error and Result of ttrpc and relevant functions, macros.
 
-use crate::ttrpc::{Code, Status};
+use crate::ttrpc::{Code, Response, Status};
 use std::result;
 use thiserror::Error;
 
@@ -32,6 +32,20 @@ pub enum Error {
 
     #[error("ttrpc err: {0}")]
     Others(String),
+}
+
+impl From<Error> for Response {
+    fn from(e: Error) -> Self {
+        let status = if let Error::RpcStatus(stat) = e {
+            stat
+        } else {
+            get_status(Code::UNKNOWN, e)
+        };
+
+        let mut res = Response::new();
+        res.set_status(status);
+        res
+    }
 }
 
 /// A specialized Result type for ttrpc.
