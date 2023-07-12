@@ -17,8 +17,8 @@ use tokio::{self, sync::mpsc, task};
 use crate::common::client_connect;
 use crate::error::{Error, Result};
 use crate::proto::{
-    Code, Codec, GenMessage, Message, Request, Response, FLAG_REMOTE_CLOSED, FLAG_REMOTE_OPEN,
-    MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
+    Code, Codec, GenMessage, Message, MessageHeader, Request, Response, FLAG_REMOTE_CLOSED,
+    FLAG_REMOTE_OPEN, MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
 };
 use crate::r#async::connection::*;
 use crate::r#async::shutdown;
@@ -97,6 +97,7 @@ impl Client {
         };
 
         let msg = result?;
+
         let res = Response::decode(msg.payload)
             .map_err(err_to_others_err!(e, "Unpack response error "))?;
 
@@ -223,6 +224,58 @@ impl WriterDelegate for ClientWriter {
     }
 }
 
+async fn get_resp_tx(
+    req_map: Arc<Mutex<HashMap<u32, ResultSender>>>,
+    header: &MessageHeader,
+) -> Option<ResultSender> {
+    let resp_tx = match header.type_ {
+        MESSAGE_TYPE_RESPONSE => match req_map.lock().unwrap().remove(&header.stream_id) {
+            Some(tx) => tx,
+            None => {
+                debug!("Receiver got unknown response packet {:?}", header);
+                return None;
+            }
+        },
+        MESSAGE_TYPE_DATA => {
+            if (header.flags & FLAG_REMOTE_CLOSED) == FLAG_REMOTE_CLOSED {
+                match req_map.lock().unwrap().remove(&header.stream_id) {
+                    Some(tx) => tx,
+                    None => {
+                        debug!("Receiver got unknown data packet {:?}", header);
+                        return None;
+                    }
+                }
+            } else {
+                match req_map.lock().unwrap().get(&header.stream_id) {
+                    Some(tx) => tx.clone(),
+                    None => {
+                        debug!("Receiver got unknown data packet {:?}", header);
+                        return None;
+                    }
+                }
+            }
+        }
+        _ => {
+            let resp_tx = match req_map.lock().unwrap().remove(&header.stream_id) {
+                Some(tx) => tx,
+                None => {
+                    debug!("Receiver got unknown packet {:?}", header);
+                    return None;
+                }
+            };
+            resp_tx
+                .send(Err(Error::Others(format!(
+                    "Receiver got malformed packet {header:?}"
+                ))))
+                .await
+                .unwrap_or_else(|_e| error!("The request has returned"));
+            return None;
+        }
+    };
+
+    Some(resp_tx)
+}
+
 struct ClientReader {
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
     shutdown_waiter: shutdown::Waiter,
@@ -252,59 +305,27 @@ impl ReaderDelegate for ClientReader {
 
     async fn exit(&self) {}
 
+    async fn handle_err(&self, header: MessageHeader, e: Error) {
+        let req_map = self.streams.clone();
+        tokio::spawn(async move {
+            if let Some(resp_tx) = get_resp_tx(req_map, &header).await {
+                resp_tx
+                    .send(Err(e))
+                    .await
+                    .unwrap_or_else(|_e| error!("The request has returned"));
+            }
+        });
+    }
+
     async fn handle_msg(&self, msg: GenMessage) {
         let req_map = self.streams.clone();
         tokio::spawn(async move {
-            let resp_tx = match msg.header.type_ {
-                MESSAGE_TYPE_RESPONSE => {
-                    match req_map.lock().unwrap().remove(&msg.header.stream_id) {
-                        Some(tx) => tx,
-                        None => {
-                            debug!("Receiver got unknown response packet {:?}", msg);
-                            return;
-                        }
-                    }
-                }
-                MESSAGE_TYPE_DATA => {
-                    if (msg.header.flags & FLAG_REMOTE_CLOSED) == FLAG_REMOTE_CLOSED {
-                        match req_map.lock().unwrap().remove(&msg.header.stream_id) {
-                            Some(tx) => tx.clone(),
-                            None => {
-                                debug!("Receiver got unknown data packet {:?}", msg);
-                                return;
-                            }
-                        }
-                    } else {
-                        match req_map.lock().unwrap().get(&msg.header.stream_id) {
-                            Some(tx) => tx.clone(),
-                            None => {
-                                debug!("Receiver got unknown data packet {:?}", msg);
-                                return;
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    let resp_tx = match req_map.lock().unwrap().remove(&msg.header.stream_id) {
-                        Some(tx) => tx,
-                        None => {
-                            debug!("Receiver got unknown packet {:?}", msg);
-                            return;
-                        }
-                    };
-                    resp_tx
-                        .send(Err(Error::Others(format!(
-                            "Receiver got malformed packet {msg:?}"
-                        ))))
-                        .await
-                        .unwrap_or_else(|_e| error!("The request has returned"));
-                    return;
-                }
-            };
-            resp_tx
-                .send(Ok(msg))
-                .await
-                .unwrap_or_else(|_e| error!("The request has returned"));
+            if let Some(resp_tx) = get_resp_tx(req_map, &msg.header).await {
+                resp_tx
+                    .send(Ok(msg))
+                    .await
+                    .unwrap_or_else(|_e| error!("The request has returned"));
+            }
         });
     }
 }

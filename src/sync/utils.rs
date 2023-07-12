@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::common::check_oversize;
 use crate::error::{Error, Result};
-use crate::proto::{Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
+use crate::proto::{
+    check_oversize, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
+};
 use std::collections::HashMap;
 
 /// Response message through a channel.

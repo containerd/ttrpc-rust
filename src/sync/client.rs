@@ -24,9 +24,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::common::check_oversize;
 use crate::error::{Error, Result};
-use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
+use crate::proto::{
+    check_oversize, Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
+};
 use crate::sync::channel::{read_message, write_message};
 use crate::sync::sys::ClientConnection;
 

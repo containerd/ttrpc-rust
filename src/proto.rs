@@ -45,6 +45,27 @@ pub(crate) fn check_oversize(len: usize, return_rpc_error: bool) -> TtResult<()>
     Ok(())
 }
 
+// Discard the unwanted message body
+#[cfg(feature = "async")]
+async fn discard_message_body(
+    mut reader: impl tokio::io::AsyncReadExt + Unpin,
+    header: &MessageHeader,
+) -> TtResult<()> {
+    let mut need_discard = header.length as usize;
+
+    while need_discard > 0 {
+        let once_discard = std::cmp::min(DEFAULT_PAGE_SIZE, need_discard);
+        let mut content = vec![0; once_discard];
+        reader
+            .read_exact(&mut content)
+            .await
+            .map_err(|e| Error::Socket(e.to_string()))?;
+        need_discard -= once_discard;
+    }
+
+    Ok(())
+}
+
 /// Message header of ttrpc.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MessageHeader {
@@ -174,6 +195,18 @@ pub struct GenMessage {
     pub payload: Vec<u8>,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum GenMessageError {
+    InternalError(Error),
+    ReturnError(MessageHeader, Error),
+}
+
+impl From<Error> for GenMessageError {
+    fn from(e: Error) -> Self {
+        Self::InternalError(e)
+    }
+}
+
 #[cfg(feature = "async")]
 impl GenMessage {
     /// Encodes a MessageHeader to writer.
@@ -193,19 +226,16 @@ impl GenMessage {
     }
 
     /// Decodes a MessageHeader from reader.
-    pub async fn read_from(mut reader: impl tokio::io::AsyncReadExt + Unpin) -> TtResult<Self> {
+    pub async fn read_from(
+        mut reader: impl tokio::io::AsyncReadExt + Unpin,
+    ) -> std::result::Result<Self, GenMessageError> {
         let header = MessageHeader::read_from(&mut reader)
             .await
             .map_err(|e| Error::Socket(e.to_string()))?;
 
-        if header.length > MESSAGE_LENGTH_MAX as u32 {
-            return Err(get_rpc_status(
-                Code::INVALID_ARGUMENT,
-                format!(
-                    "message length {} exceed maximum message size of {}",
-                    header.length, MESSAGE_LENGTH_MAX
-                ),
-            ));
+        if let Err(e) = check_oversize(header.length as usize, true) {
+            discard_message_body(reader, &header).await?;
+            return Err(GenMessageError::ReturnError(header, e));
         }
 
         let mut content = vec![0; header.length as usize];
@@ -328,14 +358,12 @@ where
             .await
             .map_err(|e| Error::Socket(e.to_string()))?;
 
-        if header.length > MESSAGE_LENGTH_MAX as u32 {
-            return Err(get_rpc_status(
-                Code::INVALID_ARGUMENT,
-                format!(
-                    "message length {} exceed maximum message size of {}",
-                    header.length, MESSAGE_LENGTH_MAX
-                ),
-            ));
+        if check_oversize(header.length as usize, true).is_err() {
+            discard_message_body(reader, &header).await?;
+            return Ok(Self {
+                header,
+                payload: C::decode("").map_err(err_to_others_err!(e, "Decode payload failed."))?,
+            });
         }
 
         let mut content = vec![0; header.length as usize];
@@ -447,11 +475,21 @@ mod tests {
     #[cfg(feature = "async")]
     #[tokio::test]
     async fn async_gen_message() {
+        // Test packet which exceeds maximum message size
         let mut buf = Vec::from(MESSAGE_HEADER);
-        buf.extend_from_slice(&PROTOBUF_REQUEST);
-        let res = GenMessage::read_from(&*buf).await;
-        // exceed maximum message size
-        assert!(matches!(res, Err(Error::RpcStatus(_))));
+        let header = MessageHeader::read_from(&*buf).await.expect("read header");
+        buf.append(&mut vec![0x0; header.length as usize]);
+
+        match GenMessage::read_from(&*buf).await {
+            Err(GenMessageError::ReturnError(h, Error::RpcStatus(s))) => {
+                if h != header || s.code() != crate::proto::Code::INVALID_ARGUMENT {
+                    panic!("got invalid error when the size exceeds limit");
+                }
+            }
+            _ => {
+                panic!("got invalid error when the size exceeds limit");
+            }
+        }
 
         let mut buf = Vec::from(PROTOBUF_MESSAGE_HEADER);
         buf.extend_from_slice(&PROTOBUF_REQUEST);
@@ -477,11 +515,17 @@ mod tests {
     #[cfg(feature = "async")]
     #[tokio::test]
     async fn async_message() {
+        // Test packet which exceeds maximum message size
         let mut buf = Vec::from(MESSAGE_HEADER);
-        buf.extend_from_slice(&PROTOBUF_REQUEST);
-        let res = Message::<Request>::read_from(&*buf).await;
-        // exceed maximum message size
-        assert!(matches!(res, Err(Error::RpcStatus(_))));
+        let header = MessageHeader::read_from(&*buf).await.expect("read header");
+        buf.append(&mut vec![0x0; header.length as usize]);
+
+        let gen = Message::<Request>::read_from(&*buf)
+            .await
+            .expect("read message");
+
+        assert_eq!(gen.header, header);
+        assert_eq!(protobuf::Message::compute_size(&gen.payload), 0);
 
         let mut buf = Vec::from(PROTOBUF_MESSAGE_HEADER);
         buf.extend_from_slice(&PROTOBUF_REQUEST);

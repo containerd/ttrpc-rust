@@ -386,6 +386,10 @@ impl ReaderDelegate for ServerReader {
             }
         });
     }
+
+    async fn handle_err(&self, header: MessageHeader, e: Error) {
+        self.context().handle_err(header, e).await
+    }
 }
 
 impl ServerReader {
@@ -410,6 +414,14 @@ struct HandlerContext {
 }
 
 impl HandlerContext {
+    async fn handle_err(&self, header: MessageHeader, e: Error) {
+        Self::respond(self.tx.clone(), header.stream_id, e.into())
+            .await
+            .map_err(|e| {
+                error!("respond error got error {:?}", e);
+            })
+            .ok();
+    }
     async fn handle_msg(&self, msg: GenMessage) {
         let stream_id = msg.header.stream_id;
 

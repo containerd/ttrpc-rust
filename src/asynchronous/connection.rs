@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use crate::error::Error;
-use crate::proto::GenMessage;
+use crate::proto::{GenMessage, GenMessageError, MessageHeader};
 
 pub trait Builder {
     type Reader;
@@ -36,6 +36,7 @@ pub trait ReaderDelegate {
     async fn disconnect(&self, e: Error, task: &mut task::JoinHandle<()>);
     async fn exit(&self);
     async fn handle_msg(&self, msg: GenMessage);
+    async fn handle_err(&self, header: MessageHeader, e: Error);
 }
 
 pub struct Connection<S, B: Builder> {
@@ -89,7 +90,12 @@ where
                             trace!("Got Message {:?}", msg);
                             reader_delegate.handle_msg(msg).await;
                         }
-                        Err(e) => {
+                        Err(GenMessageError::ReturnError(header, e)) => {
+                            trace!("Read msg err (can be return): {:?}", e);
+                            reader_delegate.handle_err(header, e).await;
+                        }
+
+                        Err(GenMessageError::InternalError(e)) => {
                             trace!("Read msg err: {:?}", e);
                             reader_delegate.disconnect(e, &mut writer_task).await;
                             break;
