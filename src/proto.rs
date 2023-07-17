@@ -249,6 +249,10 @@ impl GenMessage {
             payload: content,
         })
     }
+
+    pub fn check(&self) -> TtResult<()> {
+        check_oversize(self.header.length as usize, true)
+    }
 }
 
 /// TTRPC codec, only protobuf is supported.
@@ -318,11 +322,13 @@ where
 }
 
 impl<C: Codec> Message<C> {
-    pub fn new_request(stream_id: u32, message: C) -> Self {
-        Self {
+    pub fn new_request(stream_id: u32, message: C) -> TtResult<Self> {
+        check_oversize(message.size() as usize, false)?;
+
+        Ok(Self {
             header: MessageHeader::new_request(stream_id, message.size()),
             payload: message,
-        }
+        })
     }
 }
 
@@ -451,7 +457,7 @@ mod tests {
     #[test]
     fn gen_message_to_message() {
         let req = new_protobuf_request();
-        let msg = Message::new_request(3, req);
+        let msg = Message::new_request(3, req).unwrap();
         let msg_clone = msg.clone();
         let gen: GenMessage = msg.try_into().unwrap();
         let dmsg = Message::<Request>::try_from(gen).unwrap();
@@ -548,7 +554,7 @@ mod tests {
         assert_eq!(&msg.payload.metadata[0].value, "test_value1");
 
         let req = new_protobuf_request();
-        let mut dmsg = Message::new_request(u32::MAX, req);
+        let mut dmsg = Message::new_request(u32::MAX, req).unwrap();
         dmsg.header.set_stream_id(0x123456);
         dmsg.header.set_flags(0xe0);
         dmsg.header.add_flags(0x0f);

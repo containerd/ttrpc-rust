@@ -68,7 +68,7 @@ impl Client {
         let timeout_nano = req.timeout_nano;
         let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
 
-        let msg: GenMessage = Message::new_request(stream_id, req)
+        let msg: GenMessage = Message::new_request(stream_id, req)?
             .try_into()
             .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
 
@@ -118,7 +118,7 @@ impl Client {
     ) -> Result<StreamInner> {
         let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
 
-        let mut msg: GenMessage = Message::new_request(stream_id, req)
+        let mut msg: GenMessage = Message::new_request(stream_id, req)?
             .try_into()
             .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
 
