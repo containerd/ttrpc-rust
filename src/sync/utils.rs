@@ -3,10 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::common::{MessageHeader, MESSAGE_TYPE_RESPONSE};
+use crate::common::{check_oversize, convert_msg_to_buf, MessageHeader, MESSAGE_TYPE_RESPONSE};
 use crate::error::{Error, Result};
-use crate::ttrpc::{Request, Response};
-use protobuf::Message;
+use crate::ttrpc::{Request, Response, Status};
 use std::collections::HashMap;
 
 /// Response message through a channel.
@@ -16,10 +15,12 @@ pub fn response_to_channel(
     res: Response,
     tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
 ) -> Result<()> {
-    let mut buf = Vec::with_capacity(res.compute_size() as usize);
-    let mut s = protobuf::CodedOutputStream::vec(&mut buf);
-    res.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-    s.flush().map_err(err_to_others_err!(e, ""))?;
+    let mut buf = convert_msg_to_buf(&res)?;
+
+    if let Err(e) = check_oversize(buf.len(), true) {
+        let resp: Response = e.into();
+        buf = convert_msg_to_buf(&resp)?;
+    };
 
     let mh = MessageHeader {
         length: buf.len() as u32,
@@ -27,9 +28,28 @@ pub fn response_to_channel(
         type_: MESSAGE_TYPE_RESPONSE,
         flags: 0,
     };
+
     tx.send((mh, buf)).map_err(err_to_others_err!(e, ""))?;
 
     Ok(())
+}
+
+pub fn response_error_to_channel(
+    stream_id: u32,
+    e: Error,
+    tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+) -> Result<()> {
+    response_to_channel(stream_id, e.into(), tx)
+}
+
+pub fn response_status_to_channel(
+    stream_id: u32,
+    status: Status,
+    tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+) -> Result<()> {
+    let mut res = Response::new();
+    res.set_status(status);
+    response_to_channel(stream_id, res, tx)
 }
 
 /// Handle request in sync mode.

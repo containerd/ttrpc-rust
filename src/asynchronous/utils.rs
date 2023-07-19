@@ -3,8 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::common::{MessageHeader, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE};
-use crate::error::{get_status, Error, Result};
+use crate::common::{
+    check_oversize, convert_error_to_response, convert_msg_to_buf, MessageHeader,
+    MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE,
+};
+use crate::error::{get_status, Result};
 use crate::ttrpc::{Code, Request, Response, Status};
 use async_trait::async_trait;
 use protobuf::{CodedInputStream, Message};
@@ -96,10 +99,11 @@ pub struct TtrpcContext {
 }
 
 pub fn convert_response_to_buf(res: Response) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(res.compute_size() as usize);
-    let mut s = protobuf::CodedOutputStream::vec(&mut buf);
-    res.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-    s.flush().map_err(err_to_others_err!(e, ""))?;
+    let mut buf = convert_msg_to_buf(&res)?;
+    if let Err(e) = check_oversize(buf.len(), true) {
+        let resp = convert_error_to_response(e);
+        buf = convert_msg_to_buf(&resp)?;
+    };
 
     Ok(buf)
 }

@@ -3,14 +3,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::cmp;
+
 use byteorder::{BigEndian, ByteOrder};
 
-use crate::common::{MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX, MESSAGE_TYPE_RESPONSE};
+use crate::common::{
+    check_oversize, convert_msg_to_buf, DEFAULT_PAGE_SIZE, MESSAGE_HEADER_LENGTH,
+    MESSAGE_TYPE_RESPONSE,
+};
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
 use crate::r#async::utils;
 use crate::ttrpc::{Code, Response, Status};
 use crate::MessageHeader;
-use protobuf::Message;
 use tokio::io::AsyncReadExt;
 
 async fn receive_count<T>(reader: &mut T, count: usize) -> Result<Vec<u8>>
@@ -23,6 +27,21 @@ where
     }
 
     Ok(content)
+}
+
+async fn discard_count<T>(reader: &mut T, count: usize) -> Result<()>
+where
+    T: AsyncReadExt + std::marker::Unpin,
+{
+    let mut need_discard = count;
+
+    while need_discard > 0 {
+        let once_discard = cmp::min(DEFAULT_PAGE_SIZE, need_discard);
+        receive_count(reader, once_discard).await?;
+        need_discard -= once_discard;
+    }
+
+    Ok(())
 }
 
 async fn receive_header<T>(reader: &mut T) -> Result<MessageHeader>
@@ -51,21 +70,17 @@ where
     Ok(mh)
 }
 
-pub async fn receive<T>(reader: &mut T) -> Result<(MessageHeader, Vec<u8>)>
+pub async fn receive<T>(reader: &mut T) -> Result<(MessageHeader, Result<Vec<u8>>)>
 where
     T: AsyncReadExt + std::marker::Unpin,
 {
     let mh = receive_header(reader).await?;
     trace!("Got Message header {:?}", mh);
 
-    if mh.length > MESSAGE_LENGTH_MAX as u32 {
-        return Err(get_rpc_status(
-            Code::INVALID_ARGUMENT,
-            format!(
-                "message length {} exceed maximum message size of {}",
-                mh.length, MESSAGE_LENGTH_MAX
-            ),
-        ));
+    let mh_len = mh.length as usize;
+    if let Err(e) = check_oversize(mh_len, true) {
+        discard_count(reader, mh_len).await?;
+        return Ok((mh, Err(e)));
     }
 
     let buf = receive_count(reader, mh.length as usize).await?;
@@ -78,7 +93,7 @@ where
     }
     trace!("Got Message body {:?}", buf);
 
-    Ok((mh, buf))
+    Ok((mh, Ok(buf)))
 }
 
 fn header_to_buf(mh: MessageHeader) -> Vec<u8> {
@@ -110,15 +125,6 @@ pub fn to_res_buf(stream_id: u32, mut body: Vec<u8>) -> Vec<u8> {
     buf
 }
 
-fn get_response_body(res: &Response) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(res.compute_size() as usize);
-    let mut s = protobuf::CodedOutputStream::vec(&mut buf);
-    res.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-    s.flush().map_err(err_to_others_err!(e, ""))?;
-
-    Ok(buf)
-}
-
 pub async fn respond(
     tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     stream_id: u32,
@@ -138,7 +144,7 @@ pub async fn respond_with_status(
 ) -> Result<()> {
     let mut res = Response::new();
     res.set_status(status);
-    let mut body = get_response_body(&res)?;
+    let mut body = convert_msg_to_buf(&res)?;
 
     let mh = MessageHeader {
         length: body.len() as u32,
@@ -153,4 +159,22 @@ pub async fn respond_with_status(
     tx.send(buf)
         .await
         .map_err(err_to_others_err!(e, "Send packet to sender error "))
+}
+
+pub(crate) async fn respond_error(
+    tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    stream_id: u32,
+    e: Error,
+) -> Result<()> {
+    let status = if let Error::RpcStatus(stat) = e {
+        stat
+    } else {
+        Status {
+            code: Code::UNKNOWN,
+            message: format!("{:?}", e),
+            ..Default::default()
+        }
+    };
+
+    respond_with_status(tx, stream_id, status).await
 }

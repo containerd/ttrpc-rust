@@ -11,7 +11,7 @@ use std::result::Result as StdResult;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::asynchronous::stream::{receive, respond, respond_with_status};
+use crate::asynchronous::stream::{receive, respond, respond_error, respond_with_status};
 use crate::asynchronous::unix_incoming::UnixIncoming;
 use crate::common::{self, Domain, MESSAGE_TYPE_REQUEST};
 use crate::context;
@@ -269,16 +269,21 @@ async fn spawn_connection_handler<S>(
             select! {
                 resp = receive(&mut reader) => {
                     match resp {
-                        Ok(message) => {
+                        Ok((mh, Ok(body))) => {
                             spawn(async move {
                                 select! {
-                                    _ = handle_request(tx, fd, methods, message) => {}
+                                    _ = handle_request(tx, fd, methods, (mh, body)) => {}
                                     _ = client_disconnected_rx2.changed() => {}
                                 }
 
                                 drop(req_done_tx2);
                             });
                         }
+                        Ok((mh, Err(e))) => {
+                            respond_error(tx.clone(), mh.stream_id, e).await.map_err(|e| {
+                                error!("respond-error got error {:?}", e);
+                            }).ok();
+                        },
                         Err(e) => {
                             let _ = client_disconnected_tx.send(true);
                             trace!("error {:?}", e);

@@ -4,12 +4,14 @@
 //
 
 use nix::unistd::close;
-use protobuf::{CodedInputStream, CodedOutputStream, Message};
+use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
 
-use crate::common::{client_connect, MESSAGE_TYPE_RESPONSE};
+use crate::common::{
+    check_oversize, client_connect, convert_msg_to_buf, MessageHeader, MESSAGE_TYPE_RESPONSE,
+};
 use crate::error::{Error, Result};
 use crate::ttrpc::{Code, Request, Response};
 
@@ -101,38 +103,7 @@ impl Client {
                     res = receive(&mut reader) => {
                         match res {
                             Ok((header, body)) => {
-                                tokio::spawn(async move {
-                                    let resp_tx2;
-                                    {
-                                        let mut map = req_map.lock().unwrap();
-                                        let resp_tx = match map.get(&header.stream_id) {
-                                            Some(tx) => tx,
-                                            None => {
-                                                debug!(
-                                                    "Receiver got unknown packet {:?} {:?}",
-                                                    header, body
-                                                );
-                                                return;
-                                            }
-                                        };
-
-                                        resp_tx2 = resp_tx.clone();
-                                        map.remove(&header.stream_id); // Forget the result, just remove.
-                                    }
-
-                                    if header.type_ != MESSAGE_TYPE_RESPONSE {
-                                        resp_tx2
-                                            .send(Err(Error::Others(format!(
-                                                "Recver got malformed packet {:?} {:?}",
-                                                header, body
-                                            ))))
-                                            .await
-                                            .unwrap_or_else(|_e| error!("The request has returned"));
-                                        return;
-                                    }
-
-                                    resp_tx2.send(Ok(body)).await.unwrap_or_else(|_e| error!("The request has returned"));
-                                });
+                                spawn_trans_resp(req_map, header, body);
                             }
                             Err(e) => {
                                 trace!("error {:?}", e);
@@ -148,12 +119,9 @@ impl Client {
     }
 
     pub async fn request(&self, req: Request) -> Result<Response> {
-        let mut buf = Vec::with_capacity(req.compute_size() as usize);
-        {
-            let mut s = CodedOutputStream::vec(&mut buf);
-            req.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-            s.flush().map_err(err_to_others_err!(e, ""))?;
-        }
+        let buf = convert_msg_to_buf(&req)?;
+        // NOTE: pure client problem can't be rpc error, so we use false here.
+        check_oversize(buf.len(), false)?;
 
         let (tx, mut rx): (ResponseSender, ResponseReceiver) = channel(100);
         self.req_tx
@@ -201,4 +169,44 @@ impl Drop for ClientClose {
         close(self.fd).unwrap();
         trace!("All client is droped");
     }
+}
+
+// Spwan a task and transfer the response
+fn spawn_trans_resp(
+    req_map: Arc<Mutex<HashMap<u32, ResponseSender>>>,
+    header: MessageHeader,
+    body: Result<Vec<u8>>,
+) {
+    tokio::spawn(async move {
+        let resp_tx2;
+        {
+            let mut map = req_map.lock().unwrap();
+            let resp_tx = match map.get(&header.stream_id) {
+                Some(tx) => tx,
+                None => {
+                    debug!("Receiver got unknown packet {:?} {:?}", header, body);
+                    return;
+                }
+            };
+
+            resp_tx2 = resp_tx.clone();
+            map.remove(&header.stream_id); // Forget the result, just remove.
+        }
+
+        if header.type_ != MESSAGE_TYPE_RESPONSE {
+            resp_tx2
+                .send(Err(Error::Others(format!(
+                    "Recver got malformed packet {:?}",
+                    header
+                ))))
+                .await
+                .unwrap_or_else(|_e| error!("The request has returned"));
+            return;
+        }
+
+        resp_tx2
+            .send(body)
+            .await
+            .unwrap_or_else(|_e| error!("The request has returned"));
+    });
 }

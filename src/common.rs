@@ -7,10 +7,14 @@
 
 #![allow(unused_macros)]
 
-use crate::error::{Error, Result};
+use std::os::unix::io::RawFd;
+
 use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
 use nix::sys::socket::*;
-use std::os::unix::io::RawFd;
+use protobuf::Message;
+
+use crate::error::{get_rpc_status, get_status, Error, Result};
+use crate::ttrpc::{Code, Response};
 
 #[derive(Debug)]
 pub enum Domain {
@@ -155,6 +159,45 @@ pub(crate) unsafe fn client_connect(host: &str) -> Result<RawFd> {
     Ok(fd)
 }
 
+pub fn check_oversize(len: usize, return_rpc_error: bool) -> Result<()> {
+    if len > MESSAGE_LENGTH_MAX {
+        let msg = format!(
+            "message length {} exceed maximum message size of {}",
+            len, MESSAGE_LENGTH_MAX
+        );
+        let e = if return_rpc_error {
+            get_rpc_status(Code::INVALID_ARGUMENT, msg)
+        } else {
+            Error::Others(msg)
+        };
+
+        return Err(e);
+    }
+
+    Ok(())
+}
+
+pub fn convert_msg_to_buf(msg: &impl Message) -> Result<Vec<u8>> {
+    let mut buf = Vec::with_capacity(msg.compute_size() as usize);
+    let mut s = protobuf::CodedOutputStream::vec(&mut buf);
+    msg.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
+    s.flush().map_err(err_to_others_err!(e, ""))?;
+
+    Ok(buf)
+}
+
+pub fn convert_error_to_response(e: Error) -> Response {
+    let status = if let Error::RpcStatus(stat) = e {
+        stat
+    } else {
+        get_status(Code::UNKNOWN, e)
+    };
+
+    let mut res = Response::new();
+    res.set_status(status);
+    res
+}
+
 macro_rules! cfg_sync {
     ($($item:item)*) => {
         $(
@@ -180,3 +223,5 @@ pub const MESSAGE_LENGTH_MAX: usize = 4 << 20;
 
 pub const MESSAGE_TYPE_REQUEST: u8 = 0x1;
 pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
+
+pub const DEFAULT_PAGE_SIZE: usize = 4 << 10;

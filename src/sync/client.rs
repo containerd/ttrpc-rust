@@ -16,7 +16,7 @@
 
 use nix::sys::socket::*;
 use nix::unistd::close;
-use protobuf::{CodedInputStream, CodedOutputStream, Message};
+use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::sync::mpsc;
@@ -25,7 +25,10 @@ use std::{io, thread};
 
 #[cfg(target_os = "macos")]
 use crate::common::set_fd_close_exec;
-use crate::common::{client_connect, MESSAGE_TYPE_REQUEST, MESSAGE_TYPE_RESPONSE, SOCK_CLOEXEC};
+use crate::common::{
+    check_oversize, client_connect, convert_msg_to_buf, MESSAGE_TYPE_REQUEST,
+    MESSAGE_TYPE_RESPONSE, SOCK_CLOEXEC,
+};
 use crate::error::{Error, Result};
 use crate::sync::channel::{read_message, write_message};
 use crate::ttrpc::{Code, Request, Response};
@@ -34,6 +37,7 @@ use std::time::Duration;
 
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
+type ReciverMap = Arc<Mutex<HashMap<u32, mpsc::SyncSender<Result<Vec<u8>>>>>>;
 
 /// A ttrpc Client (sync).
 #[derive(Clone)]
@@ -145,12 +149,9 @@ impl Client {
                     continue;
                 }
 
-                let mh;
-                let buf;
                 match read_message(fd) {
-                    Ok((x, y)) => {
-                        mh = x;
-                        buf = y;
+                    Ok((mh, buf)) => {
+                        trans_resp(recver_map_orig.clone(), mh, buf);
                     }
                     Err(x) => match x {
                         Error::Socket(y) => {
@@ -172,29 +173,6 @@ impl Client {
                         }
                     },
                 };
-                let mut map = recver_map_orig.lock().unwrap();
-                let recver_tx = match map.get(&mh.stream_id) {
-                    Some(tx) => tx,
-                    None => {
-                        debug!("Recver got unknown packet {:?} {:?}", mh, buf);
-                        continue;
-                    }
-                };
-                if mh.type_ != MESSAGE_TYPE_RESPONSE {
-                    recver_tx
-                        .send(Err(Error::Others(format!(
-                            "Recver got malformed packet {:?} {:?}",
-                            mh, buf
-                        ))))
-                        .unwrap_or_else(|_e| error!("The request has returned"));
-                    continue;
-                }
-
-                recver_tx
-                    .send(Ok(buf))
-                    .unwrap_or_else(|_e| error!("The request has returned"));
-
-                map.remove(&mh.stream_id);
             }
 
             let _ = close(recver_fd).map_err(|e| {
@@ -214,10 +192,9 @@ impl Client {
         }
     }
     pub fn request(&self, req: Request) -> Result<Response> {
-        let mut buf = Vec::with_capacity(req.compute_size() as usize);
-        let mut s = CodedOutputStream::vec(&mut buf);
-        req.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-        s.flush().map_err(err_to_others_err!(e, ""))?;
+        let buf = convert_msg_to_buf(&req)?;
+        // NOTE: pure client problem can't be rpc error, so we use false here.
+        check_oversize(buf.len(), false)?;
 
         let (tx, rx) = mpsc::sync_channel(0);
 
@@ -262,4 +239,31 @@ impl Drop for ClientClose {
         close(self.fd).unwrap();
         trace!("All client is droped");
     }
+}
+
+/// Transfer the response
+fn trans_resp(recver_map_orig: ReciverMap, mh: MessageHeader, buf: Result<Vec<u8>>) {
+    let mut map = recver_map_orig.lock().unwrap();
+    let recver_tx = match map.get(&mh.stream_id) {
+        Some(tx) => tx,
+        None => {
+            debug!("Recver got unknown packet {:?} {:?}", mh, buf);
+            return;
+        }
+    };
+    if mh.type_ != MESSAGE_TYPE_RESPONSE {
+        recver_tx
+            .send(Err(Error::Others(format!(
+                "Recver got malformed packet {:?} {:?}",
+                mh, buf
+            ))))
+            .unwrap_or_else(|_e| error!("The request has returned"));
+        return;
+    }
+
+    recver_tx
+        .send(buf)
+        .unwrap_or_else(|_e| error!("The request has returned"));
+
+    map.remove(&mh.stream_id);
 }
