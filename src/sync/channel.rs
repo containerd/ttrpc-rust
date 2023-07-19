@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
+use crate::error::{sock_error_msg, Error, Result};
+use crate::proto::{check_oversize, MessageHeader, DEFAULT_PAGE_SIZE, MESSAGE_HEADER_LENGTH};
 use crate::sync::sys::PipeConnection;
-use crate::proto::{Code, MessageHeader, MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX};
 
 fn read_count(conn: &PipeConnection, count: usize) -> Result<Vec<u8>> {
     let mut v: Vec<u8> = vec![0; count];
@@ -51,7 +50,7 @@ fn write_count(conn: &PipeConnection, buf: &[u8], count: usize) -> Result<usize>
     }
 
     loop {
-        match conn.write(&buf[len..]){
+        match conn.write(&buf[len..]) {
             Ok(l) => {
                 len += l;
                 if len == count {
@@ -65,6 +64,18 @@ fn write_count(conn: &PipeConnection, buf: &[u8], count: usize) -> Result<usize>
     }
 
     Ok(len)
+}
+
+fn discard_count(conn: &PipeConnection, count: usize) -> Result<()> {
+    let mut need_discard = count;
+
+    while need_discard > 0 {
+        let once_discard = std::cmp::min(DEFAULT_PAGE_SIZE, need_discard);
+        read_count(conn, once_discard)?;
+        need_discard -= once_discard;
+    }
+
+    Ok(())
 }
 
 fn read_message_header(conn: &PipeConnection) -> Result<MessageHeader> {
@@ -82,18 +93,14 @@ fn read_message_header(conn: &PipeConnection) -> Result<MessageHeader> {
     Ok(mh)
 }
 
-pub fn read_message(conn: &PipeConnection) -> Result<(MessageHeader, Vec<u8>)> {
+pub fn read_message(conn: &PipeConnection) -> Result<(MessageHeader, Result<Vec<u8>>)> {
     let mh = read_message_header(conn)?;
     trace!("Got Message header {:?}", mh);
 
-    if mh.length > MESSAGE_LENGTH_MAX as u32 {
-        return Err(get_rpc_status(
-            Code::INVALID_ARGUMENT,
-            format!(
-                "message length {} exceed maximum message size of {}",
-                mh.length, MESSAGE_LENGTH_MAX
-            ),
-        ));
+    let mh_len = mh.length as usize;
+    if let Err(e) = check_oversize(mh_len, true) {
+        discard_count(conn, mh_len)?;
+        return Ok((mh, Err(e)));
     }
 
     let buf = read_count(conn, mh.length as usize)?;
@@ -106,7 +113,7 @@ pub fn read_message(conn: &PipeConnection) -> Result<(MessageHeader, Vec<u8>)> {
     }
     trace!("Got Message body {:?}", buf);
 
-    Ok((mh, buf))
+    Ok((mh, Ok(buf)))
 }
 
 fn write_message_header(conn: &PipeConnection, mh: MessageHeader) -> Result<()> {

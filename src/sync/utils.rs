@@ -4,8 +4,9 @@
 //
 
 use crate::error::{Error, Result};
-use crate::proto::{MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
-use protobuf::Message;
+use crate::proto::{
+    check_oversize, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
+};
 use std::collections::HashMap;
 
 /// Response message through a channel.
@@ -15,12 +16,12 @@ pub fn response_to_channel(
     res: Response,
     tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
 ) -> Result<()> {
-    let mut buf = Vec::with_capacity(res.compute_size() as usize);
-    let mut s = protobuf::CodedOutputStream::vec(&mut buf);
-    res.write_to(&mut s).map_err(err_to_others_err!(e, ""))?;
-    s.flush().map_err(err_to_others_err!(e, ""))?;
+    let mut buf = res.encode().map_err(err_to_others_err!(e, ""))?;
 
-    drop(s);
+    if let Err(e) = check_oversize(buf.len(), true) {
+        let resp: Response = e.into();
+        buf = resp.encode().map_err(err_to_others_err!(e, ""))?;
+    };
 
     let mh = MessageHeader {
         length: buf.len() as u32,
@@ -28,9 +29,18 @@ pub fn response_to_channel(
         type_: MESSAGE_TYPE_RESPONSE,
         flags: 0,
     };
+
     tx.send((mh, buf)).map_err(err_to_others_err!(e, ""))?;
 
     Ok(())
+}
+
+pub fn response_error_to_channel(
+    stream_id: u32,
+    e: Error,
+    tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+) -> Result<()> {
+    response_to_channel(stream_id, e.into(), tx)
 }
 
 /// Handle request in sync mode.

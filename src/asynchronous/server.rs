@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use futures::StreamExt as _;
 use nix::unistd;
+use protobuf::Message as _;
 use tokio::{
     self,
     io::{AsyncRead, AsyncWrite},
@@ -35,8 +36,8 @@ use crate::common::{self, Domain};
 use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{
-    Code, Codec, GenMessage, Message, MessageHeader, Request, Response, Status, FLAG_NO_DATA,
-    FLAG_REMOTE_CLOSED, FLAG_REMOTE_OPEN, MESSAGE_TYPE_DATA, MESSAGE_TYPE_REQUEST,
+    check_oversize, Code, Codec, GenMessage, Message, MessageHeader, Request, Response, Status,
+    FLAG_NO_DATA, FLAG_REMOTE_CLOSED, FLAG_REMOTE_OPEN, MESSAGE_TYPE_DATA, MESSAGE_TYPE_REQUEST,
 };
 use crate::r#async::connection::*;
 use crate::r#async::shutdown;
@@ -386,6 +387,10 @@ impl ReaderDelegate for ServerReader {
             }
         });
     }
+
+    async fn handle_err(&self, header: MessageHeader, e: Error) {
+        self.context().handle_err(header, e).await
+    }
 }
 
 impl ServerReader {
@@ -410,6 +415,14 @@ struct HandlerContext {
 }
 
 impl HandlerContext {
+    async fn handle_err(&self, header: MessageHeader, e: Error) {
+        Self::respond(self.tx.clone(), header.stream_id, e.into())
+            .await
+            .map_err(|e| {
+                error!("respond error got error {:?}", e);
+            })
+            .ok();
+    }
     async fn handle_msg(&self, msg: GenMessage) {
         let stream_id = msg.header.stream_id;
 
@@ -426,8 +439,13 @@ impl HandlerContext {
         match msg.header.type_ {
             MESSAGE_TYPE_REQUEST => match self.handle_request(msg).await {
                 Ok(opt_msg) => match opt_msg {
-                    Some(msg) => {
-                        Self::respond(self.tx.clone(), stream_id, msg)
+                    Some(mut resp) => {
+                        // Server: check size before sending to client
+                        if let Err(e) = check_oversize(resp.compute_size() as usize, true) {
+                            resp = e.into();
+                        }
+
+                        Self::respond(self.tx.clone(), stream_id, resp)
                             .await
                             .map_err(|e| {
                                 error!("respond got error {:?}", e);

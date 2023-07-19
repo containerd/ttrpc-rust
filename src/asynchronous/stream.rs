@@ -418,6 +418,9 @@ impl StreamSender {
             header,
             payload: buf,
         };
+
+        msg.check()?;
+
         _send(&self.tx, msg).await?;
 
         Ok(())
@@ -447,6 +450,7 @@ impl StreamReceiver {
             return Err(Error::RemoteClosed);
         }
         let msg = _recv(&mut self.rx).await?;
+
         let payload = match msg.header.type_ {
             MESSAGE_TYPE_RESPONSE => {
                 debug_assert_eq!(self.kind, Kind::Client);

@@ -6,7 +6,6 @@
 
 //! Common functions.
 
-use crate::error::{Error, Result};
 #[cfg(any(
     feature = "async",
     not(any(target_os = "linux", target_os = "android"))
@@ -15,6 +14,8 @@ use nix::fcntl::FdFlag;
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::sys::socket::*;
 use std::os::unix::io::RawFd;
+
+use crate::error::{Error, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Domain {
