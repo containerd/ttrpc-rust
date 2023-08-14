@@ -13,7 +13,7 @@ use log::{info, LevelFilter};
 #[cfg(unix)]
 use protocols::r#async::{empty, streaming, streaming_ttrpc};
 #[cfg(unix)]
-use ttrpc::asynchronous::Server;
+use ttrpc::{asynchronous::Server, Error};
 
 #[cfg(unix)]
 use async_trait::async_trait;
@@ -132,6 +132,24 @@ impl streaming_ttrpc::Streaming for StreamingService {
                 ))
             })?;
         }
+        Ok(())
+    }
+
+    // It verifies PR #208
+    async fn echo_default_value(
+        &self,
+        _ctx: &::ttrpc::r#async::TtrpcContext,
+        e: streaming::EchoPayload,
+        s: ::ttrpc::r#async::ServerStreamSender<streaming::EchoPayload>,
+    ) -> ::ttrpc::Result<()> {
+        if e.seq != 0 || !e.msg.is_empty() {
+            return Err(Error::Others(
+                "Expect a request with empty payload to verify #208".to_string(),
+            ));
+        }
+
+        s.send(&e).await.unwrap();
+
         Ok(())
     }
 }

@@ -41,9 +41,12 @@ async fn main() {
     let sc1 = sc.clone();
     let t5 = tokio::spawn(echo_null(sc1));
 
-    let t6 = tokio::spawn(echo_null_stream(sc));
+    let sc1 = sc.clone();
+    let t6 = tokio::spawn(echo_null_stream(sc1));
 
-    let _ = tokio::join!(t1, t2, t3, t4, t5, t6);
+    let t7 = tokio::spawn(echo_default_value(sc));
+
+    let _ = tokio::join!(t1, t2, t3, t4, t5, t6, t7);
 }
 
 fn default_ctx() -> Context {
@@ -184,4 +187,17 @@ async fn echo_null_stream(cli: streaming_ttrpc::StreamingClient) {
         .await
         .unwrap()
         .unwrap();
+}
+
+#[cfg(unix)]
+async fn echo_default_value(cli: streaming_ttrpc::StreamingClient) {
+    let mut stream = cli
+        .echo_default_value(default_ctx(), &Default::default()) // send default value to verify #208
+        .await
+        .unwrap();
+
+    let received = stream.recv().await.unwrap().unwrap();
+
+    assert_eq!(received.seq, 0);
+    assert_eq!(received.msg, "");
 }
