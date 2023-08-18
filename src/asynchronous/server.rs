@@ -37,7 +37,7 @@ use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{
     check_oversize, Code, Codec, GenMessage, Message, MessageHeader, Request, Response, Status,
-    FLAG_NO_DATA, FLAG_REMOTE_CLOSED, FLAG_REMOTE_OPEN, MESSAGE_TYPE_DATA, MESSAGE_TYPE_REQUEST,
+    FLAG_NO_DATA, FLAG_REMOTE_CLOSED, MESSAGE_TYPE_DATA, MESSAGE_TYPE_REQUEST,
 };
 use crate::r#async::connection::*;
 use crate::r#async::shutdown;
@@ -606,8 +606,8 @@ impl HandlerContext {
         let stream_tx = tx.clone();
         self.streams.lock().unwrap().insert(stream_id, tx);
 
-        let _remote_close = (req_msg.header.flags & FLAG_REMOTE_CLOSED) == FLAG_REMOTE_CLOSED;
-        let _remote_open = (req_msg.header.flags & FLAG_REMOTE_OPEN) == FLAG_REMOTE_OPEN;
+        let no_data = (req_msg.header.flags & FLAG_NO_DATA) == FLAG_NO_DATA;
+
         let si = StreamInner::new(
             stream_id,
             self.tx.clone(),
@@ -627,7 +627,7 @@ impl HandlerContext {
 
         let task = spawn(async move { stream.handler(ctx, si).await });
 
-        if !req.payload.is_empty() {
+        if !no_data {
             // Fake the first data message.
             let msg = GenMessage {
                 header: MessageHeader::new_data(stream_id, req.payload.len() as u32),

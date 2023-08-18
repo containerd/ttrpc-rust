@@ -15,10 +15,10 @@ use nix::unistd::close;
 use tokio::{self, sync::mpsc, task};
 
 use crate::common::client_connect;
-use crate::error::{Error, Result};
+use crate::error::{get_rpc_status, Error, Result};
 use crate::proto::{
-    Code, Codec, GenMessage, Message, MessageHeader, Request, Response, FLAG_REMOTE_CLOSED,
-    FLAG_REMOTE_OPEN, MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
+    Code, Codec, GenMessage, Message, MessageHeader, Request, Response, FLAG_NO_DATA,
+    FLAG_REMOTE_CLOSED, FLAG_REMOTE_OPEN, MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
 };
 use crate::r#async::connection::*;
 use crate::r#async::shutdown;
@@ -117,13 +117,20 @@ impl Client {
         streaming_server: bool,
     ) -> Result<StreamInner> {
         let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
+        let is_req_payload_empty = req.payload.is_empty();
 
         let mut msg: GenMessage = Message::new_request(stream_id, req)?
             .try_into()
             .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
 
         if streaming_client {
-            msg.header.add_flags(FLAG_REMOTE_OPEN);
+            if !is_req_payload_empty {
+                return Err(get_rpc_status(
+                    Code::INVALID_ARGUMENT,
+                    "Creating a ClientStream and sending payload at the same time is not allowed",
+                ));
+            }
+            msg.header.add_flags(FLAG_REMOTE_OPEN | FLAG_NO_DATA);
         } else {
             msg.header.add_flags(FLAG_REMOTE_CLOSED);
         }
