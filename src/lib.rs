@@ -24,7 +24,6 @@
 //!
 //! - `async`: Enables async server and client.
 //! - `sync`: Enables traditional sync server and client (default enabled).
-//! - `protobuf-codec`: Includes rust-protobuf (default enabled).
 //!
 //! # Socket address
 //!
