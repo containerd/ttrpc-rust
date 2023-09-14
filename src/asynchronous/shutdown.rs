@@ -32,7 +32,7 @@ pub struct Waiter {
 
 /// Used to Notify all [`Waiter`s](Waiter) shutdown.
 ///
-/// No `Clone` is provided. If you want multiple instances, you can use Arc<Notifier>.
+/// No `Clone` is provided. If you want multiple instances, you can use `Arc<Notifier>`.
 /// Notifier will automatically call shutdown when dropping.
 #[derive(Debug)]
 pub struct Notifier {
