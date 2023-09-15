@@ -639,12 +639,9 @@ fn write_generated_common(w: &mut CodeWriter) {
     w.write_line("// @generated");
 
     w.write_line("");
-    w.comment("https://github.com/Manishearth/rust-clippy/issues/702");
+    w.write_line("#![cfg_attr(rustfmt, rustfmt_skip)]");
     w.write_line("#![allow(unknown_lints)]");
     w.write_line("#![allow(clipto_camel_casepy)]");
-    w.write_line("");
-    w.write_line("#![cfg_attr(rustfmt, rustfmt_skip)]");
-    w.write_line("");
     w.write_line("#![allow(box_pointers)]");
     w.write_line("#![allow(dead_code)]");
     w.write_line("#![allow(missing_docs)]");
@@ -655,6 +652,7 @@ fn write_generated_common(w: &mut CodeWriter) {
     w.write_line("#![allow(unsafe_code)]");
     w.write_line("#![allow(unused_imports)]");
     w.write_line("#![allow(unused_results)]");
+    w.write_line("#![allow(clippy::all)]");
 }
 
 fn gen_file(
