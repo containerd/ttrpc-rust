@@ -22,7 +22,7 @@ tokio = { version = "1", features = ["rt", "sync", "io-util", "macros", "time"],
 futures = { version = "0.3", optional = true }
 crossbeam = "0.8.0"
 
-[target.'cfg(windows)'.dependencies] 
+[target.'cfg(windows)'.dependencies]
 windows-sys = {version = "0.48", features = [ "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_Security", "Win32_System_Threading"]}
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
@@ -30,9 +30,6 @@ tokio-vsock = { version = "0.4.0", optional = true }
 
 [build-dependencies]
 protobuf-codegen = "3.1.0"
-
-[dev-dependencies]
-assert_cmd = "2.0.7"
 
 [features]
 default = ["sync"]
