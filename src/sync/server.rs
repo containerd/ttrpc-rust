@@ -367,7 +367,14 @@ impl Server {
                                 .map(|mut cn| {
                                     cn.handler.take().map(|handler| {
                                         handler.join().unwrap();
-                                        close(fd).unwrap();
+                                        close(fd)
+                                            .map_err(|e| {
+                                                warn!(
+                                                    "close connection fd: {} failed: {:?}",
+                                                    fd, e
+                                                );
+                                            })
+                                            .ok();
                                     })
                                 });
                         }
