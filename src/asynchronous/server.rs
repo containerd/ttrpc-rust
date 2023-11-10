@@ -101,6 +101,15 @@ impl Server {
         Ok(self.add_listener(listener))
     }
 
+    #[cfg(unix)]
+    /// # Safety
+    /// The file descriptor must represent a unix listener.
+    pub unsafe fn add_tcp_listener(self, fd: RawFd) -> Result<Server> {
+        let listener = Listener::from_raw_tcp_listener_fd(fd)
+            .map_err(err_to_others_err!(e, "from_raw_tcp_listener_fd error"))?;
+        Ok(self.add_listener(listener))
+    }
+
     #[cfg(any(target_os = "linux", target_os = "android"))]
     /// # Safety
     /// The file descriptor must represent a vsock listener.
