@@ -363,6 +363,10 @@ impl Server {
                             continue;
                         }
                         Ok(Some(conn)) => Arc::new(conn),
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                            error!("got interruption {:?}.  Continue...", e);
+                            continue;
+                        }
                         Err(e) => {
                             error!("listener accept got {:?}", e);
                             break;
