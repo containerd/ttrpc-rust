@@ -27,6 +27,8 @@ use crate::r#async::stream::{
 };
 use crate::r#async::utils;
 
+use super::stream::SendingMessage;
+
 /// A ttrpc Client (async).
 #[derive(Clone)]
 pub struct Client {
@@ -78,7 +80,7 @@ impl Client {
         self.streams.lock().unwrap().insert(stream_id, tx);
 
         self.req_tx
-            .send(msg)
+            .send(SendingMessage::new(msg))
             .await
             .map_err(|e| Error::Others(format!("Send packet to sender error {e:?}")))?;
 
@@ -139,7 +141,7 @@ impl Client {
         // TODO: check return
         self.streams.lock().unwrap().insert(stream_id, tx);
         self.req_tx
-            .send(msg)
+            .send(SendingMessage::new(msg))
             .await
             .map_err(|e| Error::Others(format!("Send packet to sender error {e:?}")))?;
 
@@ -204,7 +206,7 @@ struct ClientWriter {
 
 #[async_trait]
 impl WriterDelegate for ClientWriter {
-    async fn recv(&mut self) -> Option<GenMessage> {
+    async fn recv(&mut self) -> Option<SendingMessage> {
         self.rx.recv().await
     }
 
