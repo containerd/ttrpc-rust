@@ -12,7 +12,6 @@ jobs:
         uses: actions/checkout@v3
       - name: Check
         run: |
-          make deps
           make check
           make -C compiler check
           make -C ttrpc-codegen check
@@ -28,7 +27,6 @@ jobs:
         uses: actions/checkout@v3
       - name: Build
         run: |
-          make deps
           make
           make -C compiler
           make -C ttrpc-codegen
