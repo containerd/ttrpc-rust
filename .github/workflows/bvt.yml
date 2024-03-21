@@ -12,9 +12,7 @@ jobs:
         uses: actions/checkout@v3
       - name: Check
         run: |
-          make check
-          make -C compiler check
-          make -C ttrpc-codegen check
+          make check-all
 
   make:
     name: Build
