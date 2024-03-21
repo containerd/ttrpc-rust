@@ -305,7 +305,7 @@ mod test {
         });
         notifier.shutdown();
         // Elapsed
-        assert!(matches!(notifier.wait_all_exit().await, Err(_)));
+        assert!(notifier.wait_all_exit().await.is_err());
         task.await.unwrap();
     }
 }

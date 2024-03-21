@@ -112,7 +112,7 @@ impl PipeListener {
                 let res = unsafe {GetOverlappedResult(np.named_pipe, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
                 match res {
                     0 => {
-                        return Err(io::Error::last_os_error());
+                        Err(io::Error::last_os_error())
                     }
                     _ => {
                         if let Some(shutdown_signal) = self.handle_shutdown(&np) {
@@ -129,10 +129,10 @@ impl PipeListener {
                 Ok(Some(np))
             }
             e => {
-                return Err(io::Error::new(
+                Err(io::Error::new(
                     io::ErrorKind::Other,
                     format!("failed to connect pipe: {:?}", e),
-                ));
+                ))
             }
         }
     }
@@ -165,12 +165,12 @@ impl PipeListener {
         // https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights
         match  unsafe { CreateNamedPipeW(name.as_ptr(), open_mode, PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, PIPE_UNLIMITED_INSTANCES, PIPE_BUFFER_SIZE, PIPE_BUFFER_SIZE, 0, std::ptr::null_mut())} {
             INVALID_HANDLE_VALUE => {
-                return Err(io::Error::last_os_error())
+                Err(io::Error::last_os_error())
             }
             h => {
-                return Ok(h)
+                Ok(h)
             },
-        };
+        }
     }
 
     pub fn close(&self) -> Result<()> {
@@ -208,8 +208,8 @@ impl PipeConnection {
         let write_event = create_event()?;
         Ok(PipeConnection {
             named_pipe: h,
-            read_event: read_event,
-            write_event: write_event,
+            read_event,
+            write_event,
         })
     }
 
@@ -236,15 +236,15 @@ impl PipeConnection {
                 let res = unsafe {GetOverlappedResult(self.named_pipe, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
                 match res {
                     0 => {
-                        return Err(handle_windows_error(io::Error::last_os_error()))
+                        Err(handle_windows_error(io::Error::last_os_error()))
                     }
                     _ => {
-                        return Ok(bytes_transfered as usize)
+                        Ok(bytes_transfered as usize)
                     }
                 }
             }
             ref e => {
-                return Err(Error::Others(format!("failed to read from pipe: {:?}", e)))
+                Err(Error::Others(format!("failed to read from pipe: {:?}", e)))
             }
         }
     }
@@ -267,15 +267,15 @@ impl PipeConnection {
                 let res = unsafe {GetOverlappedResult(self.named_pipe, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
                 match res {
                     0 => {
-                        return Err(handle_windows_error(io::Error::last_os_error()))
+                        Err(handle_windows_error(io::Error::last_os_error()))
                     }
                     _ => {
-                        return Ok(bytes_transfered as usize)
+                        Ok(bytes_transfered as usize)
                     }
                 }
             }
             ref e => {
-                return Err(Error::Others(format!("failed to write to pipe: {:?}", e)))
+                Err(Error::Others(format!("failed to write to pipe: {:?}", e)))
             }
         }
     }
@@ -346,10 +346,10 @@ impl ClientConnection {
             .custom_flags(FILE_FLAG_OVERLAPPED);
         match opts.open(self.address.as_str()) {
             Ok(file) => {
-                return PipeConnection::new(file.into_raw_handle() as isize)
+                PipeConnection::new(file.into_raw_handle() as isize)
             }
             Err(e) => {
-                return Err(handle_windows_error(e))
+                Err(handle_windows_error(e))
             }
         }
     }
@@ -383,7 +383,7 @@ mod test {
         let client = ClientConnection::new("non_existent_pipe");
         match client.get_pipe_connection() {
             Ok(_) => {
-                assert!(false, "should not be able to get a connection to a non existent pipe");
+                panic!("should not be able to get a connection to a non existent pipe");
             }
             Err(e) => {
                 assert_eq!(e, Error::Windows(ERROR_FILE_NOT_FOUND as i32));
@@ -404,10 +404,10 @@ mod test {
                     // pipe is working
                 }
                 Ok(None) => {
-                    assert!(false, "should get a working pipe")
+                    panic!("should get a working pipe")
                 }
                 Err(e) => {
-                    assert!(false, "should not get error {}", e.to_string())
+                    panic!("should not get error {}", e)
                 }
             }
         });
@@ -425,7 +425,7 @@ mod test {
             let quit_flag = Arc::new(AtomicBool::new(false));
             match listener_server.accept(&quit_flag) {
                 Ok(_) => {
-                    assert!(false, "should not get pipe on close")
+                    panic!("should not get pipe on close")
                 }
                 Err(e) => {
                     assert_eq!(e.to_string(), "closing pipe")
