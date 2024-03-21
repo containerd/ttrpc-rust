@@ -32,3 +32,9 @@ endif
 check:
 	cargo fmt --all -- --check
 	cargo clippy --all-targets --all-features -- -D warnings
+
+.PHONY: check-all
+check-all:
+	$(MAKE) check
+	$(MAKE) -C compiler check
+	$(MAKE) -C ttrpc-codegen check
