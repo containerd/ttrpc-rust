@@ -9,6 +9,7 @@ readme = "README.md"
 repository = "https://github.com/containerd/ttrpc-rust"
 homepage = "https://github.com/containerd/ttrpc-rust"
 description = "A Rust version of ttrpc."
+rust-version = "1.70"
 
 [dependencies]
 protobuf = { version = "3.1.0" }
