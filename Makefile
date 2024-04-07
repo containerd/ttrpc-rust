@@ -1,5 +1,3 @@
-RUST_VERSION = 1.66
-
 all: debug test
 
 #
@@ -35,8 +33,8 @@ check:
 	cargo fmt --all -- --check
 	cargo clippy --all-targets --all-features -- -D warnings
 
-.PHONY: deps
-deps:
-	rustup install $(RUST_VERSION)
-	rustup default $(RUST_VERSION)
-	rustup component add rustfmt clippy
+.PHONY: check-all
+check-all:
+	$(MAKE) check
+	$(MAKE) -C compiler check
+	$(MAKE) -C ttrpc-codegen check

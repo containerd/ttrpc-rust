@@ -8,18 +8,13 @@ use crate::str_lit::StrLit;
 use protobuf_support::lexer::float;
 
 /// Protobox syntax
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
 pub enum Syntax {
     /// Protobuf syntax [2](https://developers.google.com/protocol-buffers/docs/proto) (default)
+    #[default]
     Proto2,
     /// Protobuf syntax [3](https://developers.google.com/protocol-buffers/docs/proto3)
     Proto3,
-}
-
-impl Default for Syntax {
-    fn default() -> Syntax {
-        Syntax::Proto2
-    }
 }
 
 /// A field rule

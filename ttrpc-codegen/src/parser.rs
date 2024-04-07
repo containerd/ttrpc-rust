@@ -387,11 +387,11 @@ impl<'a> Lexer<'a> {
 
     // capitalLetter =  "A" … "Z"
     fn _next_capital_letter_opt(&mut self) -> Option<char> {
-        self.next_char_if(|c| ('A'..='Z').contains(&c))
+        self.next_char_if(|c| c.is_ascii_uppercase())
     }
 
     fn is_ascii_alphanumeric(c: char) -> bool {
-        ('a'..='z').contains(&c) || ('A'..='Z').contains(&c) || ('0'..='9').contains(&c)
+        c.is_ascii_lowercase() || c.is_ascii_uppercase() || c.is_ascii_digit()
     }
 
     fn next_ident_part(&mut self) -> Option<char> {
@@ -417,7 +417,7 @@ impl<'a> Lexer<'a> {
     // Integer literals
 
     fn is_ascii_hexdigit(c: char) -> bool {
-        ('0'..='9').contains(&c) || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
+        c.is_ascii_digit() || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
     }
 
     // hexLit     = "0" ( "x" | "X" ) hexDigit { hexDigit }
@@ -433,7 +433,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn is_ascii_digit(c: char) -> bool {
-        ('0'..='9').contains(&c)
+        c.is_ascii_digit()
     }
 
     // decimalLit = ( "1" … "9" ) { decimalDigit }
@@ -458,7 +458,7 @@ impl<'a> Lexer<'a> {
     fn next_hex_digit(&mut self) -> ParserResult<u32> {
         let mut clone = *self;
         let r = match clone.next_char()? {
-            c if ('0'..='9').contains(&c) => c as u32 - b'0' as u32,
+            c if c.is_ascii_digit() => c as u32 - b'0' as u32,
             c if ('A'..='F').contains(&c) => c as u32 - b'A' as u32 + 10,
             c if ('a'..='f').contains(&c) => c as u32 - b'a' as u32 + 10,
             _ => return Err(ParserError::ExpectHexDigit),
@@ -482,7 +482,7 @@ impl<'a> Lexer<'a> {
     fn next_decimal_digit(&mut self) -> ParserResult<u32> {
         let mut clone = *self;
         let r = match clone.next_char()? {
-            c if ('0'..='9').contains(&c) => c as u32 - '0' as u32,
+            c if c.is_ascii_digit() => c as u32 - '0' as u32,
             _ => return Err(ParserError::ExpectDecDigit),
         };
         *self = clone;
@@ -492,7 +492,7 @@ impl<'a> Lexer<'a> {
     // decimals  = decimalDigit { decimalDigit }
     fn next_decimal_digits(&mut self) -> ParserResult<()> {
         self.next_decimal_digit()?;
-        self.take_while(|c| ('0'..='9').contains(&c));
+        self.take_while(|c| c.is_ascii_digit());
         Ok(())
     }
 
@@ -1029,7 +1029,7 @@ impl<'a> Parser<'a> {
     }
 
     fn is_ascii_uppercase(c: char) -> bool {
-        ('A'..='Z').contains(&c)
+        c.is_ascii_uppercase()
     }
 
     // groupName = capitalLetter { letter | decimalDigit | "_" }
