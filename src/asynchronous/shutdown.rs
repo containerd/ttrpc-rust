@@ -144,22 +144,23 @@ impl Notifier {
     /// Wait for all [`Waiter`]s to drop.
     pub async fn wait_all_exit(&self) -> Result<(), Elapsed> {
         //debug_assert!(self.shared.is_shutdown());
-        if self.waiters() == 0 {
-            return Ok(());
+        if let Some(tm) = self.wait_time {
+            timeout(tm, self.wait()).await
+        } else {
+            self.wait().await;
+            Ok(())
         }
-        let wait = self.wait();
-        if self.waiters() == 0 {
-            return Ok(());
-        }
-        wait.await
     }
 
-    async fn wait(&self) -> Result<(), Elapsed> {
-        if let Some(tm) = self.wait_time {
-            timeout(tm, self.shared.notify_exit.notified()).await
-        } else {
-            self.shared.notify_exit.notified().await;
-            Ok(())
+    async fn wait(&self) {
+        while self.waiters() > 0 {
+            let notified = self.shared.notify_exit.notified();
+            if self.waiters() == 0 {
+                return;
+            }
+            notified.await;
+            // Some waiters could have been created in the meantime 
+            // by calling `subscribe`, loop again
         }
     }
 }
