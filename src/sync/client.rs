@@ -62,7 +62,7 @@ impl Client {
 
     fn new_client(pipe_client: ClientConnection) -> Result<Client> {
         let client = Arc::new(pipe_client);
-
+        let weak_client = Arc::downgrade(&client);
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
 
@@ -98,20 +98,28 @@ impl Client {
             trace!("Sender quit");
         });
 
-        //Recver
+        //Reciver
         let receiver_connection = connection;
-        let receiver_client = client.clone();
+        //this thread should use weak arc for ClientConnection, otherwise the thread will occupy a reference count of ClientConnection's arc,
+        //ClientConnection's drop will be not call until the thread finished. It means if all the external references are finished,
+        //this thread should be release.
+        let receiver_client = weak_client.clone();
         thread::spawn(move || {
             loop {
-                match receiver_client.ready() {
-                    Ok(None) => {
-                        continue;
+                //The count of ClientConnection's Arc will be add one , and back to original value when this code ends. 
+                if let Some(receiver_client) = receiver_client.upgrade(){
+                    match receiver_client.ready() {
+                        Ok(None) => {
+                            continue;
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("pipeConnection ready error {:?}", e);
+                            break;
+                        }
                     }
-                    Ok(_) => {}
-                    Err(e) => {
-                        error!("pipeConnection ready error {:?}", e);
-                        break;
-                    }
+                } else {
+                    break;
                 }
 
                 match read_message(&receiver_connection) {
@@ -139,10 +147,6 @@ impl Client {
                     },
                 };
             }
-
-            let _ = receiver_client
-                .close_receiver()
-                .map_err(|e| warn!("failed to close with error: {:?}", e));
 
             trace!("Receiver quit");
         });
@@ -191,7 +195,9 @@ impl Client {
 
 impl Drop for ClientConnection {
     fn drop(&mut self) {
+        //close all fd , make sure all fd have been release
         self.close().unwrap();
+        self.close_receiver().unwrap();
         trace!("Client is dropped");
     }
 }

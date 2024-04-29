@@ -28,6 +28,9 @@ use crate::common::{self, client_connect, SOCK_CLOEXEC};
 use crate::common::set_fd_close_exec;
 use nix::sys::socket::{self};
 
+//The libc::poll's max wait time
+const POLL_MAX_TIME: i32 = 10;
+
 pub struct PipeListener {
     fd: RawFd,
     monitor_fd: (RawFd, RawFd),
@@ -104,7 +107,7 @@ impl PipeListener {
             libc::poll(
                 pollers as *mut _ as *mut libc::pollfd,
                 pollers.len() as _,
-                -1,
+                POLL_MAX_TIME,
             )
         };
 
@@ -278,7 +281,7 @@ impl ClientConnection {
             libc::poll(
                 pollers as *mut _ as *mut libc::pollfd,
                 pollers.len() as _,
-                -1,
+                POLL_MAX_TIME,
             )
         };
 
