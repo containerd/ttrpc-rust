@@ -65,7 +65,7 @@ impl PipeListener {
     }
 
     fn new_monitor_fd() ->  Result<(i32, i32)> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         let fds = pipe2(nix::fcntl::OFlag::O_CLOEXEC)?;
  
         
@@ -131,7 +131,7 @@ impl PipeListener {
             return Err(io::Error::new(io::ErrorKind::Other, "listener shutdown for quit flag"));
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         let fd = match accept4(self.fd, SockFlag::SOCK_CLOEXEC) {
             Ok(fd) => fd,
             Err(e) => {
