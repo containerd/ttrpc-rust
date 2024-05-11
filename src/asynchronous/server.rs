@@ -327,13 +327,14 @@ impl Builder for ServerBuilder {
                 server_shutdown: self.shutdown_waiter.clone(),
                 handler_shutdown: disconnect_notifier,
             },
-            ServerWriter { rx },
+            ServerWriter { rx, _server_shutdown: self.shutdown_waiter.clone() },
         )
     }
 }
 
 struct ServerWriter {
     rx: MessageReceiver,
+    _server_shutdown: shutdown::Waiter
 }
 
 #[async_trait]
