@@ -16,6 +16,8 @@ use tokio::{
 use crate::error::Error;
 use crate::proto::{GenMessage, GenMessageError, MessageHeader};
 
+use super::stream::SendingMessage;
+
 pub trait Builder {
     type Reader;
     type Writer;
@@ -25,7 +27,7 @@ pub trait Builder {
 
 #[async_trait]
 pub trait WriterDelegate {
-    async fn recv(&mut self) -> Option<GenMessage>;
+    async fn recv(&mut self) -> Option<SendingMessage>;
     async fn disconnect(&self, msg: &GenMessage, e: Error);
     async fn exit(&self);
 }
@@ -58,12 +60,14 @@ where
         let (reader_delegate, mut writer_delegate) = builder.build();
 
         let writer_task = tokio::spawn(async move {
-            while let Some(msg) = writer_delegate.recv().await {
-                trace!("write message: {:?}", msg);
-                if let Err(e) = msg.write_to(&mut writer).await {
+            while let Some(mut sending_msg) = writer_delegate.recv().await {
+                trace!("write message: {:?}", sending_msg.msg);
+                if let Err(e) = sending_msg.msg.write_to(&mut writer).await {
                     error!("write_message got error: {:?}", e);
-                    writer_delegate.disconnect(&msg, e).await;
+                    sending_msg.send_result(Err(e.clone()));
+                    writer_delegate.disconnect(&sending_msg.msg, e).await;
                 }
+                sending_msg.send_result(Ok(()));
             }
             writer_delegate.exit().await;
             trace!("Writer task exit.");
