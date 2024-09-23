@@ -21,8 +21,6 @@ use std::os::unix::prelude::AsRawFd;
 use nix::Error;
 
 use nix::unistd::*;
-use std::sync::{Arc};
-use std::sync::atomic::{AtomicBool, Ordering};
 use crate::common::{self, client_connect, SOCK_CLOEXEC};
 #[cfg(target_os = "macos")] 
 use crate::common::set_fd_close_exec;
@@ -84,11 +82,7 @@ impl PipeListener {
     // - Ok(Some(PipeConnection)) if a new connection is established
     // - Ok(None) if spurious wake up with no new connection
     // - Err(io::Error) if there is an error and listener loop should be shutdown
-    pub(crate) fn accept( &self, quit_flag: &Arc<AtomicBool>) ->  std::result::Result<Option<PipeConnection>, io::Error> {
-        if quit_flag.load(Ordering::SeqCst) {
-            return Err(io::Error::new(io::ErrorKind::Other, "listener shutdown for quit flag"));
-        }
-        
+    pub(crate) fn accept(&self) -> std::result::Result<Option<PipeConnection>, io::Error> {
         let mut pollers = vec![
             libc::pollfd {
                 fd: self.monitor_fd.0,
@@ -125,10 +119,6 @@ impl PipeListener {
 
         if pollers[0].revents != 0 || pollers[pollers.len() - 1].revents == 0 {
             return Ok(None);
-        }
-
-        if quit_flag.load(Ordering::SeqCst) {
-            return Err(io::Error::new(io::ErrorKind::Other, "listener shutdown for quit flag"));
         }
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
