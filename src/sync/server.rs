@@ -385,7 +385,11 @@ impl Server {
             .spawn(move || {
                 loop {   
                     trace!("listening...");
-                    let pipe_connection = match listener.accept(&listener_quit_flag) {
+                    if listener_quit_flag.load(Ordering::SeqCst) {
+                        info!("listener shutdown for quit flag");
+                        break;
+                    }
+                    let pipe_connection = match listener.accept() {
                         Ok(None) => {
                             continue;
                         }
@@ -394,7 +398,7 @@ impl Server {
                         }
                         Err(e) => {
                             error!("listener accept got {:?}", e);
-                            break;
+                            continue;
                         }
                     };
 
