@@ -427,7 +427,7 @@ impl Server {
                         Ok(fd) => fd,
                         Err(e) => {
                             error!("failed to accept error {:?}", e);
-                            break;
+                            continue;
                         }
                     };
 
@@ -439,13 +439,13 @@ impl Server {
                         Ok(fd) => {
                             if let Err(err) = set_fd_close_exec(fd) {
                                 error!("fcntl failed after accept: {:?}", err);
-                                break;
+                                continue;
                             };
                             fd
                         }
                         Err(e) => {
                             error!("failed to accept error {:?}", e);
-                            break;
+                            continue;
                         }
                     };
 
