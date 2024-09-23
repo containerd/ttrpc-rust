@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use nix::unistd::close;
 use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
@@ -155,19 +154,6 @@ impl Client {
         }
 
         Ok(res)
-    }
-}
-
-struct ClientClose {
-    fd: RawFd,
-    close_fd: RawFd,
-}
-
-impl Drop for ClientClose {
-    fn drop(&mut self) {
-        close(self.close_fd).unwrap();
-        close(self.fd).unwrap();
-        trace!("All client is droped");
     }
 }
 
