@@ -17,11 +17,41 @@ use crate::proto::{
     MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
 };
 
-pub type MessageSender = mpsc::Sender<GenMessage>;
-pub type MessageReceiver = mpsc::Receiver<GenMessage>;
+pub type MessageSender = mpsc::Sender<SendingMessage>;
+pub type MessageReceiver = mpsc::Receiver<SendingMessage>;
 
 pub type ResultSender = mpsc::Sender<Result<GenMessage>>;
 pub type ResultReceiver = mpsc::Receiver<Result<GenMessage>>;
+
+#[derive(Debug)]
+pub struct SendingMessage {
+    pub msg: GenMessage,
+    pub result_chan: Option<tokio::sync::oneshot::Sender<Result<()>>>,
+}
+
+impl SendingMessage {
+    pub fn new(msg: GenMessage) -> Self {
+        Self {
+            msg,
+            result_chan: None,
+        }
+    }
+    pub fn new_with_result(
+        msg: GenMessage,
+        result_chan: tokio::sync::oneshot::Sender<Result<()>>,
+    ) -> Self {
+        Self {
+            msg,
+            result_chan: Some(result_chan),
+        }
+    }
+
+    pub fn send_result(&mut self, result: Result<()>) {
+        if let Some(result_ch) = self.result_chan.take() {
+            result_ch.send(result).unwrap_or_default();
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct ClientStream<Q, P> {
@@ -317,9 +347,13 @@ async fn _recv(rx: &mut ResultReceiver) -> Result<GenMessage> {
 }
 
 async fn _send(tx: &MessageSender, msg: GenMessage) -> Result<()> {
-    tx.send(msg)
+    let (res_tx, res_rx) = tokio::sync::oneshot::channel();
+    tx.send(SendingMessage::new_with_result(msg, res_tx))
         .await
-        .map_err(|e| Error::Others(format!("Send data packet to sender error {e:?}")))
+        .map_err(|e| Error::Others(format!("Send data packet to sender error {:?}", e)))?;
+    res_rx
+        .await
+        .map_err(|e| Error::Others(format!("Failed to wait send result {:?}", e)))?
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
