@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! API to generate .rs files for ttrpc from protobuf
 //!
 //!
