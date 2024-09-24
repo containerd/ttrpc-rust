@@ -23,7 +23,6 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::{IntoRawHandle};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc};
 use std::{io};
 
 use windows_sys::Win32::Foundation::{ CloseHandle, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE };
@@ -75,14 +74,7 @@ impl PipeListener {
     // accept returns:
     // - Ok(Some(PipeConnection)) if a new connection is established
     // - Err(io::Error) if there is an error and listener loop should be shutdown
-    pub(crate) fn accept(&self, quit_flag: &Arc<AtomicBool>) -> std::result::Result<Option<PipeConnection>, io::Error> {
-        if quit_flag.load(Ordering::SeqCst) {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "listener shutdown for quit flag",
-            ));
-        }
-
+    pub(crate) fn accept(&self) -> std::result::Result<Option<PipeConnection>, io::Error> {
         // Create a new pipe instance for every new client
         let instance = self.new_instance()?;
         let np = match PipeConnection::new(instance) {
@@ -376,6 +368,7 @@ fn handle_windows_error(e: io::Error) -> Error {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::sync::Arc;
     use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
 
     #[test]
@@ -398,8 +391,7 @@ mod test {
 
         let listener_server = listener.clone();
         let thread = std::thread::spawn(move || {
-            let quit_flag = Arc::new(AtomicBool::new(false));
-            match listener_server.accept(&quit_flag) {
+            match listener_server.accept() {
                 Ok(Some(_)) => {
                     // pipe is working
                 }
@@ -422,8 +414,7 @@ mod test {
 
         let listener_server = listener.clone();
         let thread = std::thread::spawn(move || {
-            let quit_flag = Arc::new(AtomicBool::new(false));
-            match listener_server.accept(&quit_flag) {
+            match listener_server.accept() {
                 Ok(_) => {
                     panic!("should not get pipe on close")
                 }
