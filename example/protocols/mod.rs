@@ -4,6 +4,4 @@
 //
 #[cfg(unix)]
 pub mod asynchronous;
-#[cfg(unix)]
-pub use asynchronous as r#async;
 pub mod sync;

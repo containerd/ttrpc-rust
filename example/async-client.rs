@@ -6,7 +6,7 @@
 mod protocols;
 mod utils;
 #[cfg(unix)]
-use protocols::r#async::{agent, agent_ttrpc, health, health_ttrpc};
+use protocols::asynchronous::{agent, agent_ttrpc, health, health_ttrpc};
 use ttrpc::context::{self, Context};
 #[cfg(unix)]
 use ttrpc::r#async::Client;

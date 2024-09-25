@@ -145,7 +145,7 @@ impl<'a> MethodGen<'a> {
             "}",
             |w| {
                 w.write_line(&format!(
-                    "service: Arc<Box<dyn {} + Send + Sync>>,",
+                    "service: Arc<dyn {} + Send + Sync>,",
                     self.service_name
                 ));
             },
@@ -558,7 +558,7 @@ impl<'a> ServiceGen<'a> {
     fn write_sync_server_create(&self, w: &mut CodeWriter) {
         let method_handler_name = "::ttrpc::MethodHandler";
         let s = format!(
-            "create_{}(service: Arc<Box<dyn {} + Send + Sync>>) -> HashMap<String, Box<dyn {} + Send + Sync>>",
+            "create_{}(service: Arc<dyn {} + Send + Sync>) -> HashMap<String, Box<dyn {} + Send + Sync>>",
             to_snake_case(&self.service_name()),
             self.service_name(),
             method_handler_name,
@@ -577,7 +577,7 @@ impl<'a> ServiceGen<'a> {
 
     fn write_async_server_create(&self, w: &mut CodeWriter) {
         let s = format!(
-            "create_{}(service: Arc<Box<dyn {} + Send + Sync>>) -> HashMap<String, {}>",
+            "create_{}(service: Arc<dyn {} + Send + Sync>) -> HashMap<String, {}>",
             to_snake_case(&self.service_name()),
             self.service_name(),
             "::ttrpc::r#async::Service"
@@ -642,7 +642,6 @@ fn write_generated_common(w: &mut CodeWriter) {
     w.write_line("#![cfg_attr(rustfmt, rustfmt_skip)]");
     w.write_line("#![allow(unknown_lints)]");
     w.write_line("#![allow(clipto_camel_casepy)]");
-    w.write_line("#![allow(box_pointers)]");
     w.write_line("#![allow(dead_code)]");
     w.write_line("#![allow(missing_docs)]");
     w.write_line("#![allow(non_camel_case_types)]");

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use log::LevelFilter;
 
 #[cfg(unix)]
-use protocols::r#async::{agent, agent_ttrpc, health, health_ttrpc, types};
+use protocols::asynchronous::{agent, agent_ttrpc, health, health_ttrpc, types};
 #[cfg(unix)]
 use ttrpc::asynchronous::Server;
 use ttrpc::error::{Error, Result};
@@ -97,13 +97,8 @@ fn main() {
 async fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
 
-    let h = Box::new(HealthService {}) as Box<dyn health_ttrpc::Health + Send + Sync>;
-    let h = Arc::new(h);
-    let hservice = health_ttrpc::create_health(h);
-
-    let a = Box::new(AgentService {}) as Box<dyn agent_ttrpc::AgentService + Send + Sync>;
-    let a = Arc::new(a);
-    let aservice = agent_ttrpc::create_agent_service(a);
+    let hservice = health_ttrpc::create_health(Arc::new(HealthService {}));
+    let aservice = agent_ttrpc::create_agent_service(Arc::new(AgentService {}));
 
     utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
 
