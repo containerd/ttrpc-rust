@@ -101,7 +101,7 @@ impl PipeListener {
             libc::poll(
                 pollers as *mut _ as *mut libc::pollfd,
                 pollers.len() as _,
-                POLL_MAX_TIME,
+                -1,
             )
         };
 
