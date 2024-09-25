@@ -81,14 +81,8 @@ impl agent_ttrpc::AgentService for AgentService {
 
 fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
-
-    let h = Box::new(HealthService {}) as Box<dyn health_ttrpc::Health + Send + Sync>;
-    let h = Arc::new(h);
-    let hservice = health_ttrpc::create_health(h);
-
-    let a = Box::new(AgentService {}) as Box<dyn agent_ttrpc::AgentService + Send + Sync>;
-    let a = Arc::new(a);
-    let aservice = agent_ttrpc::create_agent_service(a);
+    let hservice = health_ttrpc::create_health(Arc::new(HealthService {}));
+    let aservice = agent_ttrpc::create_agent_service(Arc::new(AgentService {}));
 
     utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
     let mut server = Server::new()

@@ -6,7 +6,7 @@
 mod protocols;
 mod utils;
 #[cfg(unix)]
-use protocols::r#async::{empty, streaming, streaming_ttrpc};
+use protocols::asynchronous::{empty, streaming, streaming_ttrpc};
 use ttrpc::context::{self, Context};
 #[cfg(unix)]
 use ttrpc::r#async::Client;

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use log::{info, LevelFilter};
 
 #[cfg(unix)]
-use protocols::r#async::{empty, streaming, streaming_ttrpc};
+use protocols::asynchronous::{empty, streaming, streaming_ttrpc};
 #[cfg(unix)]
 use ttrpc::{asynchronous::Server, Error};
 
@@ -163,11 +163,7 @@ fn main() {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     simple_logging::log_to_stderr(LevelFilter::Info);
-
-    let s = Box::new(StreamingService {}) as Box<dyn streaming_ttrpc::Streaming + Send + Sync>;
-    let s = Arc::new(s);
-    let service = streaming_ttrpc::create_streaming(s);
-
+    let service = streaming_ttrpc::create_streaming(Arc::new(StreamingService {}));
     utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
 
     let mut server = Server::new()

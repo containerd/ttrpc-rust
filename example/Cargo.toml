@@ -51,3 +51,7 @@ path = "./async-stream-client.rs"
 
 [build-dependencies]
 ttrpc-codegen = { path = "../ttrpc-codegen"}
+
+[patch.crates-io]
+ttrpc-compiler = { path = "../compiler"}
+
