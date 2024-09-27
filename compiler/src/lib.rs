@@ -36,4 +36,6 @@ pub struct Customize {
     pub async_client: bool,
     /// Indicates whether to generate async code for server.
     pub async_server: bool,
+    /// Gen mod rs in mod.rs
+    pub gen_mod: bool,
 }

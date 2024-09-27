@@ -6,5 +6,4 @@ Cargo.lock
 .idea
 *.o
 example/protocols/**/*.rs
-!example/protocols/**/mod.rs
 src/ttrpc.rs

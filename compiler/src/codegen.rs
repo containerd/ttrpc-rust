@@ -36,7 +36,11 @@
 
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    io::BufRead,
+};
 
 use crate::Customize;
 use protobuf::{
@@ -722,6 +726,31 @@ pub fn gen_and_write(
     customize: &Customize,
 ) -> io::Result<()> {
     let results = gen(file_descriptors, files_to_generate, customize);
+
+    if customize.gen_mod {
+        let file_path = out_dir.join("mod.rs");
+        let mut set = HashSet::new();
+        //if mod file exists
+        if let Ok(file) = File::open(&file_path) {
+            let reader = io::BufReader::new(file);
+            reader.lines().for_each(|line| {
+                let _ = line.map(|r| set.insert(r));
+            });
+        }
+        let mut file_write = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&file_path)?;
+        for r in &results {
+            let prefix_name: Vec<&str> = r.name.split('.').collect();
+            set.insert(format!("pub mod {};", prefix_name[0]));
+        }
+        for item in &set {
+            writeln!(file_write, "{}", item)?;
+        }
+        file_write.flush()?;
+    }
 
     for r in &results {
         let mut file_path = out_dir.to_owned();
