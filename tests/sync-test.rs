@@ -1,6 +1,6 @@
 use std::{
     io::{BufRead, BufReader},
-    process::Command,
+    process::{Child, Command},
     time::Duration,
 };
 
@@ -22,13 +22,19 @@ fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {
             });
             let output = client.stdout.unwrap();
             BufReader::new(output).lines().for_each(|line| {
-                println!("{}", line.unwrap());
+                println!("client output: {}", line.unwrap());
             });
             break;
         }
 
         match client.try_wait() {
             Ok(Some(status)) => {
+                println!(
+                    "Client exited with status: {:?} success {}",
+                    &status,
+                    &status.success()
+                );
+                wait_with_output("client", client);
                 client_succeeded = status.success();
                 break;
             }
@@ -45,6 +51,7 @@ fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {
 
     // be sure to clean up the server, the client should have run to completion
     server.kill()?;
+    wait_with_output("server", server);
     assert!(client_succeeded);
     Ok(())
 }
@@ -58,4 +65,19 @@ fn run_example(example: &str) -> Command {
         .stderr(std::process::Stdio::piped())
         .current_dir("example");
     cmd
+}
+
+fn wait_with_output(name: &str, cmd: Child) {
+    if let Ok(output) = cmd.wait_with_output() {
+        println!("==== {name} output begin");
+        println!("==== stdout:");
+        output.stdout.lines().for_each(|line| {
+            println!("{}", line.unwrap());
+        });
+        println!("==== stderr:");
+        output.stderr.lines().for_each(|line| {
+            println!("{}", line.unwrap());
+        });
+        println!("==== {name} output end");
+    }
 }
