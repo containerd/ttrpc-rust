@@ -53,7 +53,10 @@ fn main() {
                 panic!("not expecting an error from the example server: {:?}", e)
             }
             Ok(x) => {
-                panic!("not expecting a OK response from the example server: {:?}", x)
+                panic!(
+                    "not expecting a OK response from the example server: {:?}",
+                    x
+                )
             }
         }
         println!(
@@ -107,7 +110,10 @@ fn main() {
             panic!("not expecting an error from the example server: {:?}", e)
         }
         Ok(s) => {
-            panic!("not expecting a OK response from the example server: {:?}", s)
+            panic!(
+                "not expecting a OK response from the example server: {:?}",
+                s
+            )
         }
     };
     println!(
