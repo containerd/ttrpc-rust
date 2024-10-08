@@ -23,7 +23,36 @@ use ttrpc::error::Error;
 use ttrpc::proto::Code;
 use ttrpc::Client;
 
+#[cfg(not(target_os = "linux"))]
+fn get_fd_count() -> usize {
+    // currently not support get fd count
+    0
+}
+
+#[cfg(target_os = "linux")]
+fn get_fd_count() -> usize {
+    let path = "/proc/self/fd";
+    let count = std::fs::read_dir(path).unwrap().count();
+    println!("get fd count {}", count);
+    count
+}
+
 fn main() {
+    connect_once();
+    let expected_fd_count = get_fd_count();
+
+    // connect 3 times and check the fd leak.
+    for index in 0..3 {
+        connect_once();
+        let current_fd_count = get_fd_count();
+        assert_eq!(
+            expected_fd_count, current_fd_count,
+            "check fd count in {index}"
+        );
+    }
+}
+
+fn connect_once() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
 
     let c = Client::connect(utils::SOCK_ADDR).unwrap();
