@@ -29,7 +29,7 @@ fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {
 
         match client.try_wait() {
             Ok(Some(status)) => {
-                client_succeeded = status.success();
+                client_succeeded = false;
                 break;
             }
             Ok(None) => {

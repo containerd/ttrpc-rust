@@ -29,6 +29,7 @@ jobs:
           make -C compiler
           make -C ttrpc-codegen
           make -C example build-examples
+        shell: bash
 
   deny:
     runs-on: ubuntu-latest
