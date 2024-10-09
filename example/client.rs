@@ -18,12 +18,36 @@ mod utils;
 use log::LevelFilter;
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
+use std::time::Duration;
 use ttrpc::context::{self, Context};
 use ttrpc::error::Error;
 use ttrpc::proto::Code;
 use ttrpc::Client;
 
+#[cfg(not(target_os = "linux"))]
+fn get_fd_count() -> usize {
+    // currently not support get fd count
+    0
+}
+
+#[cfg(target_os = "linux")]
+fn get_fd_count() -> usize {
+    let path = "/proc/self/fd";
+    let count = std::fs::read_dir(path).unwrap().count();
+    println!("get fd count {}", count);
+    count
+}
+
 fn main() {
+    let expected_fd_count = get_fd_count();
+    connect_once();
+    // Give some time for fd to be released in the other thread
+    thread::sleep(Duration::from_secs(1));
+    let current_fd_count = get_fd_count();
+    assert_eq!(current_fd_count, expected_fd_count, "check fd count");
+}
+
+fn connect_once() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
 
     let c = Client::connect(utils::SOCK_ADDR).unwrap();
@@ -53,7 +77,10 @@ fn main() {
                 panic!("not expecting an error from the example server: {:?}", e)
             }
             Ok(x) => {
-                panic!("not expecting a OK response from the example server: {:?}", x)
+                panic!(
+                    "not expecting a OK response from the example server: {:?}",
+                    x
+                )
             }
         }
         println!(
@@ -107,7 +134,10 @@ fn main() {
             panic!("not expecting an error from the example server: {:?}", e)
         }
         Ok(s) => {
-            panic!("not expecting a OK response from the example server: {:?}", s)
+            panic!(
+                "not expecting a OK response from the example server: {:?}",
+                s
+            )
         }
     };
     println!(
@@ -115,9 +145,6 @@ fn main() {
         show,
         now.elapsed()
     );
-
-    println!("\nsleep 2 seconds ...\n");
-    thread::sleep(std::time::Duration::from_secs(2));
 
     let version = hc.version(default_ctx(), &health::CheckRequest::new());
     assert_eq!("mock.0.1", version.as_ref().unwrap().agent_version.as_str());
