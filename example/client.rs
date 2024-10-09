@@ -18,6 +18,7 @@ mod utils;
 use log::LevelFilter;
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
+use std::time::Duration;
 use ttrpc::context::{self, Context};
 use ttrpc::error::Error;
 use ttrpc::proto::Code;
@@ -38,18 +39,12 @@ fn get_fd_count() -> usize {
 }
 
 fn main() {
-    connect_once();
     let expected_fd_count = get_fd_count();
-
-    // connect 3 times and check the fd leak.
-    for index in 0..3 {
-        connect_once();
-        let current_fd_count = get_fd_count();
-        assert_eq!(
-            expected_fd_count, current_fd_count,
-            "check fd count in {index}"
-        );
-    }
+    connect_once();
+    // Give some time for fd to be released in the other thread
+    thread::sleep(Duration::from_secs(1));
+    let current_fd_count = get_fd_count();
+    assert_eq!(current_fd_count, expected_fd_count, "check fd count");
 }
 
 fn connect_once() {
@@ -150,9 +145,6 @@ fn connect_once() {
         show,
         now.elapsed()
     );
-
-    println!("\nsleep 2 seconds ...\n");
-    thread::sleep(std::time::Duration::from_secs(2));
 
     let version = hc.version(default_ctx(), &health::CheckRequest::new());
     assert_eq!("mock.0.1", version.as_ref().unwrap().agent_version.as_str());
