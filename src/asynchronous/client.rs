@@ -35,6 +35,7 @@ pub struct Client {
     req_tx: MessageSender,
     next_stream_id: Arc<AtomicU32>,
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
+    _client_close: Arc<ClientClose>,
 }
 
 impl Client {
@@ -47,6 +48,7 @@ impl Client {
     pub fn new(fd: RawFd) -> Client {
         let stream = utils::new_unix_stream_from_raw_fd(fd);
 
+        let client_close = Arc::new(ClientClose{fd});
         let (req_tx, rx): (MessageSender, MessageReceiver) = mpsc::channel(100);
 
         let req_map = Arc::new(Mutex::new(HashMap::new()));
@@ -62,6 +64,7 @@ impl Client {
             req_tx,
             next_stream_id: Arc::new(AtomicU32::new(1)),
             streams: req_map,
+            _client_close: client_close
         }
     }
 
@@ -164,12 +167,10 @@ impl Client {
 
 struct ClientClose {
     fd: RawFd,
-    close_fd: RawFd,
 }
 
 impl Drop for ClientClose {
     fn drop(&mut self) {
-        close(self.close_fd).unwrap();
         close(self.fd).unwrap();
         trace!("All client is droped");
     }
