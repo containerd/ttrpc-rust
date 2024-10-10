@@ -4,12 +4,15 @@
 //
 
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{Read, Write},
 };
 use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
 
 fn main() {
+    fs::create_dir_all("protocols/sync").unwrap();
+    fs::create_dir_all("protocols/asynchronous").unwrap();
+
     let mut protos = vec![
         "protocols/protos/github.com/gogo/protobuf/gogoproto/gogo.proto",
         "protocols/protos/github.com/kata-containers/agent/pkg/types/types.proto",
@@ -18,8 +21,7 @@ fn main() {
         "protocols/protos/google/protobuf/empty.proto",
         "protocols/protos/oci.proto",
     ];
-
-    let protobuf_customized = ProtobufCustomize::default().gen_mod_rs(false);
+    let protobuf_customized = ProtobufCustomize::default().gen_mod_rs(true);
 
     Codegen::new()
         .out_dir("protocols/sync")
@@ -27,6 +29,7 @@ fn main() {
         .include("protocols/protos")
         .rust_protobuf()
         .customize(Customize {
+            gen_mod: true, //This could be add while the new ttrpc compiler support it.
             ..Default::default()
         })
         .rust_protobuf_customize(protobuf_customized.clone())
@@ -42,6 +45,7 @@ fn main() {
         .include("protocols/protos")
         .rust_protobuf()
         .customize(Customize {
+            gen_mod: true, //This could be add while the new ttrpc compiler support it.
             async_all: true,
             ..Default::default()
         })
