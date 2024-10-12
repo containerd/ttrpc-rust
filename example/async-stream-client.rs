@@ -6,7 +6,7 @@
 mod protocols;
 mod utils;
 #[cfg(unix)]
-use protocols::asynchronous::{empty, streaming, streaming_ttrpc};
+include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 use ttrpc::context::{self, Context};
 #[cfg(unix)]
 use ttrpc::r#async::Client;

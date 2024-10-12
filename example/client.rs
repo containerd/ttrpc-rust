@@ -16,7 +16,9 @@ mod protocols;
 mod utils;
 
 use log::LevelFilter;
+// include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
+
 use std::thread;
 use std::time::Duration;
 use ttrpc::context::{self, Context};
