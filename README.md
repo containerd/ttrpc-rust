@@ -65,6 +65,7 @@ Currently we only support generating async codes by using ttrpc-codegen
         .include("protocols/protos")
         .rust_protobuf()
         .customize(Customize {
+            gen_mod: true, // Gen mod will add mod.rs in out_dir.It's compatible with protobuf's gen_mod_rs
             async_all: true, // It's the key option.
             ..Default::default()
         })
@@ -76,6 +77,7 @@ Provide customize option
 - `async_all`: generate async codes for both server and client
 - `async_server`: generate async codes for server
 - `async_client`: generate async codes for client
+- `gen_mod`: generate mod.rs in out_dir
 
 > See more in `example/build.rs`
 
