@@ -84,12 +84,12 @@ impl Client {
         self.req_tx
             .send(SendingMessage::new(msg))
             .await
-            .map_err(|e| Error::Others(format!("Send packet to sender error {e:?}")))?;
+            .map_err(|_| Error::LocalClosed)?;
 
         let result = if timeout_nano == 0 {
             rx.recv()
                 .await
-                .ok_or_else(|| Error::Others("Receive packet from receiver error".to_string()))?
+                .ok_or_else(|| Error::RemoteClosed)?
         } else {
             tokio::time::timeout(
                 std::time::Duration::from_nanos(timeout_nano as u64),
@@ -97,7 +97,7 @@ impl Client {
             )
             .await
             .map_err(|e| Error::Others(format!("Receive packet timeout {e:?}")))?
-            .ok_or_else(|| Error::Others("Receive packet from receiver error".to_string()))?
+            .ok_or_else(|| Error::RemoteClosed)?
         };
 
         let msg = result?;
