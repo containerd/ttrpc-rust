@@ -38,7 +38,7 @@ async fn main() {
         println!(
             "Green Thread 1 - {} -> {:?} ended: {:?}",
             "health.check()",
-            thc.check(context::with_timeout(20 * 1000 * 1000), &req)
+            thc.check(context::with_duration(core::time::Duration::from_millis(20)), &req)
                 .await,
             now.elapsed(),
         );
