@@ -14,7 +14,7 @@ use std::sync::Arc;
 use log::LevelFilter;
 
 #[cfg(unix)]
-use protocols::asynchronous::{agent, agent_ttrpc, health, health_ttrpc, types};
+include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 #[cfg(unix)]
 use ttrpc::asynchronous::Server;
 use ttrpc::error::{Error, Result};

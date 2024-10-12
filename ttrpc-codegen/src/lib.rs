@@ -46,7 +46,7 @@ mod str_lit;
 #[derive(Debug, Default)]
 pub struct Codegen {
     /// --lang_out= param
-    out_dir: PathBuf,
+    out_dir: Option<PathBuf>,
     /// -I args
     includes: Vec<PathBuf>,
     /// List of .proto files to compile
@@ -65,9 +65,9 @@ impl Codegen {
         Self::default()
     }
 
-    /// Set the output directory for codegen.
+    /// Set the output directory for codegen. Support None out_dir
     pub fn out_dir(&mut self, out_dir: impl AsRef<Path>) -> &mut Self {
-        self.out_dir = out_dir.as_ref().to_owned();
+        self.out_dir = Some(out_dir.as_ref().to_owned());
         self
     }
 
@@ -132,11 +132,14 @@ impl Codegen {
         let includes: Vec<&Path> = self.includes.iter().map(|p| p.as_path()).collect();
         let inputs: Vec<&Path> = self.inputs.iter().map(|p| p.as_path()).collect();
         let p = parse_and_typecheck(&includes, &inputs)?;
-
+        //add default path from OUT_DIR
+        let path_dir = std::env::var("OUT_DIR").unwrap_or_default();
+        let dst_path =  self.out_dir.clone().unwrap_or( PathBuf::from(path_dir));
+           
         if self.rust_protobuf {
             self.rust_protobuf_codegen
                 .pure()
-                .out_dir(&self.out_dir)
+                .out_dir(&dst_path)
                 .inputs(&self.inputs)
                 .includes(&self.includes)
                 .run()
@@ -146,7 +149,7 @@ impl Codegen {
         ttrpc_compiler::codegen::gen_and_write(
             &p.file_descriptors,
             &p.relative_paths,
-            &self.out_dir,
+            &dst_path,
             &self.customize,
         )
     }

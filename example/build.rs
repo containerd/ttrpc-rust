@@ -6,12 +6,13 @@
 use std::{
     fs::{self, File},
     io::{Read, Write},
+    path::PathBuf,
 };
 use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
 
 fn main() {
+    //In this example, the async trait proto will use default path `in build path`
     fs::create_dir_all("protocols/sync").unwrap();
-    fs::create_dir_all("protocols/asynchronous").unwrap();
 
     let mut protos = vec![
         "protocols/protos/github.com/gogo/protobuf/gogoproto/gogo.proto",
@@ -40,7 +41,6 @@ fn main() {
     protos.push("protocols/protos/streaming.proto");
 
     Codegen::new()
-        .out_dir("protocols/asynchronous")
         .inputs(&protos)
         .include("protocols/protos")
         .rust_protobuf()
@@ -56,15 +56,16 @@ fn main() {
     // There is a message named 'Box' in oci.proto
     // so there is a struct named 'Box', we should replace Box<Self> to ::std::boxed::Box<Self>
     // to avoid the conflict.
+    let modify_path = PathBuf::from(std::env::var("OUT_DIR").unwrap_or_default()).join("oci.rs");
     replace_text_in_file(
-        "protocols/sync/oci.rs",
+        modify_path.to_str().unwrap(),
         "self: Box<Self>",
         "self: ::std::boxed::Box<Self>",
     )
     .unwrap();
 
     replace_text_in_file(
-        "protocols/asynchronous/oci.rs",
+        "protocols/sync/oci.rs",
         "self: Box<Self>",
         "self: ::std::boxed::Box<Self>",
     )

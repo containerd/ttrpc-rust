@@ -11,7 +11,7 @@ use std::sync::Arc;
 use log::{info, LevelFilter};
 
 #[cfg(unix)]
-use protocols::asynchronous::{empty, streaming, streaming_ttrpc};
+include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 #[cfg(unix)]
 use ttrpc::{asynchronous::Server, Error};
 
