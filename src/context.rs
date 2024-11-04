@@ -4,8 +4,8 @@
 //
 
 use crate::proto::KeyValue;
+use core::time::Duration;
 use std::collections::HashMap;
-
 #[derive(Clone, Default, Debug)]
 pub struct Context {
     pub metadata: HashMap<String, Vec<String>>,
@@ -17,6 +17,11 @@ pub fn with_timeout(i: i64) -> Context {
         timeout_nano: i,
         ..Default::default()
     }
+}
+///With_timeout is not friendly enough to external interfaces
+///Keep with_timeout for forward compatibility
+pub fn with_duration(du: Duration) -> Context {
+    with_timeout(du.as_nanos() as i64)
 }
 
 pub fn with_metadata(md: HashMap<String, Vec<String>>) -> Context {
@@ -131,7 +136,7 @@ mod tests {
         assert_eq!(0, ctx.timeout_nano);
         assert_eq!(ctx.metadata.len(), 0);
 
-        let mut ctx = context::with_timeout(99);
+        let mut ctx = context::with_duration(core::time::Duration::from_nanos(99));
         assert_eq!(99, ctx.timeout_nano);
         assert_eq!(ctx.metadata.len(), 0);
 
