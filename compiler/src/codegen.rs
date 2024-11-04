@@ -505,7 +505,7 @@ impl<'a> ServiceGen<'a> {
         w.impl_self_block(&self.client_name(), |w| {
             w.pub_fn("new(client: ::ttrpc::Client) -> Self", |w| {
                 w.expr_block(&self.client_name(), |w| {
-                    w.field_entry("client", "client");
+                    w.write_line("client,");
                 });
             });
 
@@ -527,7 +527,7 @@ impl<'a> ServiceGen<'a> {
         w.impl_self_block(&self.client_name(), |w| {
             w.pub_fn("new(client: ::ttrpc::r#async::Client) -> Self", |w| {
                 w.expr_block(&self.client_name(), |w| {
-                    w.field_entry("client", "client");
+                    w.write_line("client,");
                 });
             });
 
