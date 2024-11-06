@@ -47,8 +47,8 @@ use crate::r#async::stream::{
 use crate::r#async::utils;
 use crate::r#async::{MethodHandler, StreamHandler, TtrpcContext};
 
-const DEFAULT_CONN_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(5000);
-const DEFAULT_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(10000);
+const DEFAULT_CONN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct Service {
     pub methods: HashMap<String, Box<dyn MethodHandler + Send + Sync>>,
@@ -202,7 +202,7 @@ impl Server {
                                     ).await;
                                 }
                                 Err(e) => {
-                                    error!("{:?}", e)
+                                    error!("incoming conn fail {:?}", e)
                                 }
                             }
 
@@ -381,14 +381,17 @@ impl ReaderDelegate for ServerReader {
     async fn handle_msg(&self, msg: GenMessage) {
         let handler_shutdown_waiter = self.handler_shutdown.subscribe();
         let context = self.context();
-        let (wait_tx, wait_rx) = tokio::sync::oneshot::channel::<()>();
-        spawn(async move {
-            select! {
-                _ = context.handle_msg(msg, wait_tx) => {}
-                _ = handler_shutdown_waiter.wait_shutdown() => {}
-            }
-        });
-        wait_rx.await.unwrap_or_default();
+        //Check if it is already shutdown no need select wait 
+        if !handler_shutdown_waiter.is_shutdown(){
+            let (wait_tx, wait_rx) = tokio::sync::oneshot::channel::<()>();
+            spawn(async move {
+                select! {
+                    _ = context.handle_msg(msg, wait_tx) => {}
+                    _ = handler_shutdown_waiter.wait_shutdown() => {}
+                }
+            });
+            wait_rx.await.unwrap_or_default();
+        }
     }
 
     async fn handle_err(&self, header: MessageHeader, e: Error) {
