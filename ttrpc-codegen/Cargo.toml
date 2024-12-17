@@ -13,6 +13,8 @@ readme = "README.md"
 
 
 [dependencies]
+# lock home to avoid conflict with latest version
+home = "=0.5.9"
 protobuf-support = "3.2.0"
 protobuf = { version = "2.27.1" }
 protobuf-codegen = "3.2.0"
