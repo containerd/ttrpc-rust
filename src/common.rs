@@ -101,8 +101,40 @@ fn make_addr(_domain: Domain, sockaddr: &str) -> Result<UnixAddr> {
     UnixAddr::new(sockaddr).map_err(err_to_others_err!(e, ""))
 }
 
-fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, Box<dyn SockaddrLike>)> {
-    let (sockaddr, _) = addr;
+// addr: cid:port
+// return (cid, port)
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn parse_vscok(addr: &str) -> Result<(u32, u32)> {
+    // vsock://cid:port
+    let sockaddr_port_v: Vec<&str> = addr.split(':').collect();
+    if sockaddr_port_v.len() != 2 {
+        return Err(Error::Others(format!(
+            "sockaddr {addr} is not right for vsock"
+        )));
+    }
+
+    // for -1 need trace to libc::VMADDR_CID_ANY
+    let cid: u32 = if sockaddr_port_v[0].trim().eq("-1") {
+        libc::VMADDR_CID_ANY
+    } else {
+        sockaddr_port_v[0].parse().map_err(|e| {
+            Error::Others(format!(
+                "failed to parse cid from {:?} error: {:?}",
+                sockaddr_port_v[0], e
+            ))
+        })?
+    };
+
+    let port: u32 = sockaddr_port_v[1].parse().map_err(|e| {
+        Error::Others(format!(
+            "failed to parse port from {:?} error: {:?}",
+            sockaddr_port_v[1], e
+        ))
+    })?;
+    Ok((cid, port))
+}
+
+fn make_socket(sockaddr: &str) -> Result<(RawFd, Domain, Box<dyn SockaddrLike>)> {
     let (domain, sockaddrv) = parse_sockaddr(sockaddr)?;
 
     let get_sock_addr = |domain, sockaddr| -> Result<(RawFd, Box<dyn SockaddrLike>)> {
@@ -121,15 +153,7 @@ fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, Box<dyn SockaddrLike
         Domain::Unix => get_sock_addr(domain, sockaddrv)?,
         #[cfg(any(target_os = "linux", target_os = "android"))]
         Domain::Vsock => {
-            let sockaddr_port_v: Vec<&str> = sockaddrv.split(':').collect();
-            if sockaddr_port_v.len() != 2 {
-                return Err(Error::Others(format!(
-                    "sockaddr {sockaddr} is not right for vsock"
-                )));
-            }
-            let port: u32 = sockaddr_port_v[1]
-                .parse()
-                .expect("the vsock port is not an number");
+            let (cid, port) = parse_vscok(sockaddrv)?;
             let fd = socket(
                 AddressFamily::Vsock,
                 SockType::Stream,
@@ -137,7 +161,6 @@ fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, Box<dyn SockaddrLike
                 None,
             )
             .map_err(|e| Error::Socket(e.to_string()))?;
-            let cid = addr.1;
             let sockaddr = VsockAddr::new(cid, port);
             (fd, Box::new(sockaddr))
         }
@@ -146,18 +169,8 @@ fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, Box<dyn SockaddrLike
     Ok((fd, domain, sockaddr))
 }
 
-// Vsock is not supported on non Linux.
-#[cfg(any(target_os = "linux", target_os = "android"))]
-use libc::VMADDR_CID_ANY;
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-const VMADDR_CID_ANY: u32 = 0;
-#[cfg(any(target_os = "linux", target_os = "android"))]
-use libc::VMADDR_CID_HOST;
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-const VMADDR_CID_HOST: u32 = 0;
-
 pub(crate) fn do_bind(sockaddr: &str) -> Result<(RawFd, Domain)> {
-    let (fd, domain, sockaddr) = make_socket((sockaddr, VMADDR_CID_ANY))?;
+    let (fd, domain, sockaddr) = make_socket(sockaddr)?;
 
     setsockopt(fd, sockopt::ReusePort, &true)?;
     bind(fd, sockaddr.as_ref()).map_err(err_to_others_err!(e, ""))?;
@@ -167,7 +180,7 @@ pub(crate) fn do_bind(sockaddr: &str) -> Result<(RawFd, Domain)> {
 
 /// Creates a unix socket for client.
 pub(crate) unsafe fn client_connect(sockaddr: &str) -> Result<RawFd> {
-    let (fd, _, sockaddr) = make_socket((sockaddr, VMADDR_CID_HOST))?;
+    let (fd, _, sockaddr) = make_socket(sockaddr)?;
 
     connect(fd, sockaddr.as_ref())?;
 
@@ -234,6 +247,22 @@ mod tests {
             } else {
                 assert!(r.is_err());
             }
+        }
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn test_parse_vscok() {
+        for i in &[
+            ("-1:1024", (libc::VMADDR_CID_ANY, 1024)),
+            ("0:1", (0, 1)),
+            ("1:2", (1, 2)),
+            ("4294967294:3", (4294967294, 3)),
+            // 4294967295 = 0xFFFFFFFF
+            ("4294967295:4", (libc::VMADDR_CID_ANY, 4)),
+        ] {
+            let (input, (cid, port)) = (i.0, i.1);
+            let r = parse_vscok(input);
+            assert_eq!(r.unwrap(), (cid, port), "parse {:?} failed", i);
         }
     }
 }
