@@ -23,6 +23,10 @@
 //!        .run()
 //!        .expect("Gen async code failed.");
 //! }
+//! ```
+//! If there's no out_dir and use 'gen_mod' feature
+//! You can use the following method to include the target file
+//! include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 
 pub use protobuf_codegen::{
     Customize as ProtobufCustomize, CustomizeCallback as ProtobufCustomizeCallback,
@@ -45,8 +49,8 @@ mod str_lit;
 /// Invoke pure rust codegen.
 #[derive(Debug, Default)]
 pub struct Codegen {
-    /// --lang_out= param
-    out_dir: PathBuf,
+    /// --lang_out= param ,if out_dir is none ,will use env 'OUT_DIR' path
+    out_dir: Option<PathBuf>,
     /// -I args
     includes: Vec<PathBuf>,
     /// List of .proto files to compile
@@ -65,9 +69,9 @@ impl Codegen {
         Self::default()
     }
 
-    /// Set the output directory for codegen.
+    /// Set the output directory for codegen. Support None out_dir
     pub fn out_dir(&mut self, out_dir: impl AsRef<Path>) -> &mut Self {
-        self.out_dir = out_dir.as_ref().to_owned();
+        self.out_dir = Some(out_dir.as_ref().to_owned());
         self
     }
 
@@ -132,11 +136,19 @@ impl Codegen {
         let includes: Vec<&Path> = self.includes.iter().map(|p| p.as_path()).collect();
         let inputs: Vec<&Path> = self.inputs.iter().map(|p| p.as_path()).collect();
         let p = parse_and_typecheck(&includes, &inputs)?;
+        // If out_dir is none ,dst_path will be setting in path_dir
+        let dst_path = self.out_dir.clone().unwrap_or_else(|| {
+            // Add default path from env OUT_DIR, if no OUT_DIR env ,that's will be current path
+            std::env::var("OUT_DIR").map_or_else(
+                |_| std::env::current_dir().unwrap_or_default(),
+                PathBuf::from,
+            )
+        });
 
         if self.rust_protobuf {
             self.rust_protobuf_codegen
                 .pure()
-                .out_dir(&self.out_dir)
+                .out_dir(&dst_path)
                 .inputs(&self.inputs)
                 .includes(&self.includes)
                 .run()
@@ -146,7 +158,7 @@ impl Codegen {
         ttrpc_compiler::codegen::gen_and_write(
             &p.file_descriptors,
             &p.relative_paths,
-            &self.out_dir,
+            &dst_path,
             &self.customize,
         )
     }
