@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use nix::unistd::close;
 use tokio::{self, sync::mpsc, task};
 
 use crate::common::client_connect;
@@ -159,19 +158,6 @@ impl Client {
             Kind::Client,
             self.streams.clone(),
         ))
-    }
-}
-
-struct ClientClose {
-    fd: RawFd,
-    close_fd: RawFd,
-}
-
-impl Drop for ClientClose {
-    fn drop(&mut self) {
-        close(self.close_fd).unwrap();
-        close(self.fd).unwrap();
-        trace!("All client is droped");
     }
 }
 
