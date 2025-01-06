@@ -26,7 +26,7 @@
 //! ```
 //! If there's no out_dir and use 'gen_mod' feature
 //! You can use the following method to include the target file
-//! include!(concat!(env!("OUT_DIR"), "/mod.rs"));
+//! ttrpc::include_mod!();
 
 pub use protobuf_codegen::{
     Customize as ProtobufCustomize, CustomizeCallback as ProtobufCustomizeCallback,
