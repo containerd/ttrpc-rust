@@ -33,6 +33,7 @@ service Streaming {
 	rpc EchoNull(stream EchoPayload) returns (google.protobuf.Empty);
 	rpc EchoNullStream(stream EchoPayload) returns (stream google.protobuf.Empty);
 	rpc EchoDefaultValue(EchoPayload) returns (stream EchoPayload);
+	rpc ServerSendStream(google.protobuf.Empty) returns (stream EchoPayload);
 }
 
 message EchoPayload {

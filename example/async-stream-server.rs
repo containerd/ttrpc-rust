@@ -152,6 +152,25 @@ impl streaming_ttrpc::Streaming for StreamingService {
 
         Ok(())
     }
+
+    async fn server_send_stream(
+        &self,
+        _ctx: &::ttrpc::r#async::TtrpcContext,
+        _: empty::Empty,
+        s: ::ttrpc::r#async::ServerStreamSender<streaming::EchoPayload>,
+    ) -> ::ttrpc::Result<()> {
+        let mut seq = 0;
+        while seq < 10 {
+            sleep(std::time::Duration::from_millis(100)).await;
+            let mut e = streaming::EchoPayload::new();
+            e.seq = seq;
+            e.msg = format!("hello");
+            s.send(&e).await.unwrap();
+            seq += 1;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(windows)]
