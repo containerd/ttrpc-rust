@@ -233,7 +233,7 @@ impl<'a> Run<'a> {
         protobuf_path: &str,
         result: &mut HashMap<String, FileDescriptorPair>,
     ) {
-        if result.get(protobuf_path).is_some() {
+        if result.contains_key(protobuf_path) {
             return;
         }
 
@@ -257,7 +257,7 @@ impl<'a> Run<'a> {
     }
 
     fn add_file(&mut self, protobuf_path: &str, fs_path: &Path) -> io::Result<()> {
-        if self.parsed_files.get(protobuf_path).is_some() {
+        if self.parsed_files.contains_key(protobuf_path) {
             return Ok(());
         }
 
