@@ -17,5 +17,5 @@ readme = "README.md"
 home = "=0.5.9"
 protobuf-support = "3.2.0"
 protobuf = { version = "2.27.1" }
-protobuf-codegen = "3.2.0"
+protobuf-codegen = "3.5.1"
 ttrpc-compiler = "0.6.1"
