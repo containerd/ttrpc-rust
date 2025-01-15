@@ -106,7 +106,7 @@ trait ToChar {
 
 impl ToI32 for u64 {
     fn to_i32(&self) -> ParserResult<i32> {
-        if *self <= i32::max_value() as u64 {
+        if *self <= i32::MAX as u64 {
             Ok(*self as i32)
         } else {
             Err(ParserError::IntegerOverflow)
@@ -116,7 +116,7 @@ impl ToI32 for u64 {
 
 impl ToI32 for i64 {
     fn to_i32(&self) -> ParserResult<i32> {
-        if *self <= i32::max_value() as i64 && *self >= i32::min_value() as i64 {
+        if *self <= i32::MAX as i64 && *self >= i32::MIN as i64 {
             Ok(*self as i32)
         } else {
             Err(ParserError::IntegerOverflow)
@@ -126,7 +126,7 @@ impl ToI32 for i64 {
 
 impl ToI64 for u64 {
     fn to_i64(&self) -> Result<i64, ParserError> {
-        if *self <= i64::max_value() as u64 {
+        if *self <= i64::MAX as u64 {
             Ok(*self as i64)
         } else {
             Err(ParserError::IntegerOverflow)
@@ -1378,7 +1378,7 @@ impl<'a> Parser<'a> {
         let from = self.next_field_number()?;
         let to = if self.next_ident_if_eq("to")? {
             if self.next_ident_if_eq("max")? {
-                i32::max_value()
+                i32::MAX
             } else {
                 self.next_field_number()?
             }

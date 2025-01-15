@@ -148,7 +148,7 @@ impl<'a> MethodGen<'a> {
             &format!("struct {}Method {{", self.struct_name()),
             "}",
             |w| {
-                w.write_line(&format!(
+                w.write_line(format!(
                     "service: Arc<dyn {} + Send + Sync>,",
                     self.service_name
                 ));
@@ -167,7 +167,7 @@ impl<'a> MethodGen<'a> {
         |w| {
             w.block("fn handler(&self, ctx: ::ttrpc::TtrpcContext, req: ::ttrpc::Request) -> ::ttrpc::Result<()> {", "}",
             |w| {
-                w.write_line(&format!("::ttrpc::request_handler!(self, ctx, req, {}, {}, {});",
+                w.write_line(format!("::ttrpc::request_handler!(self, ctx, req, {}, {}, {});",
                                         proto_path_to_rust_mod(self.root_scope.find_message(self.proto.get_input_type()).get_scope().get_file_descriptor().get_name()),
                                         self.root_scope.find_message(self.proto.get_input_type()).rust_name(),
                                         self.name()));
@@ -184,7 +184,7 @@ impl<'a> MethodGen<'a> {
                 |w| {
                     w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, req: ::ttrpc::Request) -> ::ttrpc::Result<::ttrpc::Response> {", "}",
                         |w| {
-                            w.write_line(&format!("::ttrpc::async_request_handler!(self, ctx, req, {}, {}, {});",
+                            w.write_line(format!("::ttrpc::async_request_handler!(self, ctx, req, {}, {}, {});",
                                         proto_path_to_rust_mod(self.root_scope.find_message(self.proto.get_input_type()).get_scope().get_file_descriptor().get_name()),
                                         self.root_scope.find_message(self.proto.get_input_type()).rust_name(),
                                         self.name()));
@@ -197,7 +197,7 @@ impl<'a> MethodGen<'a> {
                 |w| {
                     w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, inner: ::ttrpc::r#async::StreamInner) -> ::ttrpc::Result<Option<::ttrpc::Response>> {", "}",
                         |w| {
-                            w.write_line(&format!("::ttrpc::async_client_streamimg_handler!(self, ctx, inner, {});",
+                            w.write_line(format!("::ttrpc::async_client_streamimg_handler!(self, ctx, inner, {});",
                                         self.name()));
                     });
             });
@@ -208,7 +208,7 @@ impl<'a> MethodGen<'a> {
                 |w| {
                     w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, mut inner: ::ttrpc::r#async::StreamInner) -> ::ttrpc::Result<Option<::ttrpc::Response>> {", "}",
                         |w| {
-                            w.write_line(&format!("::ttrpc::async_server_streamimg_handler!(self, ctx, inner, {}, {}, {});",
+                            w.write_line(format!("::ttrpc::async_server_streamimg_handler!(self, ctx, inner, {}, {}, {});",
                                         proto_path_to_rust_mod(self.root_scope.find_message(self.proto.get_input_type()).get_scope().get_file_descriptor().get_name()),
                                         self.root_scope.find_message(self.proto.get_input_type()).rust_name(),
                                         self.name()));
@@ -221,7 +221,7 @@ impl<'a> MethodGen<'a> {
                 |w| {
                     w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, inner: ::ttrpc::r#async::StreamInner) -> ::ttrpc::Result<Option<::ttrpc::Response>> {", "}",
                         |w| {
-                            w.write_line(&format!("::ttrpc::async_duplex_streamimg_handler!(self, ctx, inner, {});",
+                            w.write_line(format!("::ttrpc::async_duplex_streamimg_handler!(self, ctx, inner, {});",
                                         self.name()));
                     });
             });
@@ -277,8 +277,8 @@ impl<'a> MethodGen<'a> {
         let method_name = self.name();
         if let MethodType::Unary = self.method_type().0 {
             w.pub_fn(&self.unary(&method_name), |w| {
-                w.write_line(&format!("let mut cres = {}::new();", self.output()));
-                w.write_line(&format!(
+                w.write_line(format!("let mut cres = {}::new();", self.output()));
+                w.write_line(format!(
                     "::ttrpc::client_request!(self, ctx, req, \"{}.{}\", \"{}\", cres);",
                     self.package_name,
                     self.service_name,
@@ -295,8 +295,8 @@ impl<'a> MethodGen<'a> {
             // Unary RPC
             MethodType::Unary => {
                 pub_async_fn(w, &self.unary(&method_name), |w| {
-                    w.write_line(&format!("let mut cres = {}::new();", self.output()));
-                    w.write_line(&format!(
+                    w.write_line(format!("let mut cres = {}::new();", self.output()));
+                    w.write_line(format!(
                         "::ttrpc::async_client_request!(self, ctx, req, \"{}.{}\", \"{}\", cres);",
                         self.package_name,
                         self.service_name,
@@ -307,7 +307,7 @@ impl<'a> MethodGen<'a> {
             // Client Streaming RPC
             MethodType::ClientStreaming => {
                 pub_async_fn(w, &self.client_streaming(&method_name), |w| {
-                    w.write_line(&format!(
+                    w.write_line(format!(
                         "::ttrpc::async_client_stream_send!(self, ctx, \"{}.{}\", \"{}\");",
                         self.package_name,
                         self.service_name,
@@ -318,7 +318,7 @@ impl<'a> MethodGen<'a> {
             // Server Streaming RPC
             MethodType::ServerStreaming => {
                 pub_async_fn(w, &self.server_streaming(&method_name), |w| {
-                    w.write_line(&format!(
+                    w.write_line(format!(
                         "::ttrpc::async_client_stream_receive!(self, ctx, req, \"{}.{}\", \"{}\");",
                         self.package_name,
                         self.service_name,
@@ -329,7 +329,7 @@ impl<'a> MethodGen<'a> {
             // Bidirectional streaming RPC
             MethodType::Duplex => {
                 pub_async_fn(w, &self.duplex_streaming(&method_name), |w| {
-                    w.write_line(&format!(
+                    w.write_line(format!(
                         "::ttrpc::async_client_stream!(self, ctx, \"{}.{}\", \"{}\");",
                         self.package_name,
                         self.service_name,
@@ -496,13 +496,13 @@ impl<'a> ServiceGen<'a> {
 
     fn write_sync_client(&self, w: &mut CodeWriter) {
         w.write_line("#[derive(Clone)]");
-        w.pub_struct(&self.client_name(), |w| {
+        w.pub_struct(self.client_name(), |w| {
             w.field_decl("client", "::ttrpc::Client");
         });
 
         w.write_line("");
 
-        w.impl_self_block(&self.client_name(), |w| {
+        w.impl_self_block(self.client_name(), |w| {
             w.pub_fn("new(client: ::ttrpc::Client) -> Self", |w| {
                 w.expr_block(&self.client_name(), |w| {
                     w.write_line("client,");
@@ -518,13 +518,13 @@ impl<'a> ServiceGen<'a> {
 
     fn write_async_client(&self, w: &mut CodeWriter) {
         w.write_line("#[derive(Clone)]");
-        w.pub_struct(&self.client_name(), |w| {
+        w.pub_struct(self.client_name(), |w| {
             w.field_decl("client", "::ttrpc::r#async::Client");
         });
 
         w.write_line("");
 
-        w.impl_self_block(&self.client_name(), |w| {
+        w.impl_self_block(self.client_name(), |w| {
             w.pub_fn("new(client: ::ttrpc::r#async::Client) -> Self", |w| {
                 w.expr_block(&self.client_name(), |w| {
                     w.write_line("client,");
