@@ -172,7 +172,6 @@ fn make_socket(sockaddr: &str) -> Result<(RawFd, Domain, Box<dyn SockaddrLike>)>
 pub(crate) fn do_bind(sockaddr: &str) -> Result<(RawFd, Domain)> {
     let (fd, domain, sockaddr) = make_socket(sockaddr)?;
 
-    setsockopt(fd, sockopt::ReusePort, &true)?;
     bind(fd, sockaddr.as_ref()).map_err(err_to_others_err!(e, ""))?;
 
     Ok((fd, domain))
