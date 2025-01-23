@@ -486,6 +486,12 @@ impl<'a> ServiceGen<'a> {
             .any(|method| !matches!(method.method_type().0, MethodType::Unary))
     }
 
+    fn has_normal_method(&self) -> bool {
+        self.methods
+            .iter()
+            .any(|method| matches!(method.method_type().0, MethodType::Unary))
+    }
+
     fn write_client(&self, w: &mut CodeWriter) {
         if async_on(self.customize, "client") {
             self.write_async_client(w)
@@ -588,9 +594,14 @@ impl<'a> ServiceGen<'a> {
         );
 
         let has_stream_method = self.has_stream_method();
+        let has_normal_method = self.has_normal_method();
         w.pub_fn(&s, |w| {
             w.write_line("let mut ret = HashMap::new();");
-            w.write_line("let mut methods = HashMap::new();");
+            if has_normal_method {
+                w.write_line("let mut methods = HashMap::new();");
+            } else {
+                w.write_line("let methods = HashMap::new();");
+            }
             if has_stream_method {
                 w.write_line("let mut streams = HashMap::new();");
             } else {
