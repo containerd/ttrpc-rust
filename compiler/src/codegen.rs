@@ -574,8 +574,13 @@ impl<'a> ServiceGen<'a> {
             method_handler_name,
         );
 
+        let has_normal_method = self.has_normal_method();
         w.pub_fn(&s, |w| {
-            w.write_line("let mut methods = HashMap::new();");
+            if has_normal_method {
+                w.write_line("let mut methods = HashMap::new();");
+            } else {
+                w.write_line("let methods = HashMap::new();");
+            }
             for method in &self.methods[0..self.methods.len()] {
                 w.write_line("");
                 method.write_bind(w);
