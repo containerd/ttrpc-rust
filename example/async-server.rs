@@ -6,19 +6,14 @@
 mod protocols;
 mod utils;
 
-#[macro_use]
-extern crate log;
-
 use std::sync::Arc;
 
 use log::LevelFilter;
 
 #[cfg(unix)]
-use protocols::asynchronous::{agent, agent_ttrpc, health, health_ttrpc, types};
+use protocols::asynchronous::{agent, agent_ttrpc, health, health_ttrpc};
 #[cfg(unix)]
 use ttrpc::asynchronous::Server;
-use ttrpc::error::{Error, Result};
-use ttrpc::proto::{Code, Status};
 
 #[cfg(unix)]
 use async_trait::async_trait;
@@ -35,30 +30,18 @@ impl health_ttrpc::Health for HealthService {
         &self,
         _ctx: &::ttrpc::r#async::TtrpcContext,
         _req: health::CheckRequest,
-    ) -> Result<health::HealthCheckResponse> {
-        let mut status = Status::new();
-
-        status.set_code(Code::NOT_FOUND);
-        status.set_message("Just for fun".to_string());
-
-        sleep(std::time::Duration::from_secs(10)).await;
-
-        Err(Error::RpcStatus(status))
+    ) -> ttrpc::Result<health::HealthCheckResponse> {
+        // Mock timeout
+        sleep(std::time::Duration::from_secs(1)).await;
+        unreachable!();
     }
 
     async fn version(
         &self,
-        ctx: &::ttrpc::r#async::TtrpcContext,
-        req: health::CheckRequest,
-    ) -> Result<health::VersionCheckResponse> {
-        info!("version {:?}", req);
-        info!("ctx {:?}", ctx);
-        let mut rep = health::VersionCheckResponse::new();
-        rep.agent_version = "mock.0.1".to_string();
-        rep.grpc_version = "0.0.1".to_string();
-        let mut status = Status::new();
-        status.set_code(Code::NOT_FOUND);
-        Ok(rep)
+        _ctx: &::ttrpc::r#async::TtrpcContext,
+        _req: health::CheckRequest,
+    ) -> ttrpc::Result<health::VersionCheckResponse> {
+        utils::resp::asynchronous::health_version()
     }
 }
 
@@ -71,19 +54,7 @@ impl agent_ttrpc::AgentService for AgentService {
         _ctx: &::ttrpc::r#async::TtrpcContext,
         _req: agent::ListInterfacesRequest,
     ) -> ::ttrpc::Result<agent::Interfaces> {
-        let mut rp = Vec::new();
-
-        let mut i = types::Interface::new();
-        i.name = "first".to_string();
-        rp.push(i);
-        let mut i = types::Interface::new();
-        i.name = "second".to_string();
-        rp.push(i);
-
-        let mut i = agent::Interfaces::new();
-        i.Interfaces = rp;
-
-        Ok(i)
+        utils::resp::asynchronous::agent_list_interfaces()
     }
 }
 

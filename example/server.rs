@@ -15,44 +15,30 @@
 mod protocols;
 mod utils;
 
-#[macro_use]
-extern crate log;
+use std::{sync::Arc, thread};
 
 use log::LevelFilter;
-use std::sync::Arc;
-use std::thread;
-
-use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc, types};
-use ttrpc::error::{Error, Result};
-use ttrpc::proto::{Code, Status};
-use ttrpc::Server;
+use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 
 struct HealthService;
 impl health_ttrpc::Health for HealthService {
     fn check(
         &self,
-        _ctx: &::ttrpc::TtrpcContext,
+        _ctx: &ttrpc::TtrpcContext,
         _req: health::CheckRequest,
-    ) -> Result<health::HealthCheckResponse> {
-        let mut status = Status::new();
-        status.set_code(Code::NOT_FOUND);
-        status.set_message("Just for fun".to_string());
-        Err(Error::RpcStatus(status))
+    ) -> ttrpc::Result<health::HealthCheckResponse> {
+        // Mock timeout
+        thread::sleep(std::time::Duration::from_secs(1));
+        // reachable but meanless
+        Err(ttrpc::Error::Eof)
     }
 
     fn version(
         &self,
-        ctx: &::ttrpc::TtrpcContext,
-        req: health::CheckRequest,
-    ) -> Result<health::VersionCheckResponse> {
-        info!("version {:?}", req);
-        info!("ctx {:?}", ctx);
-        let mut rep = health::VersionCheckResponse::new();
-        rep.agent_version = "mock.0.1".to_string();
-        rep.grpc_version = "0.0.1".to_string();
-        let mut status = Status::new();
-        status.set_code(Code::NOT_FOUND);
-        Ok(rep)
+        _ctx: &ttrpc::TtrpcContext,
+        _req: health::CheckRequest,
+    ) -> ttrpc::Result<health::VersionCheckResponse> {
+        utils::resp::sync::health_version()
     }
 }
 
@@ -60,22 +46,10 @@ struct AgentService;
 impl agent_ttrpc::AgentService for AgentService {
     fn list_interfaces(
         &self,
-        _ctx: &::ttrpc::TtrpcContext,
+        _ctx: &ttrpc::TtrpcContext,
         _req: agent::ListInterfacesRequest,
-    ) -> ::ttrpc::Result<agent::Interfaces> {
-        Ok(agent::Interfaces {
-            Interfaces: vec![
-                types::Interface {
-                    name: "first".to_string(),
-                    ..Default::default()
-                },
-                types::Interface {
-                    name: "second".to_string(),
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        })
+    ) -> ttrpc::Result<agent::Interfaces> {
+        utils::resp::sync::agent_list_interfaces()
     }
 }
 
@@ -85,7 +59,7 @@ fn main() {
     let aservice = agent_ttrpc::create_agent_service(Arc::new(AgentService {}));
 
     utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
-    let mut server = Server::new()
+    let mut server = ttrpc::Server::new()
         .bind(utils::SOCK_ADDR)
         .unwrap()
         .register_service(hservice)

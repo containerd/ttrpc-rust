@@ -26,3 +26,73 @@ pub fn remove_if_sock_exist(_sock_addr: &str) -> Result<()> {
 
     Ok(())
 }
+
+pub mod resp {
+    pub fn online_cpu_mem_not_impl() -> ttrpc::Error {
+        let mut status = ttrpc::Status::new();
+        status.set_code(ttrpc::Code::NOT_FOUND);
+        status.set_message("/grpc.AgentService/OnlineCPUMem is not supported".to_string());
+
+        ttrpc::Error::RpcStatus(status)
+    }
+    pub mod sync {
+        use crate::protocols::sync::{
+            agent::Interfaces, health::VersionCheckResponse, types::Interface,
+        };
+
+        pub fn health_version() -> ttrpc::Result<VersionCheckResponse> {
+            Ok(VersionCheckResponse {
+                grpc_version: "0.0.1".into(),
+                agent_version: "mock.0.1".into(),
+                ..Default::default()
+            })
+        }
+
+        pub fn agent_list_interfaces() -> ttrpc::Result<Interfaces> {
+            Ok(Interfaces {
+                Interfaces: vec![
+                    Interface {
+                        name: "first".into(),
+                        ..Default::default()
+                    },
+                    Interface {
+                        name: "second".into(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            })
+        }
+    }
+
+    #[cfg(unix)]
+    pub mod asynchronous {
+        use crate::protocols::asynchronous::{
+            agent::Interfaces, health::VersionCheckResponse, types::Interface,
+        };
+
+        pub fn health_version() -> ttrpc::Result<VersionCheckResponse> {
+            Ok(VersionCheckResponse {
+                grpc_version: "0.0.1".into(),
+                agent_version: "mock.0.1".into(),
+                ..Default::default()
+            })
+        }
+
+        pub fn agent_list_interfaces() -> ttrpc::Result<Interfaces> {
+            Ok(Interfaces {
+                Interfaces: vec![
+                    Interface {
+                        name: "first".into(),
+                        ..Default::default()
+                    },
+                    Interface {
+                        name: "second".into(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            })
+        }
+    }
+}
