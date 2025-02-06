@@ -80,7 +80,7 @@ fn replace_text_in_file(file_name: &str, from: &str, to: &str) -> Result<(), std
     let new_contents = contents.replace(from, to);
 
     let mut dst = File::create(file_name)?;
-    dst.write(new_contents.as_bytes())?;
+    dst.write_all(new_contents.as_bytes())?;
 
     Ok(())
 }

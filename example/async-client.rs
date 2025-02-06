@@ -35,11 +35,25 @@ async fn main() {
             "health.check()",
             now.elapsed(),
         );
+
+        let resp = thc
+            .check(
+                context::with_duration(core::time::Duration::from_millis(20)),
+                &req,
+            )
+            .await;
+
+        assert_eq!(
+            resp,
+            Err(ttrpc::Error::Others(
+                "Receive packet timeout Elapsed(())".into()
+            ))
+        );
+
         println!(
             "Green Thread 1 - {} -> {:?} ended: {:?}",
             "health.check()",
-            thc.check(context::with_duration(core::time::Duration::from_millis(20)), &req)
-                .await,
+            resp,
             now.elapsed(),
         );
     });
@@ -51,18 +65,16 @@ async fn main() {
             now.elapsed(),
         );
 
-        let show = match tac
+        let resp = tac
             .list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new())
-            .await
-        {
-            Err(e) => format!("{:?}", e),
-            Ok(s) => format!("{:?}", s),
-        };
+            .await;
+        let expected_resp = utils::resp::asynchronous::agent_list_interfaces();
+        assert_eq!(resp, expected_resp);
 
         println!(
-            "Green Thread 2 - {} -> {} ended: {:?}",
+            "Green Thread 2 - {} -> {:?} ended: {:?}",
             "agent.list_interfaces()",
-            show,
+            resp,
             now.elapsed(),
         );
     });
@@ -74,17 +86,16 @@ async fn main() {
             now.elapsed()
         );
 
-        let show = match ac
+        let resp = ac
             .online_cpu_mem(default_ctx(), &agent::OnlineCPUMemRequest::new())
-            .await
-        {
-            Err(e) => format!("{:?}", e),
-            Ok(s) => format!("{:?}", s),
-        };
+            .await;
+        let expected_resp = utils::resp::online_cpu_mem_not_impl();
+        assert_eq!(resp, Err(expected_resp));
+
         println!(
-            "Green Thread 3 - {} -> {} ended: {:?}",
+            "Green Thread 3 - {} -> {:?} ended: {:?}",
             "agent.online_cpu_mem()",
-            show,
+            resp,
             now.elapsed()
         );
 
@@ -102,7 +113,13 @@ async fn main() {
         );
     });
 
-    let _ = tokio::join!(t1, t2, t3);
+    let (r1, r2, r3) = tokio::join!(t1, t2, t3);
+    assert!(
+        r1.is_ok() && r2.is_ok() && r3.is_ok(),
+        "async test is failed because some error occurred"
+    );
+
+    println!("***** Asycn test is OK! *****");
 }
 
 fn default_ctx() -> Context {

@@ -20,8 +20,6 @@ use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
 use std::time::Duration;
 use ttrpc::context::{self, Context};
-use ttrpc::error::Error;
-use ttrpc::proto::Code;
 use ttrpc::Client;
 
 #[cfg(not(target_os = "linux"))]
@@ -45,6 +43,8 @@ fn main() {
     thread::sleep(Duration::from_secs(1));
     let current_fd_count = get_fd_count();
     assert_eq!(current_fd_count, expected_fd_count, "check fd count");
+
+    println!("***** Sync test is OK! *****");
 }
 
 fn connect_once() {
@@ -67,26 +67,22 @@ fn connect_once() {
             now.elapsed(),
         );
 
-        let rsp = thc.check(default_ctx(), &req);
-        match rsp.as_ref() {
-            Err(Error::RpcStatus(s)) => {
-                assert_eq!(Code::NOT_FOUND, s.code());
-                assert_eq!("Just for fun".to_string(), s.message())
-            }
-            Err(e) => {
-                panic!("not expecting an error from the example server: {:?}", e)
-            }
-            Ok(x) => {
-                panic!(
-                    "not expecting a OK response from the example server: {:?}",
-                    x
-                )
-            }
-        }
+        let resp = thc.check(
+            context::with_duration(core::time::Duration::from_millis(20)),
+            &req,
+        );
+
+        assert_eq!(
+            resp,
+            Err(ttrpc::Error::Others(
+                "Receive packet from Receiver timeout: timed out waiting on channel".into()
+            ))
+        );
+
         println!(
             "OS Thread {:?} - health.check() -> {:?} ended: {:?}",
             std::thread::current().id(),
-            rsp,
+            resp,
             now.elapsed(),
         );
     });
@@ -98,21 +94,14 @@ fn connect_once() {
             now.elapsed(),
         );
 
-        let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new()) {
-            Err(e) => {
-                panic!("not expecting an error from the example server: {:?}", e)
-            }
-            Ok(s) => {
-                assert_eq!("first".to_string(), s.Interfaces[0].name);
-                assert_eq!("second".to_string(), s.Interfaces[1].name);
-                format!("{s:?}")
-            }
-        };
+        let resp = tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new());
+        let expected_resp = utils::resp::sync::agent_list_interfaces();
+        assert_eq!(resp, expected_resp);
 
         println!(
             "OS Thread {:?} - agent.list_interfaces() -> {} ended: {:?}",
             std::thread::current().id(),
-            show,
+            "{resp:?}",
             now.elapsed(),
         );
     });
@@ -121,34 +110,22 @@ fn connect_once() {
         "Main OS Thread - agent.online_cpu_mem() started: {:?}",
         now.elapsed()
     );
-    let show = match ac.online_cpu_mem(default_ctx(), &agent::OnlineCPUMemRequest::new()) {
-        Err(Error::RpcStatus(s)) => {
-            assert_eq!(Code::NOT_FOUND, s.code());
-            assert_eq!(
-                "/grpc.AgentService/OnlineCPUMem is not supported".to_string(),
-                s.message()
-            );
-            format!("{s:?}")
-        }
-        Err(e) => {
-            panic!("not expecting an error from the example server: {:?}", e)
-        }
-        Ok(s) => {
-            panic!(
-                "not expecting a OK response from the example server: {:?}",
-                s
-            )
-        }
-    };
+    let resp = ac
+        .online_cpu_mem(default_ctx(), &agent::OnlineCPUMemRequest::new())
+        .expect_err("not the expecting error from the example server");
+    let expected_resp = utils::resp::online_cpu_mem_not_impl();
+    assert_eq!(resp, expected_resp);
+
     println!(
-        "Main OS Thread - agent.online_cpu_mem() -> {} ended: {:?}",
-        show,
+        "Main OS Thread - agent.online_cpu_mem() -> {:?} ended: {:?}",
+        resp,
         now.elapsed()
     );
 
     let version = hc.version(default_ctx(), &health::CheckRequest::new());
-    assert_eq!("mock.0.1", version.as_ref().unwrap().agent_version.as_str());
-    assert_eq!("0.0.1", version.as_ref().unwrap().grpc_version.as_str());
+    let expected_version_resp = utils::resp::sync::health_version();
+    assert_eq!(version, expected_version_resp);
+
     println!(
         "Main OS Thread - health.version() started: {:?}",
         now.elapsed()

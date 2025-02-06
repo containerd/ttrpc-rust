@@ -49,7 +49,21 @@ async fn main() {
 
     let t8 = tokio::spawn(server_send_stream(sc));
 
-    let _ = tokio::join!(t1, t2, t3, t4, t5, t6, t7, t8);
+    let (r1, r2, r3, r4, r5, r6, r7, r8) = tokio::join!(t1, t2, t3, t4, t5, t6, t7, t8);
+
+    assert!(
+        r1.is_ok()
+            && r2.is_ok()
+            && r3.is_ok()
+            && r4.is_ok()
+            && r5.is_ok()
+            && r6.is_ok()
+            && r7.is_ok()
+            && r8.is_ok(),
+        "async-stream test is failed because some error occurred"
+    );
+
+    println!("***** Async Stream test is OK! *****");
 }
 
 fn default_ctx() -> Context {
