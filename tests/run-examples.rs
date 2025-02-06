@@ -4,13 +4,12 @@ use std::{
     time::Duration,
 };
 
-#[test]
-fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {
+fn run_example(server: &str, client: &str) -> Result<(), Box<dyn std::error::Error>> {
     // start the server and give it a moment to start.
-    let mut server = run_example("server").spawn().unwrap();
+    let mut server = do_run_example(server).spawn().unwrap();
     std::thread::sleep(Duration::from_secs(2));
 
-    let mut client = run_example("client").spawn().unwrap();
+    let mut client = do_run_example(client).spawn().unwrap();
     let mut client_succeeded = false;
     let start = std::time::Instant::now();
     let timeout = Duration::from_secs(600);
@@ -56,7 +55,7 @@ fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_example(example: &str) -> Command {
+fn do_run_example(example: &str) -> Command {
     let mut cmd = Command::new("cargo");
     cmd.arg("run")
         .arg("--example")
@@ -80,4 +79,15 @@ fn wait_with_output(name: &str, cmd: Child) {
         });
         println!("==== {name} output end");
     }
+}
+
+#[test]
+fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
+    run_example("server", "client")?;
+    #[cfg(unix)]
+    run_example("async-server", "async-client")?;
+    #[cfg(unix)]
+    run_example("async-stream-server", "async-stream-client")?;
+
+    Ok(())
 }
