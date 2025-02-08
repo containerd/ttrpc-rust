@@ -87,6 +87,11 @@ impl Default for Server {
     }
 }
 
+impl Drop for Server{
+    fn drop(&mut self) {
+        trace!("server exit");
+    }
+}
 impl Server {
     pub fn new() -> Server {
         Server::default()
@@ -138,8 +143,9 @@ impl Server {
         let listenfd = self.listeners[self.listeners.len() - 1];
         Ok(listenfd)
     }
-
-    pub async fn start(&mut self) -> Result<()> {
+    // In order to ensure compatibility, this interface has been added and will wait for the service thread to end indefinitely
+    // This will not cause thread leak.
+    pub async fn do_listen(&mut self,do_wait:bool) -> Result<()>{
         let listenfd = self.get_listenfd()?;
 
         match self.domain.as_ref() {
@@ -155,8 +161,8 @@ impl Server {
                     .map_err(err_to_others_err!(e, "from_std error "))?;
 
                 let incoming = UnixIncoming::new(unix_listener);
-
-                self.do_start(incoming).await
+                
+                self.do_start(incoming,do_wait).await
             }
             // It seems that we can use UnixStream to represent both UnixStream and VsockStream.
             // Whatever, we keep it for now for the compatibility and vsock-specific features maybe
@@ -164,15 +170,19 @@ impl Server {
             #[cfg(any(target_os = "linux", target_os = "android"))]
             Some(Domain::Vsock) => {
                 let incoming = unsafe { VsockListener::from_raw_fd(listenfd).incoming() };
-                self.do_start(incoming).await
+                self.do_start(incoming,do_wait).await
             }
             _ => Err(Error::Others(
                 "Domain is not set or not supported".to_string(),
             )),
         }
     }
+    // It is not safe , fix it in future
+    pub async fn start(&mut self) -> Result<()> {
+        self.do_listen(false).await
+    }
 
-    async fn do_start<I, S>(&mut self, mut incoming: I) -> Result<()>
+    async fn do_start<I, S>(&mut self, mut incoming: I, do_wait:bool) -> Result<()>
     where
         I: Stream<Item = std::io::Result<S>> + Unpin + Send + 'static + AsRawFd,
         S: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
@@ -184,7 +194,7 @@ impl Server {
         let (stop_listen_tx, mut stop_listen_rx) = channel(1);
         self.stop_listen_tx = Some(stop_listen_tx);
 
-        spawn(async move {
+        let t = spawn(async move {
             loop {
                 select! {
                     conn = incoming.next() => {
@@ -224,7 +234,14 @@ impl Server {
                     }
                 }
             }
+            trace!("listener exit.");
         });
+        if do_wait{
+            t.await.map_err(|e| {
+                trace!("listener task got error {:?}", e);
+                Error::Others(format!("listener task got error {:?}", e))
+            })?;
+        }
         Ok(())
     }
 
