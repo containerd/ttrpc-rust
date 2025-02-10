@@ -101,3 +101,30 @@ async fn main() {
         }
     };
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+   
+    #[cfg(unix)]
+    #[tokio::test]
+    // Add this test for test thread leak
+    async fn test_server_start() {
+        simple_logging::log_to_stderr(LevelFilter::Trace);
+        {
+            let hservice = health_ttrpc::create_health(Arc::new(HealthService {}));
+            utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
+            let mut server = Server::new()
+                .bind(utils::SOCK_ADDR)
+                .unwrap()
+                .register_service(hservice);
+            server.start().await.unwrap();
+        }
+        // judge utils::SOCK_ADDR if still occupied
+        let server_test_r = Server::new()
+        .bind(utils::SOCK_ADDR);
+        // Notice !!!!!!! should not get error in this test, but this interface should return error.
+        assert!(server_test_r.is_err());
+    }
+}
