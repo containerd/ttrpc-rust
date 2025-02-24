@@ -4,13 +4,11 @@
 //
 
 use crate::error::{Error, Result};
+#[allow(unused_imports)]
 use crate::proto::{
     check_oversize, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
 };
-#[cfg(feature = "prost")]
-use prost::Message;
-#[cfg(not(feature = "prost"))]
-use protobuf::Message;
+
 use std::collections::HashMap;
 
 #[cfg(not(feature = "prost"))]
@@ -39,6 +37,27 @@ pub fn response_to_channel(
 
     Ok(())
 }
+
+#[cfg(feature = "prost")]
+pub fn response_to_channel(
+    stream_id: u32,
+    res: Response,
+    tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+) -> Result<()> {
+    let mut buffer = Vec::new();
+    <Response as prost::Message>::encode(&res, &mut buffer).map_err(err_to_others_err!(e, ""))?;
+    let mh = MessageHeader {
+        length: buffer.len() as u32,
+        stream_id,
+        type_: MESSAGE_TYPE_RESPONSE,
+        flags: 0,
+    };
+    
+    tx.send((mh, buffer)).map_err(err_to_others_err!(e, ""))?;
+    
+    Ok(())
+}
+
 
 pub fn response_error_to_channel(
     stream_id: u32,
