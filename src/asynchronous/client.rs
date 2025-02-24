@@ -71,7 +71,7 @@ impl Client {
 
         let msg: GenMessage = Message::new_request(stream_id, req)?
             .try_into()
-            .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
+            .map_err(|err: std::io::Error| Error::Others(err.to_string()))?;
 
         let (tx, mut rx): (ResultSender, ResultReceiver) = mpsc::channel(100);
 
@@ -104,9 +104,21 @@ impl Client {
         let res = Response::decode(msg.payload)
             .map_err(err_to_others_err!(e, "Unpack response error "))?;
 
-        let status = res.status();
-        if status.code() != Code::OK {
-            return Err(Error::RpcStatus((*status).clone()));
+        #[cfg(not(feature = "prost"))]
+        {
+            let status = res.status();
+            if status.code() != Code::OK {
+                return Err(Error::RpcStatus((*status).clone()));
+            }
+        }
+        #[cfg(feature = "prost")]
+        {
+            let status = res.status.as_ref();
+            if let Some(status) = status {
+                if status.code != Code::Ok as i32 {
+                    return Err(Error::RpcStatus(status.clone()));
+                }
+            }
         }
 
         Ok(res)
@@ -125,6 +137,10 @@ impl Client {
         let mut msg: GenMessage = Message::new_request(stream_id, req)?
             .try_into()
             .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
+        #[cfg(feature = "prost")]
+        let mut msg: GenMessage = Message::new_request(stream_id, req)
+            .try_into()
+            .map_err(|err: std::io::Error| Error::Others(err.to_string()))?;
 
         if streaming_client {
             if !is_req_payload_empty {

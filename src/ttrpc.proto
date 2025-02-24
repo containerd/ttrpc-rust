@@ -14,7 +14,7 @@
 
 syntax = "proto3";
 
-package grpc;
+package ttrpc;
 
 message Request {
 	string service = 1;

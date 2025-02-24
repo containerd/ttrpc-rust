@@ -19,6 +19,11 @@
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::time::Duration;
 
+use nix::sys::socket::{self, *};
+use nix::unistd::*;
+#[cfg(feature = "prost")]
+use prost::Message;
+#[cfg(not(feature = "prost"))]
 use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -162,18 +167,45 @@ fn start_method_handler_thread(
             if mh.type_ != MESSAGE_TYPE_REQUEST {
                 continue;
             }
-            let mut s = CodedInputStream::from_bytes(&buf);
-            let mut req = Request::new();
-            if let Err(x) = req.merge_from(&mut s) {
-                let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
-                let mut res = Response::new();
-                res.set_status(status);
-                if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
-                    debug!("response_to_channel get error {:?}", x);
-                    quit_connection(quit, control_tx);
-                    break;
+            let mut req;
+            #[cfg(not(feature = "prost"))]
+            {
+                let mut s = CodedInputStream::from_bytes(&buf);
+                let mut req = Request::new();
+                if let Err(x) = req.merge_from(&mut s) {
+                    let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
+                    let mut res = Response::new();
+                    res.set_status(status);
+                    if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
+                        debug!("response_to_channel get error {:?}", x);
+                        quit_connection(quit, control_tx);
+                        break;
+                    }
+                    continue;
                 }
-                continue;
+            }
+            #[cfg(feature = "prost")]
+            {
+                req = Request::default();
+                if let Err(x) = req.merge(&buf as &[u8]) {
+                    let status = get_status(Code::InvalidArgument, x.to_string());
+                    let res = Response {
+                        status: Some(status),
+                        ..Default::default()
+                    };
+                    if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
+                        debug!("response_to_channel get error {:?}", x);
+                        quit.store(true, Ordering::SeqCst);
+                        // the client connection would be closed and
+                        // the connection dealing main thread would have
+                        // exited.
+                        control_tx
+                            .send(())
+                            .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
+                        break;
+                    }
+                    continue;
+                }
             }
             trace!("Got Message request {:?}", req);
 
@@ -181,9 +213,24 @@ fn start_method_handler_thread(
             let method = if let Some(x) = methods.get(&path) {
                 x
             } else {
-                let status = get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
-                let mut res = Response::new();
-                res.set_status(status);
+                let status: Status;
+                let mut res: Response;
+                #[cfg(not(feature = "prost"))]
+                {
+                    status =
+                    get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
+                    res = Response::new();
+                    res.set_status(status);
+                }
+
+                #[cfg(feature = "prost")]
+                {
+                    status =
+                    get_status(Code::InvalidArgument, format!("{path} does not exist"));
+                    res = Response::default();
+                    res.status = Some(status);
+                }
+
                 if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                     info!("response_to_channel get error {:?}", x);
                     quit_connection(quit, control_tx);
