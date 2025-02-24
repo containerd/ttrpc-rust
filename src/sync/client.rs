@@ -17,7 +17,6 @@
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
 
-use protobuf::Message;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -157,7 +156,11 @@ impl Client {
         })
     }
     pub fn request(&self, req: Request) -> Result<Response> {
-        check_oversize(req.compute_size() as usize, false)?;
+        #[cfg(feature = "prost")]
+        check_oversize(req.payload.len(), false)?;
+
+        #[cfg(not(feature = "prost"))]
+        check_oversize(req.payload.len(), false)?;
 
         let buf = req.encode().map_err(err_to_others_err!(e, ""))?;
         // Notice: pure client problem can't be rpc error

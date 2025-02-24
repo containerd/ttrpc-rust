@@ -62,8 +62,6 @@ pub use crate::error::{get_status, Error, Result};
 
 cfg_sync! {
     pub mod sync;
-    #[doc(hidden)]
-    pub use sync::response_to_channel;
     #[doc(inline)]
     pub use sync::{MethodHandler, TtrpcContext};
     pub use sync::Client;

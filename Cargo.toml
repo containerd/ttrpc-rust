@@ -41,6 +41,7 @@ default = ["sync"]
 async = ["dep:async-trait", "dep:tokio", "dep:futures", "dep:tokio-vsock"]
 sync = []
 prost = ["dep:prost", "dep:prost-build"]
+rustprotobuf = []
 
 [package.metadata.docs.rs]
 all-features = true

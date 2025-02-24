@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use futures::StreamExt as _;
 use nix::unistd;
+#[cfg(not(feature = "prost"))]
 use protobuf::Message as _;
 use tokio::{
     self,
@@ -455,7 +456,12 @@ impl HandlerContext {
                 Ok(opt_msg) => match opt_msg {
                     Some(mut resp) => {
                         // Server: check size before sending to client
+                        #[cfg(not(feature = "prost"))]
                         if let Err(e) = check_oversize(resp.compute_size() as usize, true) {
+                            resp = e.into();
+                        }
+                        #[cfg(feature = "prost")]
+                        if let Err(e) = check_oversize(resp.size() as usize, true) {
                             resp = e.into();
                         }
 
@@ -744,20 +750,21 @@ impl HandlerContext {
                 get_status(Code::Unknown, e)
             })?;
         }
-        #[cfg(not(feature = "prost"))]
-        task.await
-            .unwrap_or_else(|e| Err(Error::Others(format!("stream {path} task got error {e:?}"))))
-            .map_err(|e| get_status(Code::UNKNOWN, e))
 
         #[cfg(feature = "prost")]
-        task.await
-                .unwrap_or_else(|e| {
-                    Err(Error::Others(format!(
-                        "stream {} task got error {:?}",
-                        path, e
-                    )))
-                })
-                .map_err(|e| get_status(Code::Unknown, e))
+        return task.await
+            .unwrap_or_else(|e| {
+                Err(Error::Others(format!(
+                    "stream {} task got error {:?}",
+                    path, e
+                )))
+            })
+            .map_err(|e| get_status(Code::Unknown, e));
+
+        #[cfg(not(feature = "prost"))]
+        return task.await
+            .unwrap_or_else(|e| Err(Error::Others(format!("stream {path} task got error {e:?}"))))
+            .map_err(|e| get_status(Code::UNKNOWN, e));
     }
 
     async fn respond(tx: MessageSender, stream_id: u32, resp: Response) -> Result<()> {
