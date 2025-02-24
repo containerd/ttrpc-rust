@@ -9,6 +9,8 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     ARCH="linux-x86_64"
 elif [[ "$OSTYPE" == "darwin"* ]]; then
     ARCH="osx-universal_binary"
+elif [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "win32"* ]]; then
+    ARCH="win64"
 fi
 
 curl -LO $PB_REL/download/v$VERSION/protoc-$VERSION-$ARCH.zip

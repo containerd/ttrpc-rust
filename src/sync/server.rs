@@ -19,8 +19,6 @@
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::time::Duration;
 
-use nix::sys::socket::{self, *};
-use nix::unistd::*;
 #[cfg(feature = "prost")]
 use prost::Message;
 #[cfg(not(feature = "prost"))]
@@ -32,11 +30,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 
-use super::utils::response_to_channel;
-use crate::{common, Status};
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-use crate::common::set_fd_close_exec;
-use crate::context;
+use super::utils::response_error_to_channel;
+use crate::sync::utils::response_to_channel;
+use crate::{context, Status};
 use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
@@ -170,10 +166,13 @@ fn start_method_handler_thread(
             if mh.type_ != MESSAGE_TYPE_REQUEST {
                 continue;
             }
-            let mut req;
+            #[allow(unused_mut)]
+            #[allow(unused_assignments)]
+            let mut req: Request = Request::default();
             #[cfg(not(feature = "prost"))]
             {
                 let mut s = CodedInputStream::from_bytes(&buf);
+                req = Request::new();
                 req = Request::new();
                 if let Err(x) = req.merge_from(&mut s) {
                     let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
@@ -196,7 +195,6 @@ fn start_method_handler_thread(
 
             #[cfg(feature = "prost")]
             {
-                req = Request::default();
                 if let Err(x) = req.merge(&buf as &[u8]) {
                     let status = get_status(Code::InvalidArgument, x.to_string());
                     let res = Response {

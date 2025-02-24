@@ -35,7 +35,14 @@ pub(crate) fn check_oversize(len: usize, return_rpc_error: bool) -> TtResult<()>
             len, MESSAGE_LENGTH_MAX
         );
         let e = if return_rpc_error {
-            get_rpc_status(Code::INVALID_ARGUMENT, msg)
+            #[cfg(not(feature = "prost"))]
+            {
+                get_rpc_status(Code::INVALID_ARGUMENT, msg)
+            }
+            #[cfg(feature = "prost")]
+            {
+                get_rpc_status(Code::Unknown, msg)
+            }
         } else {
             Error::Others(msg)
         };
@@ -542,6 +549,7 @@ mod tests {
     }
 
     #[cfg(feature = "async")]
+    #[cfg(not(feature = "prost"))]
     #[tokio::test]
     async fn async_gen_message() {
         // Test packet which exceeds maximum message size
@@ -582,6 +590,7 @@ mod tests {
     }
 
     #[cfg(feature = "async")]
+    #[cfg(not(feature = "prost"))]
     #[tokio::test]
     async fn async_message() {
         // Test packet which exceeds maximum message size

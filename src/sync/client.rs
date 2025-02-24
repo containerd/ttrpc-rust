@@ -17,12 +17,13 @@
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
 
-use protobuf::Message;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+use protobuf::Message;
 
 use crate::error::{Error, Result};
 use crate::proto::{
@@ -157,6 +158,10 @@ impl Client {
         })
     }
     pub fn request(&self, req: Request) -> Result<Response> {
+        #[cfg(feature = "prost")]
+        check_oversize(req.payload.len(), false)?;
+
+        #[cfg(not(feature = "prost"))]
         check_oversize(req.compute_size() as usize, false)?;
 
         let buf = req.encode().map_err(err_to_others_err!(e, ""))?;
