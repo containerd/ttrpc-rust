@@ -13,8 +13,8 @@
 // limitations under the License.
 
 //! Error and Result of ttrpc and relevant functions, macros.
-
-use crate::proto::{Code, Response, Status};
+#[allow(unused_imports)]
+use crate::proto::{self, Code, Response, Status};
 use std::result;
 use thiserror::Error;
 
@@ -53,12 +53,30 @@ impl From<Error> for Response {
         let status = if let Error::RpcStatus(stat) = e {
             stat
         } else {
-            get_status(Code::UNKNOWN, e)
+            #[cfg(not(feature = "prost"))]
+            {
+                get_status(Code::UNKNOWN, e)
+            }
+
+            #[cfg(feature = "prost")]
+            {
+                get_status(Code::Unknown, e)
+            }
         };
 
-        let mut res = Response::new();
-        res.set_status(status);
-        res
+        #[cfg(not(feature = "prost"))]
+        {
+            let mut res = Response::new();
+            res.set_status(status);
+            res
+        }
+        #[cfg(feature = "prost")]
+        {
+            Response {
+                status: Some(status),
+                ..Default::default()
+            }
+        }
     }
 }
 

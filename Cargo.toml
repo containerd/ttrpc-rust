@@ -42,7 +42,7 @@ rust-version = "1.70"
 
 [dependencies]
 prost = { version = "0.11", optional = true }
-protobuf = { workspace = true }
+protobuf = { workspace = true, optional = true }
 libc = { version = "0.2.59", features = [ "extra_traits" ] }
 nix = "0.26.2"
 log = "0.4"
@@ -67,10 +67,11 @@ protobuf-codegen = { workspace = true }
 prost-build = { version = "0.11", optional = true }
 
 [features]
-default = ["sync"]
+default = ["sync","rustprotobuf"]
 async = ["dep:async-trait", "dep:tokio", "dep:futures", "dep:tokio-vsock"]
 sync = []
 prost = ["dep:prost", "dep:prost-build"]
+rustprotobuf = ["dep:protobuf"]
 
 [package.metadata.docs.rs]
 all-features = true

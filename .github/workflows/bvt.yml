@@ -14,6 +14,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+      - name: Install Protoc
+        run: |
+          ./install_protoc.sh
       - name: Check
         run: |
           make deps
@@ -31,6 +34,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+      - name: Install Protoc
+        run: |
+          ./install_protoc.sh
       - name: Build
         run: |
           make
