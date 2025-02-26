@@ -55,6 +55,7 @@ impl Client {
         };
 
         let conn = Connection::new(stream, delegate);
+        // Long-running receiver task
         tokio::spawn(async move { conn.run().await });
 
         Client {
@@ -86,9 +87,7 @@ impl Client {
             .map_err(|_| Error::LocalClosed)?;
 
         let result = if timeout_nano == 0 {
-            rx.recv()
-                .await
-                .ok_or_else(|| Error::RemoteClosed)?
+            rx.recv().await.ok_or_else(|| Error::RemoteClosed)?
         } else {
             tokio::time::timeout(
                 std::time::Duration::from_nanos(timeout_nano as u64),

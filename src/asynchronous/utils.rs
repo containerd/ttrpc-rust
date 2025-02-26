@@ -226,7 +226,7 @@ macro_rules! async_client_stream_receive {
         }
 
         let inner = $self.client.new_stream(creq, false, true).await?;
-        let stream = ::ttrpc::r#async::ClientStreamReceiver::new(inner);
+        let stream = ::ttrpc::r#async::ClientStreamReceiver::new(inner, $self.client.clone());
 
         return Ok(stream);
     };

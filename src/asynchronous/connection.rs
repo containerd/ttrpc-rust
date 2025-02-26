@@ -59,6 +59,7 @@ where
 
         let (reader_delegate, mut writer_delegate) = builder.build();
 
+        // Long-running sender task
         let writer_task = tokio::spawn(async move {
             while let Some(mut sending_msg) = writer_delegate.recv().await {
                 trace!("write message: {:?}", sending_msg.msg);
