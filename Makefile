@@ -1,3 +1,5 @@
+export PROTOC=${HOME}/protoc/bin/protoc
+
 all: debug test
 
 #
@@ -31,7 +33,8 @@ endif
 .PHONY: check
 check:
 	cargo fmt --all -- --check
-	cargo clippy --all-targets --all-features -- -D warnings
+	cargo clippy --all-targets --features sync,async -- -D warnings
+	cargo clippy --all-targets --features sync,async,prost -- -D warnings
 
 .PHONY: check-all
 check-all:

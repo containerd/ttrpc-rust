@@ -17,5 +17,4 @@ pub use client::Client;
 pub use server::Server;
 
 #[doc(hidden)]
-pub use utils::response_to_channel;
 pub use utils::{MethodHandler, TtrpcContext};
