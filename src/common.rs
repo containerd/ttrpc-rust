@@ -6,11 +6,6 @@
 
 //! Common functions.
 
-#[cfg(any(
-    feature = "async",
-    not(any(target_os = "linux", target_os = "android"))
-))]
-use nix::fcntl::FdFlag;
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::sys::socket::*;
 use std::os::unix::io::RawFd;
@@ -61,11 +56,9 @@ fn parse_sockaddr(addr: &str) -> Result<(Domain, &str)> {
     Err(Error::Others(format!("Scheme {addr:?} is not supported")))
 }
 
-#[cfg(any(
-    feature = "async",
-    not(any(target_os = "linux", target_os = "android"))
-))]
+#[cfg(target_os = "macos")]
 pub(crate) fn set_fd_close_exec(fd: RawFd) -> Result<RawFd> {
+    use nix::fcntl::FdFlag;
     if let Err(e) = fcntl(fd, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)) {
         return Err(Error::Others(format!(
             "failed to set fd: {fd} as close-on-exec: {e}"

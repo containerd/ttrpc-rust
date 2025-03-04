@@ -5,10 +5,8 @@
 //
 
 use std::collections::HashMap;
-use std::os::unix::io::{FromRawFd, RawFd};
 
 use async_trait::async_trait;
-use tokio::net::UnixStream;
 
 use crate::error::Result;
 use crate::proto::{MessageHeader, Request, Response};
@@ -251,21 +249,9 @@ pub trait StreamHandler {
 /// The context of ttrpc (async).
 #[derive(Debug)]
 pub struct TtrpcContext {
-    pub fd: std::os::unix::io::RawFd,
     pub mh: MessageHeader,
     pub metadata: HashMap<String, Vec<String>>,
     pub timeout_nano: i64,
-}
-
-pub(crate) fn new_unix_stream_from_raw_fd(fd: RawFd) -> UnixStream {
-    let std_stream: std::os::unix::net::UnixStream;
-    unsafe {
-        std_stream = std::os::unix::net::UnixStream::from_raw_fd(fd);
-    }
-    // Notice: There is a big change between tokio 1.0 and 0.2
-    // we must set nonblocking by ourselves in tokio 1.0
-    std_stream.set_nonblocking(true).unwrap();
-    UnixStream::from_std(std_stream).unwrap()
 }
 
 pub(crate) fn get_path(service: &str, method: &str) -> String {

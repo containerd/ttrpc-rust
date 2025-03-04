@@ -6,33 +6,24 @@
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::marker::Unpin;
+#[cfg(unix)]
 use std::os::unix::io::RawFd;
-use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::os::unix::net::UnixListener as SysUnixListener;
 use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures::stream::Stream;
 use futures::StreamExt as _;
-use nix::unistd;
 use protobuf::Message as _;
 use tokio::{
-    self,
-    io::{AsyncRead, AsyncWrite},
-    net::UnixListener,
-    select, spawn,
+    self, select, spawn,
     sync::mpsc::{channel, Sender},
     task,
     time::timeout,
 };
-#[cfg(any(target_os = "linux", target_os = "android"))]
-use tokio_vsock::VsockListener;
 
-use crate::asynchronous::{stream::SendingMessage, unix_incoming::UnixIncoming};
-use crate::common::{self, Domain};
+use crate::asynchronous::stream::SendingMessage;
+use crate::asynchronous::transport::{Listener, Socket};
 use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{
@@ -67,12 +58,11 @@ impl Service {
 
 /// A ttrpc Server (async).
 pub struct Server {
-    listeners: Vec<RawFd>,
+    listeners: Vec<Listener>,
     services: Arc<HashMap<String, Service>>,
-    domain: Option<Domain>,
 
     shutdown: shutdown::Notifier,
-    stop_listen_tx: Option<Sender<Sender<RawFd>>>,
+    stop_listen_tx: Option<Sender<Sender<Listener>>>,
 }
 
 impl Default for Server {
@@ -80,7 +70,6 @@ impl Default for Server {
         Server {
             listeners: Vec::with_capacity(1),
             services: Arc::new(HashMap::new()),
-            domain: None,
             shutdown: shutdown::with_timeout(DEFAULT_SERVER_SHUTDOWN_TIMEOUT).0,
             stop_listen_tx: None,
         }
@@ -92,36 +81,33 @@ impl Server {
         Server::default()
     }
 
-    pub fn bind(mut self, sockaddr: &str) -> Result<Self> {
-        if !self.listeners.is_empty() {
-            return Err(Error::Others(
-                "ttrpc-rust just support 1 sockaddr now".to_string(),
-            ));
-        }
-
-        let (fd, domain) = common::do_bind(sockaddr)?;
-        self.domain = Some(domain);
-
-        common::do_listen(fd)?;
-        self.listeners.push(fd);
-        Ok(self)
+    pub fn bind(self, sockaddr: &str) -> Result<Self> {
+        let listener =
+            Listener::bind(sockaddr).map_err(err_to_others_err!(e, "Listener::bind error "))?;
+        Ok(self.add_listener(listener))
     }
 
-    pub fn set_domain_unix(mut self) -> Self {
-        self.domain = Some(Domain::Unix);
+    pub fn add_listener(mut self, listener: Listener) -> Server {
+        self.listeners.push(listener);
         self
+    }
+
+    #[cfg(unix)]
+    /// # Safety
+    /// The file descriptor must represent a unix listener.
+    pub unsafe fn add_unix_listener(self, fd: RawFd) -> Result<Server> {
+        let listener = Listener::from_raw_unix_listener_fd(fd)
+            .map_err(err_to_others_err!(e, "from_raw_unix_listener_fd error"))?;
+        Ok(self.add_listener(listener))
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    pub fn set_domain_vsock(mut self) -> Self {
-        self.domain = Some(Domain::Vsock);
-        self
-    }
-
-    pub fn add_listener(mut self, fd: RawFd) -> Result<Server> {
-        self.listeners.push(fd);
-
-        Ok(self)
+    /// # Safety
+    /// The file descriptor must represent a vsock listener.
+    pub unsafe fn add_vsock_listener(self, fd: RawFd) -> Result<Self> {
+        let listener = Listener::from_raw_vsock_listener_fd(fd)
+            .map_err(err_to_others_err!(e, "from_raw_unix_listener_fd error"))?;
+        Ok(self.add_listener(listener))
     }
 
     pub fn register_service(mut self, new: HashMap<String, Service>) -> Server {
@@ -130,53 +116,18 @@ impl Server {
         self
     }
 
-    fn get_listenfd(&self) -> Result<RawFd> {
-        if self.listeners.is_empty() {
-            return Err(Error::Others("ttrpc-rust not bind".to_string()));
-        }
-
-        let listenfd = self.listeners[self.listeners.len() - 1];
-        Ok(listenfd)
+    fn get_listener(&mut self) -> Result<Listener> {
+        self.listeners
+            .pop()
+            .ok_or_else(|| Error::Others("ttrpc-rust not bind".to_string()))
     }
 
     pub async fn start(&mut self) -> Result<()> {
-        let listenfd = self.get_listenfd()?;
-
-        match self.domain.as_ref() {
-            Some(Domain::Unix) => {
-                let sys_unix_listener;
-                unsafe {
-                    sys_unix_listener = SysUnixListener::from_raw_fd(listenfd);
-                }
-                sys_unix_listener
-                    .set_nonblocking(true)
-                    .map_err(err_to_others_err!(e, "set_nonblocking error "))?;
-                let unix_listener = UnixListener::from_std(sys_unix_listener)
-                    .map_err(err_to_others_err!(e, "from_std error "))?;
-
-                let incoming = UnixIncoming::new(unix_listener);
-
-                self.do_start(incoming).await
-            }
-            // It seems that we can use UnixStream to represent both UnixStream and VsockStream.
-            // Whatever, we keep it for now for the compatibility and vsock-specific features maybe
-            // used in the future.
-            #[cfg(any(target_os = "linux", target_os = "android"))]
-            Some(Domain::Vsock) => {
-                let incoming = unsafe { VsockListener::from_raw_fd(listenfd).incoming() };
-                self.do_start(incoming).await
-            }
-            _ => Err(Error::Others(
-                "Domain is not set or not supported".to_string(),
-            )),
-        }
+        let incoming = self.get_listener()?;
+        self.do_start(incoming).await
     }
 
-    async fn do_start<I, S>(&mut self, mut incoming: I) -> Result<()>
-    where
-        I: Stream<Item = std::io::Result<S>> + Unpin + Send + 'static + AsRawFd,
-        S: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
-    {
+    async fn do_start(&mut self, mut incoming: Listener) -> Result<()> {
         let services = self.services.clone();
 
         let shutdown_waiter = self.shutdown.subscribe();
@@ -192,10 +143,8 @@ impl Server {
                             // Accept a new connection
                             match conn {
                                 Ok(conn) => {
-                                    let fd = conn.as_raw_fd();
                                     // spawn a connection handler, would not block
                                     spawn_connection_handler(
-                                        fd,
                                         conn,
                                         services.clone(),
                                         shutdown_waiter.clone(),
@@ -212,13 +161,7 @@ impl Server {
                     }
                     fd_tx = stop_listen_rx.recv() => {
                         if let Some(fd_tx) = fd_tx {
-                            // dup fd to keep the listener open
-                            // or the listener will be closed when the incoming was dropped.
-                            let dup_fd = unistd::dup(incoming.as_raw_fd()).unwrap();
-                            common::set_fd_close_exec(dup_fd).unwrap();
-                            drop(incoming);
-
-                            fd_tx.send(dup_fd).await.unwrap();
+                            fd_tx.send(incoming).await.unwrap();
                             break;
                         }
                     }
@@ -231,12 +174,7 @@ impl Server {
     pub async fn shutdown(&mut self) -> Result<()> {
         self.stop_listen().await;
         self.disconnect().await;
-
-        while let Some(fd) = self.listeners.pop() {
-            unistd::close(fd).unwrap_or_else(|e| {
-                warn!("failed to close listener fd: {}", e);
-            });
-        }
+        drop(self.listeners.pop());
         Ok(())
     }
 
@@ -265,16 +203,12 @@ impl Server {
     }
 }
 
-async fn spawn_connection_handler<C>(
-    fd: RawFd,
-    conn: C,
+async fn spawn_connection_handler(
+    conn: Socket,
     services: Arc<HashMap<String, Service>>,
     shutdown_waiter: shutdown::Waiter,
-) where
-    C: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
-{
+) {
     let delegate = ServerBuilder {
-        fd,
         services,
         streams: Arc::new(Mutex::new(HashMap::new())),
         shutdown_waiter,
@@ -290,20 +224,7 @@ async fn spawn_connection_handler<C>(
     });
 }
 
-impl FromRawFd for Server {
-    unsafe fn from_raw_fd(fd: RawFd) -> Self {
-        Self::default().add_listener(fd).unwrap()
-    }
-}
-
-impl AsRawFd for Server {
-    fn as_raw_fd(&self) -> RawFd {
-        self.listeners[0]
-    }
-}
-
 struct ServerBuilder {
-    fd: RawFd,
     services: Arc<HashMap<String, Service>>,
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
     shutdown_waiter: shutdown::Waiter,
@@ -320,21 +241,23 @@ impl Builder for ServerBuilder {
 
         (
             ServerReader {
-                fd: self.fd,
                 tx,
                 services: self.services.clone(),
                 streams: self.streams.clone(),
                 server_shutdown: self.shutdown_waiter.clone(),
                 handler_shutdown: disconnect_notifier,
             },
-            ServerWriter { rx, _server_shutdown: self.shutdown_waiter.clone() },
+            ServerWriter {
+                rx,
+                _server_shutdown: self.shutdown_waiter.clone(),
+            },
         )
     }
 }
 
 struct ServerWriter {
     rx: MessageReceiver,
-    _server_shutdown: shutdown::Waiter
+    _server_shutdown: shutdown::Waiter,
 }
 
 #[async_trait]
@@ -347,7 +270,6 @@ impl WriterDelegate for ServerWriter {
 }
 
 struct ServerReader {
-    fd: RawFd,
     tx: MessageSender,
     services: Arc<HashMap<String, Service>>,
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
@@ -381,8 +303,8 @@ impl ReaderDelegate for ServerReader {
     async fn handle_msg(&self, msg: GenMessage) {
         let handler_shutdown_waiter = self.handler_shutdown.subscribe();
         let context = self.context();
-        //Check if it is already shutdown no need select wait 
-        if !handler_shutdown_waiter.is_shutdown(){
+        //Check if it is already shutdown no need select wait
+        if !handler_shutdown_waiter.is_shutdown() {
             let (wait_tx, wait_rx) = tokio::sync::oneshot::channel::<()>();
             spawn(async move {
                 select! {
@@ -402,7 +324,6 @@ impl ReaderDelegate for ServerReader {
 impl ServerReader {
     fn context(&self) -> HandlerContext {
         HandlerContext {
-            fd: self.fd,
             tx: self.tx.clone(),
             services: self.services.clone(),
             streams: self.streams.clone(),
@@ -412,7 +333,6 @@ impl ServerReader {
 }
 
 struct HandlerContext {
-    fd: RawFd,
     tx: MessageSender,
     services: Arc<HashMap<String, Service>>,
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
@@ -571,7 +491,6 @@ impl HandlerContext {
         let path = utils::get_path(&req.service, &req.method);
 
         let ctx = TtrpcContext {
-            fd: self.fd,
             mh: req_msg.header,
             metadata: context::from_pb(&req.metadata),
             timeout_nano: req.timeout_nano,
@@ -635,7 +554,6 @@ impl HandlerContext {
         );
 
         let ctx = TtrpcContext {
-            fd: self.fd,
             mh: req_msg.header,
             metadata: context::from_pb(&req.metadata),
             timeout_nano: req.timeout_nano,
