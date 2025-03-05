@@ -117,9 +117,9 @@ impl Server {
     }
 
     fn get_listener(&mut self) -> Result<Listener> {
-        self.listeners
-            .pop()
-            .ok_or_else(|| Error::Others("ttrpc-rust not bind".to_string()))
+        self.listeners.pop().ok_or_else(|| {
+            Error::Others("ttrpc-rust server started with no bound listener".to_string())
+        })
     }
 
     pub async fn start(&mut self) -> Result<()> {
