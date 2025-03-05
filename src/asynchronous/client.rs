@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryInto;
+#[cfg(unix)]
 use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,7 +14,6 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use tokio::{self, sync::mpsc, task};
 
-use crate::common::client_connect;
 use crate::error::{get_rpc_status, Error, Result};
 use crate::proto::{
     Code, Codec, GenMessage, Message, MessageHeader, Request, Response, FLAG_NO_DATA,
@@ -24,9 +24,9 @@ use crate::r#async::shutdown;
 use crate::r#async::stream::{
     Kind, MessageReceiver, MessageSender, ResultReceiver, ResultSender, StreamInner,
 };
-use crate::r#async::utils;
 
 use super::stream::SendingMessage;
+use super::transport::Socket;
 
 /// A ttrpc Client (async).
 #[derive(Clone)]
@@ -37,15 +37,23 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn connect(sockaddr: &str) -> Result<Client> {
-        let fd = unsafe { client_connect(sockaddr)? };
-        Ok(Self::new(fd))
+    pub async fn connect(sockaddr: &str) -> Result<Client> {
+        let socket = Socket::connect(sockaddr)
+            .await
+            .map_err(err_to_others_err!(e, "Socket::connect error "))?;
+        Ok(Self::new(socket))
+    }
+
+    #[cfg(unix)]
+    /// # Safety
+    /// The file descriptor must represent a unix socket.
+    pub unsafe fn from_raw_unix_socket_fd(fd: RawFd) -> Client {
+        let stream = unsafe { Socket::from_raw_unix_socket_fd(fd) }.unwrap();
+        Self::new(stream)
     }
 
     /// Initialize a new [`Client`].
-    pub fn new(fd: RawFd) -> Client {
-        let stream = utils::new_unix_stream_from_raw_fd(fd);
-
+    pub fn new(stream: Socket) -> Client {
         let (req_tx, rx): (MessageSender, MessageReceiver) = mpsc::channel(100);
 
         let req_map = Arc::new(Mutex::new(HashMap::new()));
