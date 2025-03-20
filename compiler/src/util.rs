@@ -13,9 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use protobuf_codegen::code_writer::CodeWriter;
 use std::fmt;
 use std::str;
+
+use crate::vendored::CodeWriter;
 
 // A struct that divide a name into serveral parts that meets rust's guidelines.
 struct NameSpliter<'a> {
@@ -111,9 +112,9 @@ where
     F: Fn(&mut CodeWriter),
 {
     if public {
-        w.expr_block(&format!("pub async fn {}", sig), cb);
+        w.expr_block(format!("pub async fn {}", sig), cb);
     } else {
-        w.expr_block(&format!("async fn {}", sig), cb);
+        w.expr_block(format!("async fn {}", sig), cb);
     }
 }
 

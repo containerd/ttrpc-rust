@@ -156,7 +156,7 @@ impl Codegen {
         }
 
         ttrpc_compiler::codegen::gen_and_write(
-            &p.file_descriptors,
+            p.file_descriptors.as_slice(),
             &p.relative_paths,
             &dst_path,
             &self.customize,
