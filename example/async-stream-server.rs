@@ -10,20 +10,14 @@ use std::sync::Arc;
 
 use log::{info, LevelFilter};
 
-#[cfg(unix)]
 use protocols::asynchronous::{empty, streaming, streaming_ttrpc};
-#[cfg(unix)]
 use ttrpc::{asynchronous::Server, Error};
 
-#[cfg(unix)]
 use async_trait::async_trait;
-#[cfg(unix)]
-use tokio::signal::unix::{signal, SignalKind};
 use tokio::time::sleep;
 
 struct StreamingService;
 
-#[cfg(unix)]
 #[async_trait]
 impl streaming_ttrpc::Streaming for StreamingService {
     async fn echo(
@@ -173,12 +167,6 @@ impl streaming_ttrpc::Streaming for StreamingService {
     }
 }
 
-#[cfg(windows)]
-fn main() {
-    println!("This example only works on Unix-like OSes");
-}
-
-#[cfg(unix)]
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     simple_logging::log_to_stderr(LevelFilter::Info);
@@ -190,12 +178,10 @@ async fn main() {
         .unwrap()
         .register_service(service);
 
-    let mut hangup = signal(SignalKind::hangup()).unwrap();
-    let mut interrupt = signal(SignalKind::interrupt()).unwrap();
     server.start().await.unwrap();
 
     tokio::select! {
-        _ = hangup.recv() => {
+        _ = utils::hangup() => {
             // test stop_listen -> start
             info!("stop listen");
             server.stop_listen().await;
@@ -205,7 +191,7 @@ async fn main() {
             // hold some time for the new test connection.
             sleep(std::time::Duration::from_secs(100)).await;
         }
-        _ = interrupt.recv() => {
+        _ = utils::interrupt() => {
             // test graceful shutdown
             info!("graceful shutdown");
             server.shutdown().await.unwrap();

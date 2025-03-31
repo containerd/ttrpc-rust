@@ -84,9 +84,7 @@ fn wait_with_output(name: &str, cmd: Child) {
 #[test]
 fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
     run_example("server", "client")?;
-    #[cfg(unix)]
     run_example("async-server", "async-client")?;
-    #[cfg(unix)]
     run_example("async-stream-server", "async-stream-client")?;
 
     Ok(())

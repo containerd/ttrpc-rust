@@ -65,7 +65,6 @@ pub mod resp {
         }
     }
 
-    #[cfg(unix)]
     pub mod asynchronous {
         use crate::protocols::asynchronous::{
             agent::Interfaces, health::VersionCheckResponse, types::Interface,
@@ -95,4 +94,20 @@ pub mod resp {
             })
         }
     }
+}
+
+pub async fn hangup() {
+    #[cfg(unix)]
+    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+        .unwrap()
+        .recv()
+        .await
+        .unwrap();
+
+    #[cfg(not(unix))]
+    std::future::pending::<()>().await;
+}
+
+pub async fn interrupt() {
+    tokio::signal::ctrl_c().await.unwrap();
 }

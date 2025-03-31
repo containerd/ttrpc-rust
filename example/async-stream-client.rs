@@ -5,23 +5,15 @@
 
 mod protocols;
 mod utils;
-#[cfg(unix)]
 use protocols::asynchronous::{empty, streaming, streaming_ttrpc};
 use ttrpc::context::{self, Context};
-#[cfg(unix)]
 use ttrpc::r#async::Client;
 
-#[cfg(windows)]
-fn main() {
-    println!("This example only works on Unix-like OSes");
-}
-
-#[cfg(unix)]
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     simple_logging::log_to_stderr(log::LevelFilter::Info);
 
-    let c = Client::connect(utils::SOCK_ADDR).unwrap();
+    let c = Client::connect(utils::SOCK_ADDR).await.unwrap();
     let sc = streaming_ttrpc::StreamingClient::new(c);
 
     let _now = std::time::Instant::now();
@@ -75,7 +67,6 @@ fn default_ctx() -> Context {
     ctx
 }
 
-#[cfg(unix)]
 async fn echo_request(cli: streaming_ttrpc::StreamingClient) {
     let echo1 = streaming::EchoPayload {
         seq: 1,
@@ -87,7 +78,6 @@ async fn echo_request(cli: streaming_ttrpc::StreamingClient) {
     assert_eq!(resp.seq, echo1.seq + 1);
 }
 
-#[cfg(unix)]
 async fn echo_stream(cli: streaming_ttrpc::StreamingClient) {
     let mut stream = cli.echo_stream(default_ctx()).await.unwrap();
 
@@ -110,7 +100,6 @@ async fn echo_stream(cli: streaming_ttrpc::StreamingClient) {
     assert!(matches!(ret, Err(ttrpc::Error::Eof)));
 }
 
-#[cfg(unix)]
 async fn sum_stream(cli: streaming_ttrpc::StreamingClient) {
     let mut stream = cli.sum_stream(default_ctx()).await.unwrap();
 
@@ -138,7 +127,6 @@ async fn sum_stream(cli: streaming_ttrpc::StreamingClient) {
     assert_eq!(ssum.num, sum.num);
 }
 
-#[cfg(unix)]
 async fn divide_stream(cli: streaming_ttrpc::StreamingClient) {
     let expected = streaming::Sum {
         sum: 392,
@@ -158,7 +146,6 @@ async fn divide_stream(cli: streaming_ttrpc::StreamingClient) {
     assert_eq!(actual.num, expected.num);
 }
 
-#[cfg(unix)]
 async fn echo_null(cli: streaming_ttrpc::StreamingClient) {
     let mut stream = cli.echo_null(default_ctx()).await.unwrap();
 
@@ -174,7 +161,6 @@ async fn echo_null(cli: streaming_ttrpc::StreamingClient) {
     assert_eq!(res, empty::Empty::new());
 }
 
-#[cfg(unix)]
 async fn echo_null_stream(cli: streaming_ttrpc::StreamingClient) {
     let stream = cli.echo_null_stream(default_ctx()).await.unwrap();
 
@@ -206,7 +192,6 @@ async fn echo_null_stream(cli: streaming_ttrpc::StreamingClient) {
         .unwrap();
 }
 
-#[cfg(unix)]
 async fn echo_default_value(cli: streaming_ttrpc::StreamingClient) {
     let mut stream = cli
         .echo_default_value(default_ctx(), &Default::default()) // send default value to verify #208
@@ -219,7 +204,6 @@ async fn echo_default_value(cli: streaming_ttrpc::StreamingClient) {
     assert_eq!(received.msg, "");
 }
 
-#[cfg(unix)]
 async fn server_send_stream(cli: streaming_ttrpc::StreamingClient) {
     let mut stream = cli
         .server_send_stream(default_ctx(), &Default::default())

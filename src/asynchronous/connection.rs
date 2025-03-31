@@ -4,19 +4,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::os::unix::io::AsRawFd;
-
 use async_trait::async_trait;
 use log::{error, trace};
-use tokio::{
-    io::{split, AsyncRead, AsyncWrite, ReadHalf},
-    select, task,
-};
+use tokio::io::split;
+use tokio::{io::ReadHalf, select, task};
 
 use crate::error::Error;
 use crate::proto::{GenMessage, GenMessageError, MessageHeader};
 
-use super::stream::SendingMessage;
+use super::{stream::SendingMessage, transport::Socket};
 
 pub trait Builder {
     type Reader;
@@ -41,20 +37,19 @@ pub trait ReaderDelegate {
     async fn handle_err(&self, header: MessageHeader, e: Error);
 }
 
-pub struct Connection<S, B: Builder> {
-    reader: ReadHalf<S>,
+pub struct Connection<B: Builder> {
+    reader: ReadHalf<Socket>,
     writer_task: task::JoinHandle<()>,
     reader_delegate: B::Reader,
 }
 
-impl<S, B> Connection<S, B>
+impl<B> Connection<B>
 where
-    S: AsyncRead + AsyncWrite + AsRawFd + Send + 'static,
     B: Builder,
     B::Reader: ReaderDelegate + Send + Sync + 'static,
     B::Writer: WriterDelegate + Send + Sync + 'static,
 {
-    pub fn new(conn: S, mut builder: B) -> Self {
+    pub fn new(conn: Socket, mut builder: B) -> Self {
         let (reader, mut writer) = split(conn);
 
         let (reader_delegate, mut writer_delegate) = builder.build();
