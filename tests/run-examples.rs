@@ -86,7 +86,6 @@ fn wait_with_output(name: &str, cmd: Child) {
 
 #[test]
 fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
-
     #[cfg(feature = "rustprotobuf")]
     {
         println!("Running examples with rustprotobuf feature");
@@ -104,7 +103,6 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(unix)]
         run_example("async-stream-server", "async-stream-client", "example2")?;
     }
-
 
     Ok(())
 }

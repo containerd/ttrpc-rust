@@ -15,7 +15,6 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt as _;
 
-use nix::unistd;
 #[cfg(not(feature = "prost"))]
 use protobuf::Message as _;
 use tokio::{

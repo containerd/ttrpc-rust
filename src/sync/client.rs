@@ -22,7 +22,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-
+#[cfg(not(feature = "prost"))]
 use protobuf::Message;
 
 use crate::error::{Error, Result};
