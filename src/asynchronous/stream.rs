@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 
+use super::Client;
 use crate::error::{Error, Result};
 use crate::proto::{
     Code, Codec, GenMessage, MessageHeader, Response, FLAG_NO_DATA, FLAG_REMOTE_CLOSED,
@@ -283,6 +284,8 @@ where
 pub struct ClientStreamReceiver<P> {
     inner: StreamReceiver,
     _recv: PhantomData<P>,
+    // Hold the req_tx in Client to keep receiver task running
+    _client_guard: Client,
 }
 
 impl<P> ClientStreamReceiver<P>
@@ -290,10 +293,11 @@ where
     P: Codec,
     <P as Codec>::E: std::fmt::Display,
 {
-    pub fn new(inner: StreamInner) -> Self {
+    pub fn new(inner: StreamInner, _client_guard: Client) -> Self {
         Self {
             inner: inner.split().1,
             _recv: PhantomData,
+            _client_guard,
         }
     }
 

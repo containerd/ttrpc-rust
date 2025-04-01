@@ -23,14 +23,16 @@ build: debug
 
 .PHONY: test
 test:
+
 ifeq ($OS,Windows_NT)
 	# async isn't enabled for windows, don't test that feature
-	cargo test --verbose
+	cargo test --features sync,async,rustprotobuf
 else
 	# cargo test --all-features --verbose
 	cargo test --features sync,async,rustprotobuf
 	cargo test --no-default-features --features sync,async,prost
 endif
+
 	
 .PHONY: check
 check:
