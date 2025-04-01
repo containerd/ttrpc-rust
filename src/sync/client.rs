@@ -17,12 +17,13 @@
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
 
-use protobuf::Message;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+#[cfg(not(feature = "prost"))]
+use protobuf::Message;
 
 use crate::error::{Error, Result};
 use crate::proto::{
@@ -157,6 +158,10 @@ impl Client {
         })
     }
     pub fn request(&self, req: Request) -> Result<Response> {
+        #[cfg(feature = "prost")]
+        check_oversize(req.payload.len(), false)?;
+
+        #[cfg(not(feature = "prost"))]
         check_oversize(req.compute_size() as usize, false)?;
 
         let buf = req.encode().map_err(err_to_others_err!(e, ""))?;
@@ -184,9 +189,21 @@ impl Client {
         let buf = result?;
         let res = Response::decode(buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
 
-        let status = res.status();
-        if status.code() != Code::OK {
-            return Err(Error::RpcStatus((*status).clone()));
+        #[cfg(not(feature = "prost"))]
+        {
+            let status = res.status();
+            if status.code() != Code::OK {
+                return Err(Error::RpcStatus((*status).clone()));
+            }
+        }
+        #[cfg(feature = "prost")]
+        {
+            let status = res.status.as_ref();
+            if let Some(status) = status {
+                if status.code != Code::Ok as i32 {
+                    return Err(Error::RpcStatus(status.clone()));
+                }
+            }
         }
 
         Ok(res)
