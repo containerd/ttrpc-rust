@@ -1,21 +1,21 @@
 [package]
 name = "ttrpc-compiler"
 version = "0.7.0"
-edition = "2018"
-authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
-license = "Apache-2.0"
+edition = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+readme = "README.md"
 keywords = ["compiler", "ttrpc", "protobuf"]
 description = "ttRPC compiler for ttrpc"
 categories = ["network-programming"]
 repository = "https://github.com/containerd/ttrpc-rust/tree/master/compiler"
 homepage = "https://github.com/containerd/ttrpc-rust/tree/master/compiler"
-readme = "README.md"
 
 [dependencies]
 # lock home to avoid conflict with latest version
 home = "=0.5.9"
-protobuf = "3.7.2"
-protobuf-codegen = "3.7.2"
+protobuf = { workspace = true }
+protobuf-codegen = { workspace = true }
 prost = "0.8"
 prost-build = "0.8"
 prost-types = "0.8"
