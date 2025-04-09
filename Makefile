@@ -24,8 +24,7 @@ build: debug
 .PHONY: test
 test:
 ifeq ($OS,Windows_NT)
-	# async isn't enabled for windows, don't test that feature
-	cargo test --verbose
+	cargo test --features sync,async,rustprotobuf
 else
 	# cargo test --all-features --verbose
 	cargo test --features sync,async,rustprotobuf
@@ -36,11 +35,15 @@ endif
 check:
 	cargo fmt --all -- --check
 	cargo clippy --all-targets --features sync,async -- -D warnings
+	# Skip prost check on Windows
+ifeq ($(OS),Windows_NT)
+	@echo "Skipping prost check on Windows"
+else
 	cargo clippy --all-targets --no-default-features --features sync,async,prost -- -D warnings
+endif
 
-.PHONY: deps
-deps:
-	rustup update stable
-	rustup default stable
-	rustup component add rustfmt clippy
-	./install_protoc.sh
+.PHONY: check-all
+check-all:
+	$(MAKE) check
+	$(MAKE) -C compiler check
+	$(MAKE) -C ttrpc-codegen check
