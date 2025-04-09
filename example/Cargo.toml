@@ -9,6 +9,7 @@ readme = "README.md"
 repository = "https://github.com/alipay/ttrpc-rust"
 homepage = "https://github.com/alipay/ttrpc-rust"
 description = "An example of ttrpc."
+publish = false
 
 [dev-dependencies]
 protobuf = "3.7.2"
