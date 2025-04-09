@@ -11,3 +11,4 @@ example2/protocols/**/*.rs
 !example2/protocols/**/mod.rs
 src/ttrpc.rs
 example2/protocols/**/*.rs
+!example2/protocols/**/mod.rs

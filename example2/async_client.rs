@@ -12,7 +12,7 @@ use ttrpc::r#async::Client;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let c = Client::connect(utils::SOCK_ADDR).unwrap();
+    let c = Client::connect(utils::SOCK_ADDR).await.unwrap();
     let hc = health::HealthClient::new(c.clone());
     let ac = agent::AgentServiceClient::new(c);
 
