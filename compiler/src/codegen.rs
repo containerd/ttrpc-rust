@@ -43,8 +43,7 @@ use std::{
 };
 
 use crate::{
-    vendored::{proto_path_to_rust_mod, CodeWriter, RootScope},
-    Customize,
+    util::proto_path_to_rust_mod, util::scope::RootScope, util::writer::CodeWriter, Customize,
 };
 use protobuf::{
     descriptor::*,

@@ -26,7 +26,6 @@
 pub mod codegen;
 pub mod prost_codegen;
 mod util;
-mod vendored;
 
 /// Customize generated code.
 #[derive(Default, Debug, Clone)]
