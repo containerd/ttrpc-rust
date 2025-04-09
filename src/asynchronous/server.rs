@@ -171,6 +171,15 @@ impl Server {
         Ok(())
     }
 
+    pub async fn accept(&mut self, conn: Socket) -> std::io::Result<()> {
+        let delegate = ServerBuilder {
+            services: self.services.clone(),
+            streams: Arc::default(),
+            shutdown_waiter: self.shutdown.subscribe(),
+        };
+        Connection::new(conn, delegate).run().await
+    }
+
     pub async fn shutdown(&mut self) -> Result<()> {
         self.stop_listen().await;
         self.disconnect().await;
