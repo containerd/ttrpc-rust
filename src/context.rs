@@ -70,10 +70,16 @@ pub fn to_pb(kvs: HashMap<String, Vec<String>>) -> Vec<KeyValue> {
 
     for (k, vl) in kvs {
         for v in vl {
+            #[cfg(not(feature = "prost"))]
             let key = KeyValue {
                 key: k.clone(),
                 value: v.clone(),
                 ..Default::default()
+            };
+            #[cfg(feature = "prost")]
+            let key = KeyValue {
+                key: k.clone(),
+                value: v.clone(),
             };
             meta.push(key);
         }
@@ -96,10 +102,16 @@ mod tests {
             ("key1", "value1-2"),
             ("key2", "value2"),
         ] {
+            #[cfg(not(feature = "prost"))]
             let key = KeyValue {
                 key: i.0.to_string(),
                 value: i.1.to_string(),
                 ..Default::default()
+            };
+            #[cfg(feature = "prost")]
+            let key = KeyValue {
+                key: i.0.to_string(),
+                value: i.1.to_string(),
             };
             src.push(key);
         }

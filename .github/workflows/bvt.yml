@@ -10,6 +10,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+      - name: Install Protoc
+        run: ./install_protoc.sh
+        shell: bash
       - name: Check
         run: |
           make check-all
@@ -23,15 +26,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+      - name: Install Protoc
+        run: ./install_protoc.sh
+        shell: bash
       - name: Build
         run: |
           make
           make -C compiler
           make -C ttrpc-codegen
           make -C example build-examples
-        # It's important for windows to fail correctly
-        # https://github.com/actions/runner-images/issues/6668 
-        shell: bash
+          make -C example2 build-examples
 
   deny:
     runs-on: ubuntu-latest
