@@ -171,6 +171,15 @@ impl Server {
         Ok(())
     }
 
+    pub fn accept(&mut self, conn: Socket) -> Connection<impl Builder> {
+        let delegate = ServerBuilder {
+            services: self.services.clone(),
+            streams: Arc::default(),
+            shutdown_waiter: self.shutdown.subscribe(),
+        };
+        Connection::new(conn, delegate)
+    }
+
     pub async fn shutdown(&mut self) -> Result<()> {
         self.stop_listen().await;
         self.disconnect().await;
