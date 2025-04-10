@@ -171,16 +171,13 @@ impl Server {
         Ok(())
     }
 
-    pub async fn start_connected(&mut self, conn: Socket) -> std::io::Result<()> {
-        let services = self.services.clone();
-        let shutdown_waiter = self.shutdown.subscribe();
+    pub fn accept(&mut self, conn: Socket) -> Connection<impl Builder> {
         let delegate = ServerBuilder {
-            services,
-            streams: Arc::new(Mutex::new(HashMap::new())),
-            shutdown_waiter,
+            services: self.services.clone(),
+            streams: Arc::default(),
+            shutdown_waiter: self.shutdown.subscribe(),
         };
-        let conn = Connection::new(conn, delegate);
-        conn.run().await
+        Connection::new(conn, delegate)
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
