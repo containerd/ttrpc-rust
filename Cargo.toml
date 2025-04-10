@@ -39,7 +39,7 @@ prost-build = { version = "0.11", optional = true }
 
 [features]
 default = ["sync","rustprotobuf"]
-async = ["dep:async-trait", "dep:tokio", "dep:futures", "dep:tokio-vsock"]
+async = ["async-trait", "async-stream", "tokio", "futures", "tokio-vsock"]
 sync = []
 prost = ["dep:prost", "dep:prost-build"]
 rustprotobuf = ["dep:protobuf"]

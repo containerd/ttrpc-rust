@@ -173,20 +173,13 @@ fn start_method_handler_thread(
             {
                 let mut s = CodedInputStream::from_bytes(&buf);
                 req = Request::new();
-                req = Request::new();
                 if let Err(x) = req.merge_from(&mut s) {
                     let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
                     let mut res = Response::new();
                     res.set_status(status);
                     if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                         debug!("response_to_channel get error {:?}", x);
-                        quit.store(true, Ordering::SeqCst);
-                        // the client connection would be closed and
-                        // the connection dealing main thread would have
-                        // exited.
-                        control_tx
-                            .send(())
-                            .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
+                        quit_connection(quit, control_tx);
                         break;
                     }
                     continue;

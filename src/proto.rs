@@ -241,23 +241,9 @@ impl GenMessage {
             .await
             .map_err(|e| Error::Socket(e.to_string()))?;
 
-        if header.length > MESSAGE_LENGTH_MAX as u32 {
-            #[cfg(not(feature = "prost"))]
-            return Err(get_rpc_status(
-                Code::INVALID_ARGUMENT,
-                format!(
-                    "message length {} exceed maximum message size of {}",
-                    header.length, MESSAGE_LENGTH_MAX
-                ),
-            ));
-            #[cfg(feature = "prost")]
-            return Err(get_rpc_status(
-                Code::InvalidArgument,
-                format!(
-                    "message length {} exceed maximum message size of {}",
-                    header.length, MESSAGE_LENGTH_MAX
-                ),
-            ));
+        if let Err(e) = check_oversize(header.length as usize, true) {
+            discard_message_body(reader, &header).await?;
+            return Err(GenMessageError::ReturnError(header, e));
         }
 
         let mut content = vec![0; header.length as usize];
@@ -407,23 +393,12 @@ where
             .await
             .map_err(|e| Error::Socket(e.to_string()))?;
 
-        if header.length > MESSAGE_LENGTH_MAX as u32 {
-            #[cfg(not(feature = "prost"))]
-            return Err(get_rpc_status(
-                Code::INVALID_ARGUMENT,
-                format!(
-                    "message length {} exceed maximum message size of {}",
-                    header.length, MESSAGE_LENGTH_MAX
-                ),
-            ));
-            #[cfg(feature = "prost")]
-            return Err(get_rpc_status(
-                Code::InvalidArgument,
-                format!(
-                    "message length {} exceed maximum message size of {}",
-                    header.length, MESSAGE_LENGTH_MAX
-                ),
-            ));
+        if check_oversize(header.length as usize, true).is_err() {
+            discard_message_body(reader, &header).await?;
+            return Ok(Self {
+                header,
+                payload: C::decode("").map_err(err_to_others_err!(e, "Decode payload failed."))?,
+            });
         }
 
         let mut content = vec![0; header.length as usize];

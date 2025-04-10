@@ -61,20 +61,10 @@ pub fn response_to_channel(
 
 pub fn response_error_to_channel(
     stream_id: u32,
-    res: Response,
+    e: Error,
     tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
 ) -> Result<()> {
-    let buf = res.encode_to_vec();
-
-    let mh = MessageHeader {
-        length: buf.len() as u32,
-        stream_id,
-        type_: MESSAGE_TYPE_RESPONSE,
-        flags: 0,
-    };
-    tx.send((mh, buf)).map_err(err_to_others_err!(e, ""))?;
-
-    Ok(())
+    response_to_channel(stream_id, e.into(), tx)
 }
 
 /// Handle request in sync mode.

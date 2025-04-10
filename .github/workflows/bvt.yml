@@ -15,11 +15,7 @@ jobs:
         shell: bash
       - name: Check
         run: |
-          make deps
-          make check
-          make -C compiler check
-          make -C ttrpc-codegen check
-          make -C codegen check
+          make check-all
 
   make:
     name: Build
