@@ -63,6 +63,8 @@ pub struct Server {
 
     shutdown: shutdown::Notifier,
     stop_listen_tx: Option<Sender<Sender<Listener>>>,
+    // store the handle of the server main thread, for terminating when dropped
+    listener_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Default for Server {
@@ -72,6 +74,7 @@ impl Default for Server {
             services: Arc::new(HashMap::new()),
             shutdown: shutdown::with_timeout(DEFAULT_SERVER_SHUTDOWN_TIMEOUT).0,
             stop_listen_tx: None,
+            listener_handle: None,
         }
     }
 }
@@ -135,7 +138,8 @@ impl Server {
         let (stop_listen_tx, mut stop_listen_rx) = channel(1);
         self.stop_listen_tx = Some(stop_listen_tx);
 
-        spawn(async move {
+        // save the thread handle
+        self.listener_handle = Some(spawn(async move {
             loop {
                 select! {
                     conn = incoming.next() => {
@@ -167,13 +171,20 @@ impl Server {
                     }
                 }
             }
-        });
+        }));
         Ok(())
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
         self.stop_listen().await;
         self.disconnect().await;
+        
+        // cancel and wait listener thread exit
+        if let Some(handle) = self.listener_handle.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
+        
         drop(self.listeners.pop());
         Ok(())
     }
@@ -200,6 +211,47 @@ impl Server {
             self.listeners.clear();
             self.listeners.push(fd);
         }
+    }
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        // in drop method, abort the thread if not shutdown
+        if let Some(handle) = self.listener_handle.take() {
+            handle.abort();
+        }
+        let stop_listen_tx = self.stop_listen_tx.take();
+        let shutdown = std::mem::replace(&mut self.shutdown, shutdown::with_timeout(Duration::from_secs(0)).0);
+        
+        let _ = std::thread::spawn(move || {
+            if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                rt.block_on(async {
+                    // 1. close the listener
+                    if let Some(tx) = stop_listen_tx {
+                        let (fd_tx, mut fd_rx) = channel(1);
+                        if tx.send(fd_tx).await.is_ok() {
+                            // wait the listener back
+                            let _ = tokio::time::timeout(
+                                Duration::from_millis(100), 
+                                fd_rx.recv()
+                            ).await;
+                        }
+                    }
+                    
+                    // 2. shutdown the connection
+                    shutdown.shutdown();
+                    
+                    // 3. wait the connection exit, with a reasonable timeout
+                    let _ = tokio::time::timeout(
+                        Duration::from_millis(500),
+                        shutdown.wait_all_exit()
+                    ).await;
+                });
+            }
+        });
+        
+        // clean the listeners
+        self.listeners.clear();
     }
 }
 
@@ -599,5 +651,88 @@ impl HandlerContext {
                 error!("respond with status got error {:?}", e);
             })
             .ok();
+    }
+}
+
+#[cfg(unix)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    use std::time::Duration;
+
+    // test if the Server's Drop implementation correctly closes the thread
+    #[test]
+    fn test_server_drop_closes_threads() {
+        // create a flag to track the shutdown signal
+        let shutdown_received = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = shutdown_received.clone();
+
+        // create a runtime to execute async code
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        
+        rt.block_on(async {
+            // create a temporary socket address
+            let sockaddr = format!("unix:///tmp/test-server-drop-{}.sock", std::process::id());
+            
+            // remove the old socket file if it exists
+            if let Some(path) = sockaddr.strip_prefix("unix://") {
+                std::fs::remove_file(path).ok();
+            }
+            
+            // create a service structure to monitor the shutdown call
+            let mut service_map = HashMap::new();
+            let mut methods = HashMap::new();
+            
+            // create a custom method handler, which will be cleaned when the server is closed
+            struct TestHandler {
+                shutdown_signal: Arc<AtomicBool>,
+            }
+            
+            #[async_trait]
+            impl MethodHandler for TestHandler {
+                async fn handler(&self, _: TtrpcContext, _: Request) -> Result<Response> {
+                    Ok(Response::new())
+                }
+            }
+            
+            impl Drop for TestHandler {
+                fn drop(&mut self) {
+                    // when the handler is dropped, set the flag
+                    self.shutdown_signal.store(true, Ordering::SeqCst);
+                }
+            }
+            
+            // add the test handler
+            methods.insert(
+                "test_method".to_string(), 
+                Box::new(TestHandler { shutdown_signal: shutdown_received }) as Box<dyn MethodHandler + Send + Sync>
+            );
+            
+            let service = Service {
+                methods,
+                streams: HashMap::new(),
+            };
+            
+            service_map.insert("test_service".to_string(), service);
+            
+            // create and start the server
+            let mut server = Server::new().register_service(service_map);
+            server = server.bind(&sockaddr).unwrap();
+            server.start().await.unwrap();
+            
+            // drop the server in the inner scope
+            {
+                let _server = server;
+                // the server will be dropped here
+            }
+            
+            // give the Drop implementation some time to clean up resources
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            
+            // verify the handler has been cleaned, which indicates the shutdown has been run
+            assert!(shutdown_clone.load(Ordering::SeqCst), 
+                "the Drop implementation of the server should call the shutdown method, causing the handler to be cleaned");
+        });
     }
 }
