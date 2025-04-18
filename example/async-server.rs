@@ -86,3 +86,47 @@ async fn main() {
         }
     };
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    pub fn is_socket_in_use(sock_path: &str) -> bool {
+        use std::process::Command;
+
+        let output = Command::new("lsof")
+            .arg(sock_path)
+            .output()
+            .expect("Failed to execute lsof command");
+
+        output.status.success()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    // Add this test for test thread leak, if the caller forget to call the shutdown function.
+    async fn test_server_start() {
+        use std::time::Duration;
+
+        simple_logging::log_to_stderr(LevelFilter::Trace);
+        {
+            let hservice = health_ttrpc::create_health(Arc::new(HealthService {}));
+            utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
+            let mut server = Server::new()
+                .bind(utils::SOCK_ADDR)
+                .unwrap()
+                .register_service(hservice);
+            server.start().await.unwrap();
+        }
+        sleep(std::time::Duration::from_secs(1)).await;
+        // judge utils::SOCK_ADDR if still occupied
+        let addr = utils::SOCK_ADDR
+            .strip_prefix("unix://")
+            .expect("socket address is not expected");
+        // It should be true, because the server's thread is not stopped.
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert!(is_socket_in_use(addr));
+    }
+}
