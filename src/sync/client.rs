@@ -47,7 +47,8 @@ pub struct Client {
 
 impl Client {
     pub fn connect(sockaddr: &str) -> Result<Client> {
-        let conn = ClientConnection::client_connect(sockaddr)?;
+        let conn =
+            ClientConnection::new(fd).map_err(err_to_others_err!(e, "new ClientConnection"))?;
 
         Self::new_client(conn)
     }
