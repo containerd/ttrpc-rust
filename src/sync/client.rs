@@ -55,7 +55,8 @@ impl Client {
     #[cfg(unix)]
     /// Initialize a new [`Client`] from raw file descriptor.
     pub fn new(fd: RawFd) -> Result<Client> {
-        let conn = ClientConnection::new(fd);
+        let conn =
+            ClientConnection::new(fd).map_err(err_to_others_err!(e, "new ClientConnection"))?;
 
         Self::new_client(conn)
     }

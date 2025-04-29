@@ -228,14 +228,14 @@ pub struct ClientConnection {
 }
 
 impl ClientConnection {
-    pub fn client_connect(sockaddr: &str)-> Result<ClientConnection>   {
+    pub fn client_connect(sockaddr: &str) -> Result<ClientConnection> {
         let fd = unsafe { client_connect(sockaddr)? };
-        Ok(ClientConnection::new(fd))
+        ClientConnection::new(fd)
     }
 
-    pub(crate) fn new(fd: RawFd) -> ClientConnection {
+    pub(crate) fn new(fd: RawFd) -> Result<ClientConnection> {
         let (recver_fd, close_fd) =
-            socketpair(AddressFamily::Unix, SockType::Stream, None, SOCK_CLOEXEC).unwrap();
+            socketpair(AddressFamily::Unix, SockType::Stream, None, SOCK_CLOEXEC)?;
 
         // MacOS doesn't support descriptor creation with SOCK_CLOEXEC automically,
         // so there is a chance of leak if fork + exec happens in between of these calls.
@@ -245,11 +245,10 @@ impl ClientConnection {
             set_fd_close_exec(close_fd).unwrap();
         }
 
-
-        ClientConnection { 
-            fd, 
-            socket_pair: (recver_fd, close_fd) 
-        }
+        Ok(ClientConnection {
+            fd,
+            socket_pair: (recver_fd, close_fd),
+        })
     }
 
     pub fn ready(&self) -> std::result::Result<Option<()>, io::Error> {
