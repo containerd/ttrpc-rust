@@ -219,8 +219,8 @@ impl Server {
                             drop(incoming);
 
                             fd_tx.send(dup_fd).await.unwrap();
-                            break;
                         }
+                        break;
                     }
                 }
             }
@@ -327,14 +327,17 @@ impl Builder for ServerBuilder {
                 server_shutdown: self.shutdown_waiter.clone(),
                 handler_shutdown: disconnect_notifier,
             },
-            ServerWriter { rx, _server_shutdown: self.shutdown_waiter.clone() },
+            ServerWriter {
+                rx,
+                _server_shutdown: self.shutdown_waiter.clone(),
+            },
         )
     }
 }
 
 struct ServerWriter {
     rx: MessageReceiver,
-    _server_shutdown: shutdown::Waiter
+    _server_shutdown: shutdown::Waiter,
 }
 
 #[async_trait]
@@ -381,8 +384,8 @@ impl ReaderDelegate for ServerReader {
     async fn handle_msg(&self, msg: GenMessage) {
         let handler_shutdown_waiter = self.handler_shutdown.subscribe();
         let context = self.context();
-        //Check if it is already shutdown no need select wait 
-        if !handler_shutdown_waiter.is_shutdown(){
+        //Check if it is already shutdown no need select wait
+        if !handler_shutdown_waiter.is_shutdown() {
             let (wait_tx, wait_rx) = tokio::sync::oneshot::channel::<()>();
             spawn(async move {
                 select! {
