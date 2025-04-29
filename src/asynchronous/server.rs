@@ -162,8 +162,8 @@ impl Server {
                     fd_tx = stop_listen_rx.recv() => {
                         if let Some(fd_tx) = fd_tx {
                             fd_tx.send(incoming).await.unwrap();
-                            break;
                         }
+                        break;
                     }
                 }
             }
