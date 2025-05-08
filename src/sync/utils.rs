@@ -115,7 +115,7 @@ macro_rules! request_handler {
         let mut res = ::ttrpc::Response::default();
         match $class.service.$req_fn(&$ctx, req) {
             Ok(rep) => {
-                res.status = Some(::ttrpc::get_status(::ttrpc::Code::Ok, "".to_string()));
+                res.status = Some(::ttrpc::get_status(::ttrpc::Code::OK, "".to_string()));
                 rep.encode(&mut res.payload)
                     .map_err(::ttrpc::err_to_others!(e, "Encoding error "))?;
             }
@@ -125,7 +125,7 @@ macro_rules! request_handler {
                 }
                 _ => {
                     res.status = Some(::ttrpc::get_status(
-                        ::ttrpc::Code::Unknown,
+                        ::ttrpc::Code::UNKNOWN,
                         format!("{:?}", x),
                     ));
                 }

@@ -33,7 +33,7 @@ impl health::Health for HealthService {
     ) -> Result<health::HealthCheckResponse> {
         let mut status = Status::default();
 
-        status.code = Code::NotFound as i32;
+        status.code = Code::NOT_FOUND as i32;
         status.message = "Just for fun".to_string();
 
         sleep(std::time::Duration::from_secs(10)).await;
@@ -52,7 +52,7 @@ impl health::Health for HealthService {
         rep.agent_version = "mock.0.1".to_string();
         rep.grpc_version = "0.0.1".to_string();
         let mut status = Status::default();
-        status.code = Code::NotFound as i32;
+        status.code = Code::NOT_FOUND as i32;
         Ok(rep)
     }
 }

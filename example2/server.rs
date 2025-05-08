@@ -36,7 +36,7 @@ impl health::Health for HealthService {
         _: health::CheckRequest,
     ) -> Result<health::HealthCheckResponse> {
         let mut status = Status::default();
-        status.code = Code::NotFound as i32;
+        status.code = Code::NOT_FOUND as i32;
         status.message = "Just for fun".to_owned();
         Err(Error::RpcStatus(status))
     }
@@ -52,7 +52,7 @@ impl health::Health for HealthService {
         rep.agent_version = "mock 0.1".to_owned();
         rep.grpc_version = "0.0.1".to_owned();
         let mut status = Status::default();
-        status.code = Code::NotFound as i32;
+        status.code = Code::NOT_FOUND as i32;
         Ok(rep)
     }
 }

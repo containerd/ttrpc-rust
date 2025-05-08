@@ -122,7 +122,7 @@ impl streaming::Streaming for StreamingService {
         for t in tasks {
             t.await.unwrap().map_err(|e| {
                 ::ttrpc::Error::RpcStatus(::ttrpc::get_status(
-                    ::ttrpc::Code::Unknown,
+                    ::ttrpc::Code::UNKNOWN,
                     e.to_string(),
                 ))
             })?;
