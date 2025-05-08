@@ -62,7 +62,7 @@ macro_rules! async_request_handler {
         let mut res = ::ttrpc::Response::default();
         match $class.service.$req_fn(&$ctx, req).await {
             Ok(rep) => {
-                res.status = Some(::ttrpc::get_status(::ttrpc::Code::Ok, "".to_string()));
+                res.status = Some(::ttrpc::get_status(::ttrpc::Code::OK, "".to_string()));
                 rep.encode(&mut res.payload)
                     .map_err(::ttrpc::err_to_others!(e, "Encoding error "))?;
             }
@@ -72,7 +72,7 @@ macro_rules! async_request_handler {
                 }
                 _ => {
                     res.status = Some(::ttrpc::get_status(
-                        ::ttrpc::Code::Unknown,
+                        ::ttrpc::Code::UNKNOWN,
                         format!("{:?}", x),
                     ));
                 }
@@ -123,7 +123,7 @@ macro_rules! async_client_streamimg_handler {
         let mut res = ::ttrpc::Response::default();
         match $class.service.$req_fn(&$ctx, stream).await {
             Ok(rep) => {
-                res.status = Some(::ttrpc::get_status(::ttrpc::Code::Ok, "".to_string()));
+                res.status = Some(::ttrpc::get_status(::ttrpc::Code::OK, "".to_string()));
                 rep.encode(&mut res.payload)
                     .map_err(::ttrpc::err_to_others!(e, "Encoding error "))?;
             }
@@ -133,7 +133,7 @@ macro_rules! async_client_streamimg_handler {
                 }
                 _ => {
                     res.status = Some(::ttrpc::get_status(
-                        ::ttrpc::Code::Unknown,
+                        ::ttrpc::Code::UNKNOWN,
                         format!("{:?}", x),
                     ));
                 }
@@ -195,7 +195,7 @@ macro_rules! async_server_streamimg_handler {
                     }
                     _ => {
                         res.status = Some(::ttrpc::get_status(
-                            ::ttrpc::Code::Unknown,
+                            ::ttrpc::Code::UNKNOWN,
                             format!("{:?}", x),
                         ));
                     }
@@ -252,7 +252,7 @@ macro_rules! async_duplex_streamimg_handler {
                     }
                     _ => {
                         res.status = Some(::ttrpc::get_status(
-                            ::ttrpc::Code::Unknown,
+                            ::ttrpc::Code::UNKNOWN,
                             format!("{:?}", x),
                         ));
                     }

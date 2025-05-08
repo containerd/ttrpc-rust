@@ -119,7 +119,7 @@ impl TtrpcServiceGenerator {
                 Err(
                     #mod_path::Error::RpcStatus(
                         #mod_path::get_status(
-                            #mod_path::Code::NotFound,
+                            #mod_path::Code::NOT_FOUND,
                             #err_msg,
                         )
                     )
