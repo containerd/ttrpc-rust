@@ -496,12 +496,7 @@ impl StreamReceiver {
                 let resp = Response::decode(&msg.payload)
                     .map_err(err_to_others_err!(e, "Decode message failed."))?;
                 if let Some(status) = resp.status.as_ref() {
-                    #[cfg(not(feature = "prost"))]
                     if status.code() != Code::OK {
-                        return Err(Error::RpcStatus((*status).clone()));
-                    }
-                    #[cfg(feature = "prost")]
-                    if status.code != Code::Ok as i32 {
                         return Err(Error::RpcStatus((*status).clone()));
                     }
                 }

@@ -188,7 +188,6 @@ impl Client {
 
         let buf = result?;
         let res = Response::decode(buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
-
         #[cfg(not(feature = "prost"))]
         {
             let status = res.status();
@@ -200,12 +199,12 @@ impl Client {
         {
             let status = res.status.as_ref();
             if let Some(status) = status {
-                if status.code != Code::Ok as i32 {
+                if status.code != Code::OK as i32 {
                     return Err(Error::RpcStatus(status.clone()));
                 }
             }
         }
-
+    
         Ok(res)
     }
 }

@@ -355,18 +355,10 @@ impl HandlerContext {
         let stream_id = msg.header.stream_id;
 
         if (stream_id % 2) != 1 {
-            #[cfg(not(feature = "prost"))]
             Self::respond_with_status(
                 self.tx.clone(),
                 stream_id,
                 get_status(Code::INVALID_ARGUMENT, "stream id must be odd"),
-            )
-            .await;
-            #[cfg(feature = "prost")]
-            Self::respond_with_status(
-                self.tx.clone(),
-                stream_id,
-                get_status(Code::InvalidArgument, "stream id must be odd"),
             )
             .await;
             return;
@@ -417,7 +409,6 @@ impl HandlerContext {
                 if (msg.header.flags & FLAG_REMOTE_CLOSED) == FLAG_REMOTE_CLOSED
                     && !msg.payload.is_empty()
                 {
-                    #[cfg(not(feature = "prost"))]
                     Self::respond_with_status(
                         self.tx.clone(),
                         stream_id,
@@ -429,25 +420,11 @@ impl HandlerContext {
                         ),
                     )
                     .await;
-                    #[cfg(feature = "prost")]
-                    Self::respond_with_status(
-                        self.tx.clone(),
-                        stream_id,
-                        get_status(
-                            Code::InvalidArgument,
-                            format!(
-                                "Stream id {}: data close message connot include data",
-                                stream_id
-                            ),
-                        ),
-                    )
-                    .await;
                     return;
                 }
                 let stream_tx = self.streams.lock().unwrap().get(&stream_id).cloned();
                 if let Some(stream_tx) = stream_tx {
                     if let Err(e) = stream_tx.send(Ok(msg)).await {
-                        #[cfg(not(feature = "prost"))]
                         Self::respond_with_status(
                             self.tx.clone(),
                             stream_id,
@@ -457,30 +434,12 @@ impl HandlerContext {
                             ),
                         )
                         .await;
-                        #[cfg(feature = "prost")]
-                        Self::respond_with_status(
-                            self.tx.clone(),
-                            stream_id,
-                            get_status(
-                                Code::InvalidArgument,
-                                format!("Stream id {}: handling data error: {}", stream_id, e),
-                            ),
-                        )
-                        .await;
                     }
                 } else {
-                    #[cfg(not(feature = "prost"))]
                     Self::respond_with_status(
                         self.tx.clone(),
                         stream_id,
                         get_status(Code::INVALID_ARGUMENT, "Stream is no longer active"),
-                    )
-                    .await;
-                    #[cfg(feature = "prost")]
-                    Self::respond_with_status(
-                        self.tx.clone(),
-                        stream_id,
-                        get_status(Code::InvalidArgument, "Stream is no longer active"),
                     )
                     .await;
                 }
@@ -504,27 +463,14 @@ impl HandlerContext {
         //}
         // self.last_stream_id = header.stream_id;
 
-        #[cfg(not(feature = "prost"))]
         let req_msg = Message::<Request>::try_from(msg)
             .map_err(|e| get_status(Code::INVALID_ARGUMENT, e.to_string()))?;
-        #[cfg(feature = "prost")]
-        let req_msg = Message::<Request>::try_from(msg)
-            .map_err(|e| get_status(Code::InvalidArgument, e.to_string()))?;
-
         let req = &req_msg.payload;
         trace!("Got Message request {} {}", req.service, req.method);
 
-        #[cfg(not(feature = "prost"))]
         let srv = self.services.get(&req.service).ok_or_else(|| {
             get_status(
                 Code::INVALID_ARGUMENT,
-                format!("{} service does not exist", &req.service),
-            )
-        })?;
-        #[cfg(feature = "prost")]
-        let srv = self.services.get(&req.service).ok_or_else(|| {
-            get_status(
-                Code::InvalidArgument,
                 format!("{} service does not exist", &req.service),
             )
         })?;
@@ -536,17 +482,10 @@ impl HandlerContext {
         if let Some(stream) = srv.get_stream(&req.method) {
             return self.handle_stream(stream, req_msg, wait_tx).await;
         }
-        #[cfg(not(feature = "prost"))]
-        let err = Err(get_status(
+        Err(get_status(
             Code::UNIMPLEMENTED,
             format!("{} method", &req.method),
-        ));
-        #[cfg(feature = "prost")]
-        let err = Err(get_status(
-            Code::Unimplemented,
-            format!("{} method", &req.method),
-        ));
-        err
+        ))
     }
 
     async fn handle_method(
@@ -563,15 +502,9 @@ impl HandlerContext {
             timeout_nano: req.timeout_nano,
         };
 
-        #[cfg(not(feature = "prost"))]
         let get_unknown_status_and_log_err = |e| {
             error!("method handle {} got error {:?}", path, &e);
             get_status(Code::UNKNOWN, e)
-        };
-        #[cfg(feature = "prost")]
-        let get_unknown_status_and_log_err = |e| {
-            error!("method handle {} got error {:?}", path, &e);
-            get_status(Code::Unknown, e)
         };
         if req.timeout_nano == 0 {
             method
@@ -580,8 +513,7 @@ impl HandlerContext {
                 .map_err(get_unknown_status_and_log_err)
                 .map(Some)
         } else {
-            #[cfg(not(feature = "prost"))]
-            let resp = timeout(
+            timeout(
                 Duration::from_nanos(req.timeout_nano as u64),
                 method.handler(ctx, req),
             )
@@ -595,24 +527,7 @@ impl HandlerContext {
                 // Handler finished
                 r.map_err(get_unknown_status_and_log_err)
             })
-            .map(Some);
-            #[cfg(feature = "prost")]
-            let resp = timeout(
-                Duration::from_nanos(req.timeout_nano as u64),
-                method.handler(ctx, req),
-            )
-            .await
-            .map_err(|_| {
-                // Timed out
-                error!("method handle {} got error timed out", path);
-                get_status(Code::DeadlineExceeded, "timeout")
-            })
-            .and_then(|r| {
-                // Handler finished
-                r.map_err(get_unknown_status_and_log_err)
-            })
-            .map(Some);
-            resp
+            .map(Some)
         }
     }
 
@@ -658,32 +573,14 @@ impl HandlerContext {
                 header: MessageHeader::new_data(stream_id, req.payload.len() as u32),
                 payload: req.payload,
             };
-            #[cfg(not(feature = "prost"))]
             stream_tx.send(Ok(msg)).await.map_err(|e| {
                 error!("send stream data {} got error {:?}", path, &e);
                 get_status(Code::UNKNOWN, e)
             })?;
-            #[cfg(feature = "prost")]
-            stream_tx.send(Ok(msg)).await.map_err(|e| {
-                error!("send stream data {} got error {:?}", path, &e);
-                get_status(Code::Unknown, e)
-            })?;
         }
-
-        #[cfg(feature = "prost")]
-        return task.await
-            .unwrap_or_else(|e| {
-                Err(Error::Others(format!(
-                    "stream {} task got error {:?}",
-                    path, e
-                )))
-            })
-            .map_err(|e| get_status(Code::Unknown, e));
-
-        #[cfg(not(feature = "prost"))]
-        return task.await
+        task.await
             .unwrap_or_else(|e| Err(Error::Others(format!("stream {path} task got error {e:?}"))))
-            .map_err(|e| get_status(Code::UNKNOWN, e));
+            .map_err(|e| get_status(Code::UNKNOWN, e))
     }
 
     async fn respond(tx: MessageSender, stream_id: u32, resp: Response) -> Result<()> {
