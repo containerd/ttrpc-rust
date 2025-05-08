@@ -53,17 +53,8 @@ impl From<Error> for Response {
         let status = if let Error::RpcStatus(stat) = e {
             stat
         } else {
-            #[cfg(not(feature = "prost"))]
-            {
-                get_status(Code::UNKNOWN, e)
-            }
-
-            #[cfg(feature = "prost")]
-            {
-                get_status(Code::Unknown, e)
-            }
+            get_status(Code::UNKNOWN, e)
         };
-
         #[cfg(not(feature = "prost"))]
         {
             let mut res = Response::new();
@@ -113,12 +104,7 @@ pub fn sock_error_msg(size: usize, msg: String) -> Error {
         return Error::Socket(SOCK_DICONNECTED.to_string());
     }
 
-    #[cfg(not(feature = "prost"))]
-    let err = get_rpc_status(Code::INVALID_ARGUMENT, msg);
-    #[cfg(feature = "prost")]
-    let err = get_rpc_status(Code::InvalidArgument, msg);
-
-    err
+    get_rpc_status(Code::INVALID_ARGUMENT, msg)
 }
 
 macro_rules! err_to_others_err {

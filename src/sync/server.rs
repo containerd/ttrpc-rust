@@ -32,7 +32,7 @@ use std::thread::JoinHandle;
 
 use super::utils::response_error_to_channel;
 use crate::sync::utils::response_to_channel;
-use crate::{context, Status};
+use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
@@ -189,7 +189,7 @@ fn start_method_handler_thread(
             #[cfg(feature = "prost")]
             {
                 if let Err(x) = req.merge(&buf as &[u8]) {
-                    let status = get_status(Code::InvalidArgument, x.to_string());
+                    let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
                     let res = Response {
                         status: Some(status),
                         ..Default::default()
@@ -214,9 +214,9 @@ fn start_method_handler_thread(
             let path = format!("/{}/{}", req.service, req.method);
             let method = if let Some(x) = methods.get(&path) {
                 x
-            } else {
-                let status: Status;
-                let mut res: Response;
+            } else {   
+                let mut res;
+                let status;
                 #[cfg(not(feature = "prost"))]
                 {
                     status =
@@ -228,11 +228,10 @@ fn start_method_handler_thread(
                 #[cfg(feature = "prost")]
                 {
                     status =
-                    get_status(Code::InvalidArgument, format!("{path} does not exist"));
+                    get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
                     res = Response::default();
                     res.status = Some(status);
                 }
-
                 if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
                     info!("response_to_channel get error {:?}", x);
                     quit_connection(quit, control_tx);

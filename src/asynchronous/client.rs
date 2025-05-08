@@ -133,7 +133,7 @@ impl Client {
         {
             let status = res.status.as_ref();
             if let Some(status) = status {
-                if status.code != Code::Ok as i32 {
+                if status.code != Code::OK as i32 {
                     return Err(Error::RpcStatus(status.clone()));
                 }
             }
@@ -164,14 +164,8 @@ impl Client {
 
         if streaming_client {
             if !is_req_payload_empty {
-                #[cfg(not(feature = "prost"))]
                 return Err(get_rpc_status(
                     Code::INVALID_ARGUMENT,
-                    "Creating a ClientStream and sending payload at the same time is not allowed",
-                ));
-                #[cfg(feature = "prost")]
-                return Err(get_rpc_status(
-                    Code::Unknown,
                     "Creating a ClientStream and sending payload at the same time is not allowed",
                 ));
             }
