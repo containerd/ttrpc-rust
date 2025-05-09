@@ -219,8 +219,8 @@ impl Server {
                             drop(incoming);
 
                             fd_tx.send(dup_fd).await.unwrap();
-                            break;
                         }
+                        break;
                     }
                 }
             }
@@ -327,14 +327,17 @@ impl Builder for ServerBuilder {
                 server_shutdown: self.shutdown_waiter.clone(),
                 handler_shutdown: disconnect_notifier,
             },
-            ServerWriter { rx, _server_shutdown: self.shutdown_waiter.clone() },
+            ServerWriter {
+                rx,
+                _server_shutdown: self.shutdown_waiter.clone(),
+            },
         )
     }
 }
 
 struct ServerWriter {
     rx: MessageReceiver,
-    _server_shutdown: shutdown::Waiter
+    _server_shutdown: shutdown::Waiter,
 }
 
 #[async_trait]
@@ -381,8 +384,8 @@ impl ReaderDelegate for ServerReader {
     async fn handle_msg(&self, msg: GenMessage) {
         let handler_shutdown_waiter = self.handler_shutdown.subscribe();
         let context = self.context();
-        //Check if it is already shutdown no need select wait 
-        if !handler_shutdown_waiter.is_shutdown(){
+        //Check if it is already shutdown no need select wait
+        if !handler_shutdown_waiter.is_shutdown() {
             let (wait_tx, wait_rx) = tokio::sync::oneshot::channel::<()>();
             spawn(async move {
                 select! {
@@ -681,5 +684,38 @@ impl HandlerContext {
                 error!("respond with status got error {:?}", e);
             })
             .ok();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    pub const SOCK_ADDR: &str = r"unix://@/tmp/ttrpc-server-unit-test";
+
+    pub fn is_socket_in_use(sock_path: &str) -> bool {
+        let output = std::process::Command::new("bash")
+            .args(["-c", &format!("lsof -U|grep {}", sock_path)])
+            .output()
+            .expect("Failed to execute lsof command");
+
+        output.status.success()
+    }
+
+    #[tokio::test]
+    async fn test_server_lifetime() {
+        let addr = SOCK_ADDR
+            .strip_prefix("unix://@")
+            .expect("socket address is not expected");
+        {
+            let mut server = Server::new().bind(SOCK_ADDR).unwrap();
+            server.start().await.unwrap();
+            assert!(is_socket_in_use(addr));
+        }
+
+        // Sleep to wait for shutdown of server caused by server's lifetime over
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        assert!(!is_socket_in_use(addr));
     }
 }
