@@ -162,8 +162,8 @@ impl Server {
                     fd_tx = stop_listen_rx.recv() => {
                         if let Some(fd_tx) = fd_tx {
                             fd_tx.send(incoming).await.unwrap();
-                            break;
                         }
+                        break;
                     }
                 }
             }
@@ -599,5 +599,38 @@ impl HandlerContext {
                 error!("respond with status got error {:?}", e);
             })
             .ok();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    pub const SOCK_ADDR: &str = r"unix://@/tmp/ttrpc-server-unit-test";
+
+    pub fn is_socket_in_use(sock_path: &str) -> bool {
+        let output = std::process::Command::new("bash")
+            .args(["-c", &format!("lsof -U|grep {}", sock_path)])
+            .output()
+            .expect("Failed to execute lsof command");
+
+        output.status.success()
+    }
+
+    #[tokio::test]
+    async fn test_server_lifetime() {
+        let addr = SOCK_ADDR
+            .strip_prefix("unix://@")
+            .expect("socket address is not expected");
+        {
+            let mut server = Server::new().bind(SOCK_ADDR).unwrap();
+            server.start().await.unwrap();
+            assert!(is_socket_in_use(addr));
+        }
+
+        // Sleep to wait for shutdown of server caused by server's lifetime over
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        assert!(!is_socket_in_use(addr));
     }
 }
