@@ -14,6 +14,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt as _;
+
+#[cfg(not(feature = "prost"))]
 use protobuf::Message as _;
 use tokio::{
     self, select, spawn,
@@ -367,7 +369,12 @@ impl HandlerContext {
                 Ok(opt_msg) => match opt_msg {
                     Some(mut resp) => {
                         // Server: check size before sending to client
+                        #[cfg(not(feature = "prost"))]
                         if let Err(e) = check_oversize(resp.compute_size() as usize, true) {
+                            resp = e.into();
+                        }
+                        #[cfg(feature = "prost")]
+                        if let Err(e) = check_oversize(resp.size() as usize, true) {
                             resp = e.into();
                         }
 
@@ -458,7 +465,6 @@ impl HandlerContext {
 
         let req_msg = Message::<Request>::try_from(msg)
             .map_err(|e| get_status(Code::INVALID_ARGUMENT, e.to_string()))?;
-
         let req = &req_msg.payload;
         trace!("Got Message request {} {}", req.service, req.method);
 
@@ -591,8 +597,19 @@ impl HandlerContext {
     }
 
     async fn respond_with_status(tx: MessageSender, stream_id: u32, status: Status) {
-        let mut resp = Response::new();
-        resp.set_status(status);
+        #[cfg(not(feature = "prost"))]
+        let resp = {
+            let mut resp = Response::new();
+            resp.set_status(status);
+            resp
+        };
+        #[cfg(feature = "prost")]
+        let resp = {
+            Response {
+                status: Some(status),
+                ..Default::default()
+            }
+        };
         Self::respond(tx, stream_id, resp)
             .await
             .map_err(|e| {

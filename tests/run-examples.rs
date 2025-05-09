@@ -4,12 +4,16 @@ use std::{
     time::Duration,
 };
 
-fn run_example(server: &str, client: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn run_example(
+    server: &str,
+    client: &str,
+    example_dir: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     // start the server and give it a moment to start.
-    let mut server = do_run_example(server).spawn().unwrap();
+    let mut server = do_run_example(server, example_dir).spawn().unwrap();
     std::thread::sleep(Duration::from_secs(2));
 
-    let mut client = do_run_example(client).spawn().unwrap();
+    let mut client = do_run_example(client, example_dir).spawn().unwrap();
     let mut client_succeeded = false;
     let start = std::time::Instant::now();
     let timeout = Duration::from_secs(600);
@@ -55,14 +59,13 @@ fn run_example(server: &str, client: &str) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
-fn do_run_example(example: &str) -> Command {
+fn do_run_example(example: &str, example_dir: &str) -> Command {
     let mut cmd = Command::new("cargo");
-    cmd.arg("run")
-        .arg("--example")
-        .arg(example)
-        .stdout(std::process::Stdio::piped())
+    cmd.arg("run").arg("--example").arg(example);
+
+    cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .current_dir("example");
+        .current_dir(example_dir);
     cmd
 }
 
@@ -83,9 +86,23 @@ fn wait_with_output(name: &str, cmd: Child) {
 
 #[test]
 fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
-    run_example("server", "client")?;
-    run_example("async-server", "async-client")?;
-    run_example("async-stream-server", "async-stream-client")?;
+    #[cfg(feature = "rustprotobuf")]
+    {
+        println!("Running examples with rustprotobuf feature");
+        run_example("server", "client", "example")?;
+        run_example("async-server", "async-client", "example")?;
+        run_example("async-stream-server", "async-stream-client", "example")?;
+    }
+
+    #[cfg(feature = "prost")]
+    {
+        println!("Running examples with prost feature");
+        // run_example("server", "client", "example2")?;
+        #[cfg(unix)]
+        run_example("async-server", "async-client", "example2")?;
+        #[cfg(unix)]
+        run_example("async-stream-server", "async-stream-client", "example2")?;
+    }
 
     Ok(())
 }

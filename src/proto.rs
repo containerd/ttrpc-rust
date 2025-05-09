@@ -11,6 +11,7 @@ mod compiled {
 pub use compiled::ttrpc::*;
 
 use byteorder::{BigEndian, ByteOrder};
+#[cfg(not(feature = "prost"))]
 use protobuf::{CodedInputStream, CodedOutputStream};
 
 use crate::error::{get_rpc_status, Error, Result as TtResult};
@@ -266,6 +267,7 @@ pub trait Codec {
         Self: Sized;
 }
 
+#[cfg(not(feature = "prost"))]
 impl<M: protobuf::Message> Codec for M {
     type E = protobuf::Error;
 
@@ -285,6 +287,26 @@ impl<M: protobuf::Message> Codec for M {
     fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E> {
         let mut s = CodedInputStream::from_bytes(buf.as_ref());
         M::parse_from(&mut s)
+    }
+}
+
+#[cfg(feature = "prost")]
+impl<M: prost::Message + Default> Codec for M {
+    type E = std::io::Error;
+
+    fn size(&self) -> u32 {
+        self.encoded_len() as u32
+    }
+
+    fn encode(&self) -> Result<Vec<u8>, Self::E> {
+        Ok(self.encode_to_vec())
+    }
+
+    fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E>
+    where
+        Self: Sized,
+    {
+        prost::Message::decode(buf.as_ref()).map_err(std::io::Error::from)
     }
 }
 
@@ -428,6 +450,7 @@ mod tests {
         117, 101, 49,
     ];
 
+    #[cfg(not(feature = "prost"))]
     fn new_protobuf_request() -> Request {
         let mut creq = Request::new();
         creq.set_service("grpc.TestServices".to_string());
@@ -441,6 +464,21 @@ mod tests {
         creq.set_metadata(meta);
         creq.payload = vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9];
         creq
+    }
+
+    #[cfg(feature = "prost")]
+    fn new_protobuf_request() -> Request {
+        let meta = vec![KeyValue {
+            key: "test_key1".to_string(),
+            value: "test_value1".to_string(),
+        }];
+        Request {
+            service: "grpc.TestServices".to_owned(),
+            method: "Test".to_owned(),
+            timeout_nano: 20 * 1000 * 1000,
+            metadata: meta,
+            payload: vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9],
+        }
     }
 
     #[test]
@@ -479,6 +517,7 @@ mod tests {
     }
 
     #[cfg(feature = "async")]
+    #[cfg(not(feature = "prost"))]
     #[tokio::test]
     async fn async_gen_message() {
         // Test packet which exceeds maximum message size
@@ -519,6 +558,7 @@ mod tests {
     }
 
     #[cfg(feature = "async")]
+    #[cfg(not(feature = "prost"))]
     #[tokio::test]
     async fn async_message() {
         // Test packet which exceeds maximum message size

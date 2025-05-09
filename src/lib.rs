@@ -62,10 +62,10 @@ pub use crate::error::{get_status, Error, Result};
 
 cfg_sync! {
     pub mod sync;
-    #[doc(hidden)]
-    pub use sync::response_to_channel;
     #[doc(inline)]
     pub use sync::{MethodHandler, TtrpcContext};
+    #[doc(inline)]
+    pub use sync::utils::{response_to_channel, response_error_to_channel};
     pub use sync::Client;
     #[doc(inline)]
     pub use sync::Server;
@@ -76,3 +76,17 @@ cfg_async! {
     #[doc(hidden)]
     pub use asynchronous as r#async;
 }
+
+macro_rules! assert_unique_feature {
+    () => {};
+    ($first:tt $(,$rest:tt)*) => {
+        $(
+            #[cfg(all(feature = $first, feature = $rest))]
+            compile_error!(concat!("features \"", $first, "\" and \"", $rest, "\" cannot be used together"));
+        )*
+        assert_unique_feature!($($rest),*);
+    }
+}
+
+// Enabling feature the rustprotobuf and the prost together is prohibited.
+assert_unique_feature!("rustprotobuf", "prost");

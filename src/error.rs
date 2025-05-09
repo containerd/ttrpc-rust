@@ -13,8 +13,8 @@
 // limitations under the License.
 
 //! Error and Result of ttrpc and relevant functions, macros.
-
-use crate::proto::{Code, Response, Status};
+#[allow(unused_imports)]
+use crate::proto::{self, Code, Response, Status};
 use std::result;
 use thiserror::Error;
 
@@ -55,16 +55,26 @@ impl From<Error> for Response {
         } else {
             get_status(Code::UNKNOWN, e)
         };
-
-        let mut res = Response::new();
-        res.set_status(status);
-        res
+        #[cfg(not(feature = "prost"))]
+        {
+            let mut res = Response::new();
+            res.set_status(status);
+            res
+        }
+        #[cfg(feature = "prost")]
+        {
+            Response {
+                status: Some(status),
+                ..Default::default()
+            }
+        }
     }
 }
 
 /// A specialized Result type for ttrpc.
 pub type Result<T> = result::Result<T, Error>;
 
+#[cfg(not(feature = "prost"))]
 /// Get ttrpc::Status from ttrpc::Code and a message.
 pub fn get_status(c: Code, msg: impl ToString) -> Status {
     let mut status = Status::new();
@@ -72,6 +82,16 @@ pub fn get_status(c: Code, msg: impl ToString) -> Status {
     status.set_message(msg.to_string());
 
     status
+}
+
+#[cfg(feature = "prost")]
+/// Get ttrpc::Status from ttrpc::Code and a message.
+pub fn get_status(c: Code, msg: impl ToString) -> Status {
+    Status {
+        code: c as i32,
+        message: msg.to_string(),
+        ..Default::default()
+    }
 }
 
 pub fn get_rpc_status(c: Code, msg: impl ToString) -> Error {
