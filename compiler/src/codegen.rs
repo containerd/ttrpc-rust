@@ -42,18 +42,18 @@ use std::{
     io::BufRead,
 };
 
-use crate::Customize;
+use crate::{
+    util::proto_path_to_rust_mod, util::scope::RootScope, util::writer::CodeWriter, Customize,
+};
 use protobuf::{
-    compiler_plugin::{GenRequest, GenResult},
     descriptor::*,
-    descriptorx::*,
     plugin::{
-        CodeGeneratorRequest, CodeGeneratorResponse, CodeGeneratorResponse_Feature,
-        CodeGeneratorResponse_File,
+        code_generator_response::Feature as CodeGeneratorResponse_Feature,
+        code_generator_response::File as CodeGeneratorResponse_File, CodeGeneratorRequest,
+        CodeGeneratorResponse,
     },
     Message,
 };
-use protobuf_codegen::code_writer::CodeWriter;
 use std::fs::File;
 use std::io::{self, stdin, stdout, Write};
 use std::path::Path;
@@ -91,7 +91,7 @@ impl<'a> MethodGen<'a> {
         format!(
             "super::{}",
             self.root_scope
-                .find_message(self.proto.get_input_type())
+                .find_message(self.proto.input_type())
                 .rust_fq_name()
         )
     }
@@ -100,16 +100,13 @@ impl<'a> MethodGen<'a> {
         format!(
             "super::{}",
             self.root_scope
-                .find_message(self.proto.get_output_type())
+                .find_message(self.proto.output_type())
                 .rust_fq_name()
         )
     }
 
     fn method_type(&self) -> (MethodType, String) {
-        match (
-            self.proto.get_client_streaming(),
-            self.proto.get_server_streaming(),
-        ) {
+        match (self.proto.client_streaming(), self.proto.server_streaming()) {
             (false, false) => (MethodType::Unary, fq_grpc("MethodType::Unary")),
             (true, false) => (
                 MethodType::ClientStreaming,
@@ -128,11 +125,11 @@ impl<'a> MethodGen<'a> {
     }
 
     fn name(&self) -> String {
-        to_snake_case(self.proto.get_name())
+        to_snake_case(self.proto.name())
     }
 
     fn struct_name(&self) -> String {
-        to_camel_case(self.proto.get_name())
+        to_camel_case(self.proto.name())
     }
 
     fn const_method_name(&self) -> String {
@@ -145,7 +142,7 @@ impl<'a> MethodGen<'a> {
 
     fn write_handler(&self, w: &mut CodeWriter) {
         w.block(
-            &format!("struct {}Method {{", self.struct_name()),
+            format!("struct {}Method {{", self.struct_name()),
             "}",
             |w| {
                 w.write_line(format!(
@@ -163,13 +160,13 @@ impl<'a> MethodGen<'a> {
     }
 
     fn write_handler_impl(&self, w: &mut CodeWriter) {
-        w.block(&format!("impl ::ttrpc::MethodHandler for {}Method {{", self.struct_name()), "}",
+        w.block(format!("impl ::ttrpc::MethodHandler for {}Method {{", self.struct_name()), "}",
         |w| {
             w.block("fn handler(&self, ctx: ::ttrpc::TtrpcContext, req: ::ttrpc::Request) -> ::ttrpc::Result<()> {", "}",
             |w| {
                 w.write_line(format!("::ttrpc::request_handler!(self, ctx, req, {}, {}, {});",
-                                        proto_path_to_rust_mod(self.root_scope.find_message(self.proto.get_input_type()).get_scope().get_file_descriptor().get_name()),
-                                        self.root_scope.find_message(self.proto.get_input_type()).rust_name(),
+                                        proto_path_to_rust_mod(self.root_scope.find_message(self.proto.input_type()).fd.name()),
+                                        self.root_scope.find_message(self.proto.input_type()).rust_name(),
                                         self.name()));
                 w.write_line("Ok(())");
             });
@@ -180,20 +177,20 @@ impl<'a> MethodGen<'a> {
         w.write_line("#[async_trait]");
         match self.method_type().0 {
             MethodType::Unary => {
-                w.block(&format!("impl ::ttrpc::r#async::MethodHandler for {}Method {{", self.struct_name()), "}",
+                w.block(format!("impl ::ttrpc::r#async::MethodHandler for {}Method {{", self.struct_name()), "}",
                 |w| {
                     w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, req: ::ttrpc::Request) -> ::ttrpc::Result<::ttrpc::Response> {", "}",
                         |w| {
                             w.write_line(format!("::ttrpc::async_request_handler!(self, ctx, req, {}, {}, {});",
-                                        proto_path_to_rust_mod(self.root_scope.find_message(self.proto.get_input_type()).get_scope().get_file_descriptor().get_name()),
-                                        self.root_scope.find_message(self.proto.get_input_type()).rust_name(),
+                                        proto_path_to_rust_mod(self.root_scope.find_message(self.proto.input_type()).fd.name()),
+                                        self.root_scope.find_message(self.proto.input_type()).rust_name(),
                                         self.name()));
                     });
             });
             }
             // only receive
             MethodType::ClientStreaming => {
-                w.block(&format!("impl ::ttrpc::r#async::StreamHandler for {}Method {{", self.struct_name()), "}",
+                w.block(format!("impl ::ttrpc::r#async::StreamHandler for {}Method {{", self.struct_name()), "}",
                 |w| {
                     w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, inner: ::ttrpc::r#async::StreamInner) -> ::ttrpc::Result<Option<::ttrpc::Response>> {", "}",
                         |w| {
@@ -204,20 +201,20 @@ impl<'a> MethodGen<'a> {
             }
             // only send
             MethodType::ServerStreaming => {
-                w.block(&format!("impl ::ttrpc::r#async::StreamHandler for {}Method {{", self.struct_name()), "}",
+                w.block(format!("impl ::ttrpc::r#async::StreamHandler for {}Method {{", self.struct_name()), "}",
                 |w| {
                     w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, mut inner: ::ttrpc::r#async::StreamInner) -> ::ttrpc::Result<Option<::ttrpc::Response>> {", "}",
                         |w| {
                             w.write_line(format!("::ttrpc::async_server_streamimg_handler!(self, ctx, inner, {}, {}, {});",
-                                        proto_path_to_rust_mod(self.root_scope.find_message(self.proto.get_input_type()).get_scope().get_file_descriptor().get_name()),
-                                        self.root_scope.find_message(self.proto.get_input_type()).rust_name(),
+                                        proto_path_to_rust_mod(self.root_scope.find_message(self.proto.input_type()).fd.name()),
+                                        self.root_scope.find_message(self.proto.input_type()).rust_name(),
                                         self.name()));
                     });
             });
             }
             // receive and send
             MethodType::Duplex => {
-                w.block(&format!("impl ::ttrpc::r#async::StreamHandler for {}Method {{", self.struct_name()), "}",
+                w.block(format!("impl ::ttrpc::r#async::StreamHandler for {}Method {{", self.struct_name()), "}",
                 |w| {
                     w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, inner: ::ttrpc::r#async::StreamInner) -> ::ttrpc::Result<Option<::ttrpc::Response>> {", "}",
                         |w| {
@@ -276,13 +273,13 @@ impl<'a> MethodGen<'a> {
     fn write_client(&self, w: &mut CodeWriter) {
         let method_name = self.name();
         if let MethodType::Unary = self.method_type().0 {
-            w.pub_fn(&self.unary(&method_name), |w| {
+            w.pub_fn(self.unary(&method_name), |w| {
                 w.write_line(format!("let mut cres = {}::new();", self.output()));
                 w.write_line(format!(
                     "::ttrpc::client_request!(self, ctx, req, \"{}.{}\", \"{}\", cres);",
                     self.package_name,
                     self.service_name,
-                    &self.proto.get_name(),
+                    &self.proto.name(),
                 ));
                 w.write_line("Ok(cres)");
             });
@@ -300,7 +297,7 @@ impl<'a> MethodGen<'a> {
                         "::ttrpc::async_client_request!(self, ctx, req, \"{}.{}\", \"{}\", cres);",
                         self.package_name,
                         self.service_name,
-                        &self.proto.get_name(),
+                        &self.proto.name(),
                     ));
                 });
             }
@@ -311,7 +308,7 @@ impl<'a> MethodGen<'a> {
                         "::ttrpc::async_client_stream_send!(self, ctx, \"{}.{}\", \"{}\");",
                         self.package_name,
                         self.service_name,
-                        &self.proto.get_name(),
+                        &self.proto.name(),
                     ));
                 });
             }
@@ -322,7 +319,7 @@ impl<'a> MethodGen<'a> {
                         "::ttrpc::async_client_stream_receive!(self, ctx, req, \"{}.{}\", \"{}\");",
                         self.package_name,
                         self.service_name,
-                        &self.proto.get_name(),
+                        &self.proto.name(),
                     ));
                 });
             }
@@ -333,7 +330,7 @@ impl<'a> MethodGen<'a> {
                         "::ttrpc::async_client_stream!(self, ctx, \"{}.{}\", \"{}\");",
                         self.package_name,
                         self.service_name,
-                        &self.proto.get_name(),
+                        &self.proto.name(),
                     ));
                 });
             }
@@ -383,7 +380,7 @@ impl<'a> MethodGen<'a> {
         let cb = |w: &mut CodeWriter| {
             w.write_line(format!("Err(::ttrpc::Error::RpcStatus(::ttrpc::get_status(::ttrpc::Code::NOT_FOUND, \"/{}.{}/{} is not supported\".to_string())))",
             self.package_name,
-            self.service_name, self.proto.get_name(),));
+            self.service_name, self.proto.name(),));
         };
 
         if async_on(self.customize, "server") {
@@ -403,7 +400,7 @@ impl<'a> MethodGen<'a> {
                     Box::new({}Method{{service: service.clone()}}) as Box<dyn {} + Send + Sync>);",
             self.package_name,
             self.service_name,
-            self.proto.get_name(),
+            self.proto.name(),
             self.struct_name(),
             method_handler_name,
         );
@@ -415,7 +412,7 @@ impl<'a> MethodGen<'a> {
             format!(
                 "methods.insert(\"{}\".to_string(),
                     Box::new({}Method{{service: service.clone()}}) as {});",
-                self.proto.get_name(),
+                self.proto.name(),
                 self.struct_name(),
                 "Box<dyn ::ttrpc::r#async::MethodHandler + Send + Sync>"
             )
@@ -423,7 +420,7 @@ impl<'a> MethodGen<'a> {
             format!(
                 "streams.insert(\"{}\".to_string(),
                     Arc::new({}Method{{service: service.clone()}}) as {});",
-                self.proto.get_name(),
+                self.proto.name(),
                 self.struct_name(),
                 "Arc<dyn ::ttrpc::r#async::StreamHandler + Send + Sync>"
             )
@@ -443,17 +440,17 @@ impl<'a> ServiceGen<'a> {
     fn new(
         proto: &'a ServiceDescriptorProto,
         file: &FileDescriptorProto,
-        root_scope: &'a RootScope,
+        root_scope: &'a RootScope<'a>,
         customize: &'a Customize,
     ) -> ServiceGen<'a> {
         let methods = proto
-            .get_method()
+            .method
             .iter()
             .map(|m| {
                 MethodGen::new(
                     m,
-                    file.get_package().to_string(),
-                    util::to_camel_case(proto.get_name()),
+                    file.package().to_string(),
+                    util::to_camel_case(proto.name()),
                     root_scope,
                     customize,
                 )
@@ -464,12 +461,12 @@ impl<'a> ServiceGen<'a> {
             proto,
             methods,
             customize,
-            package_name: file.get_package().to_string(),
+            package_name: file.package().to_string(),
         }
     }
 
     fn service_name(&self) -> String {
-        util::to_camel_case(self.proto.get_name())
+        util::to_camel_case(self.proto.name())
     }
 
     fn service_path(&self) -> String {
@@ -510,7 +507,7 @@ impl<'a> ServiceGen<'a> {
 
         w.impl_self_block(self.client_name(), |w| {
             w.pub_fn("new(client: ::ttrpc::Client) -> Self", |w| {
-                w.expr_block(&self.client_name(), |w| {
+                w.expr_block(self.client_name(), |w| {
                     w.write_line("client,");
                 });
             });
@@ -532,7 +529,7 @@ impl<'a> ServiceGen<'a> {
 
         w.impl_self_block(self.client_name(), |w| {
             w.pub_fn("new(client: ::ttrpc::r#async::Client) -> Self", |w| {
-                w.expr_block(&self.client_name(), |w| {
+                w.expr_block(self.client_name(), |w| {
                     w.write_line("client,");
                 });
             });
@@ -676,60 +673,60 @@ fn write_generated_common(w: &mut CodeWriter) {
 
 fn gen_file(
     file: &FileDescriptorProto,
-    root_scope: &RootScope,
+    root_scope: &RootScope<'_>,
     customize: &Customize,
-) -> Option<GenResult> {
-    if file.get_service().is_empty() {
+) -> Option<CodeGeneratorResponse_File> {
+    if file.service.is_empty() {
         return None;
     }
 
-    let base = protobuf::descriptorx::proto_path_to_rust_mod(file.get_name());
+    let base = proto_path_to_rust_mod(file.name());
 
-    let mut v = Vec::new();
-    {
-        let mut w = CodeWriter::new(&mut v);
+    let mut w = CodeWriter::new();
 
-        write_generated_by(&mut w, "ttrpc-compiler", env!("CARGO_PKG_VERSION"));
+    write_generated_by(&mut w, "ttrpc-compiler", env!("CARGO_PKG_VERSION"));
 
-        w.write_line("use protobuf::{CodedInputStream, CodedOutputStream, Message};");
-        w.write_line("use std::collections::HashMap;");
-        w.write_line("use std::sync::Arc;");
-        if customize.async_all || customize.async_client || customize.async_server {
-            w.write_line("use async_trait::async_trait;");
-        }
-
-        for service in file.get_service() {
-            w.write_line("");
-            ServiceGen::new(service, file, root_scope, customize).write(&mut w);
-        }
+    w.write_line("use protobuf::{CodedInputStream, CodedOutputStream, Message};");
+    w.write_line("use std::collections::HashMap;");
+    w.write_line("use std::sync::Arc;");
+    if customize.async_all || customize.async_client || customize.async_server {
+        w.write_line("use async_trait::async_trait;");
     }
 
-    Some(GenResult {
-        name: base + "_ttrpc.rs",
-        content: v,
-    })
+    for service in file.service.iter() {
+        w.write_line("");
+        ServiceGen::new(service, file, root_scope, customize).write(&mut w);
+    }
+
+    let mut file = CodeGeneratorResponse_File::new();
+    file.set_name(format!("{base}_ttrpc.rs"));
+    file.set_content(w.take_code());
+    Some(file)
 }
 
 pub fn gen(
     file_descriptors: &[FileDescriptorProto],
     files_to_generate: &[String],
     customize: &Customize,
-) -> Vec<GenResult> {
+) -> CodeGeneratorResponse {
     let files_map: HashMap<&str, &FileDescriptorProto> =
-        file_descriptors.iter().map(|f| (f.get_name(), f)).collect();
+        file_descriptors.iter().map(|f| (f.name(), f)).collect();
 
     let root_scope = RootScope { file_descriptors };
 
-    let mut results = Vec::new();
+    let mut results = CodeGeneratorResponse::new();
+    results.set_supported_features(CodeGeneratorResponse_Feature::FEATURE_PROTO3_OPTIONAL as _);
 
     for file_name in files_to_generate {
         let file = files_map[&file_name[..]];
 
-        if file.get_service().is_empty() {
+        if file.service.is_empty() {
             continue;
         }
 
-        results.extend(gen_file(file, &root_scope, customize).into_iter());
+        results
+            .file
+            .extend(gen_file(file, &root_scope, customize).into_iter());
     }
 
     results
@@ -758,8 +755,8 @@ pub fn gen_and_write(
             .write(true)
             .truncate(true)
             .open(&file_path)?;
-        for r in &results {
-            let prefix_name: Vec<&str> = r.name.split('.').collect();
+        for r in &results.file {
+            let prefix_name: Vec<&str> = r.name().split('.').collect();
             set.insert(format!("pub mod {};", prefix_name[0]));
         }
         for item in &set {
@@ -768,11 +765,11 @@ pub fn gen_and_write(
         file_write.flush()?;
     }
 
-    for r in &results {
+    for r in &results.file {
         let mut file_path = out_dir.to_owned();
-        file_path.push(&r.name);
+        file_path.push(r.name());
         let mut file_writer = File::create(&file_path)?;
-        file_writer.write_all(&r.content)?;
+        file_writer.write_all(r.content().as_bytes())?;
         file_writer.flush()?;
     }
 
@@ -793,37 +790,16 @@ pub fn protoc_gen_grpc_rust_main() {
 
 fn plugin_main<F>(gen: F)
 where
-    F: Fn(&[FileDescriptorProto], &[String]) -> Vec<GenResult>,
+    F: Fn(&[FileDescriptorProto], &[String]) -> CodeGeneratorResponse,
 {
-    plugin_main_2(|r| gen(r.file_descriptors, r.files_to_generate))
+    plugin_main_2(|r| gen(&r.proto_file, &r.file_to_generate))
 }
 
 fn plugin_main_2<F>(gen: F)
 where
-    F: Fn(&GenRequest) -> Vec<GenResult>,
+    F: Fn(&CodeGeneratorRequest) -> CodeGeneratorResponse,
 {
     let req = CodeGeneratorRequest::parse_from_reader(&mut stdin()).unwrap();
-    let result = gen(&GenRequest {
-        file_descriptors: req.get_proto_file(),
-        files_to_generate: req.get_file_to_generate(),
-        parameter: req.get_parameter(),
-    });
-    let mut resp = CodeGeneratorResponse::new();
-    resp.set_supported_features(CodeGeneratorResponse_Feature::FEATURE_PROTO3_OPTIONAL as u64);
-    resp.set_file(
-        result
-            .iter()
-            .map(|file| {
-                let mut r = CodeGeneratorResponse_File::new();
-                r.set_name(file.name.to_string());
-                r.set_content(
-                    std::str::from_utf8(file.content.as_ref())
-                        .unwrap()
-                        .to_string(),
-                );
-                r
-            })
-            .collect(),
-    );
-    resp.write_to_writer(&mut stdout()).unwrap();
+    let result = gen(&req);
+    result.write_to_writer(&mut stdout()).unwrap();
 }
