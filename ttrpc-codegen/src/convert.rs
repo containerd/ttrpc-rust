@@ -56,10 +56,12 @@ enum MessageOrEnum {
 }
 
 impl MessageOrEnum {
-    fn descriptor_type(&self) -> protobuf::descriptor::FieldDescriptorProto_Type {
+    fn descriptor_type(&self) -> protobuf::descriptor::field_descriptor_proto::Type {
         match *self {
-            MessageOrEnum::Message => protobuf::descriptor::FieldDescriptorProto_Type::TYPE_MESSAGE,
-            MessageOrEnum::Enum => protobuf::descriptor::FieldDescriptorProto_Type::TYPE_ENUM,
+            MessageOrEnum::Message => {
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_MESSAGE
+            }
+            MessageOrEnum::Enum => protobuf::descriptor::field_descriptor_proto::Type::TYPE_ENUM,
         }
     }
 }
@@ -407,7 +409,7 @@ impl<'a> Resolver<'a> {
         output.set_number(number);
 
         let (t, t_name) = self.field_type(name, field_type, path_in_file);
-        output.set_field_type(t);
+        output.set_type(t);
         if let Some(t_name) = t_name {
             output.set_type_name(t_name.path);
         }
@@ -424,13 +426,13 @@ impl<'a> Resolver<'a> {
     ) -> ConvertResult<protobuf::descriptor::DescriptorProto> {
         let mut output = protobuf::descriptor::DescriptorProto::new();
 
-        output.mut_options().set_map_entry(true);
+        output.options.mut_or_insert_default().set_map_entry(true);
         output.set_name(Resolver::map_entry_name_for_field_name(field_name));
         output
-            .mut_field()
+            .field
             .push(self.map_entry_field("key", 1, key, path_in_file));
         output
-            .mut_field()
+            .field
             .push(self.map_entry_field("value", 2, value, path_in_file));
 
         Ok(output)
@@ -459,49 +461,49 @@ impl<'a> Resolver<'a> {
         let mut output = protobuf::descriptor::DescriptorProto::new();
         output.set_name(input.name.clone());
 
-        let mut nested_messages = protobuf::RepeatedField::new();
-
         for m in &input.messages {
-            nested_messages.push(self.message(m, &nested_path_in_file)?);
+            output
+                .nested_type
+                .push(self.message(m, &nested_path_in_file)?);
         }
 
         for f in &input.fields {
             if let model::FieldType::Map(ref t) = f.typ {
-                nested_messages.push(self.map_entry_message(&f.name, &t.0, &t.1, path_in_file)?);
+                output.nested_type.push(self.map_entry_message(
+                    &f.name,
+                    &t.0,
+                    &t.1,
+                    path_in_file,
+                )?);
             }
         }
 
-        output.set_nested_type(nested_messages);
-
-        output.set_enum_type(
-            input
-                .enums
-                .iter()
-                .map(|e| self.enumeration(e))
-                .collect::<Result<_, _>>()?,
-        );
+        output.enum_type = input
+            .enums
+            .iter()
+            .map(|e| self.enumeration(e))
+            .collect::<Result<_, _>>()?;
 
         {
-            let mut fields = protobuf::RepeatedField::new();
-
             for f in &input.fields {
-                fields.push(self.field(f, None, &nested_path_in_file)?);
+                output
+                    .field
+                    .push(self.field(f, None, &nested_path_in_file)?);
             }
 
             for (oneof_index, oneof) in input.oneofs.iter().enumerate() {
                 let oneof_index = oneof_index as i32;
                 for f in &oneof.fields {
-                    fields.push(self.field(f, Some(oneof_index), &nested_path_in_file)?);
+                    output
+                        .field
+                        .push(self.field(f, Some(oneof_index), &nested_path_in_file)?);
                 }
             }
-
-            output.set_field(fields);
         }
 
-        let oneofs = input.oneofs.iter().map(|o| self.oneof(o)).collect();
-        output.set_oneof_decl(oneofs);
+        output.oneof_decl = input.oneofs.iter().map(|o| self.oneof(o)).collect();
 
-        output.set_options(self.message_options(&input.options)?);
+        *output.options.mut_or_insert_default() = self.message_options(&input.options)?;
 
         Ok(output)
     }
@@ -540,7 +542,6 @@ impl<'a> Resolver<'a> {
         let mut output = protobuf::descriptor::ServiceDescriptorProto::new();
         output.set_name(input.name.clone());
 
-        let mut methods = protobuf::RepeatedField::new();
         for m in &input.methods {
             let mut mm = protobuf::descriptor::MethodDescriptorProto::new();
             mm.set_name(m.name.clone());
@@ -550,13 +551,12 @@ impl<'a> Resolver<'a> {
 
             mm.set_client_streaming(m.client_streaming);
             mm.set_server_streaming(m.server_streaming);
-            mm.set_options(self.method_options(&m.options)?);
+            *mm.options.mut_or_insert_default() = self.method_options(&m.options)?;
 
-            methods.push(mm);
+            output.method.push(mm);
         }
 
-        output.set_method(methods);
-        output.set_options(self.service_options(&input.options)?);
+        *output.options.mut_or_insert_default() = self.service_options(&input.options)?;
 
         Ok(output)
     }
@@ -631,28 +631,28 @@ impl<'a> Resolver<'a> {
         output.set_name(input.name.clone());
 
         if let model::FieldType::Map(..) = input.typ {
-            output.set_label(protobuf::descriptor::FieldDescriptorProto_Label::LABEL_REPEATED);
+            output.set_label(protobuf::descriptor::field_descriptor_proto::Label::LABEL_REPEATED);
         } else {
             output.set_label(label(input.rule));
         }
 
         let (t, t_name) = self.field_type(&input.name, &input.typ, path_in_file);
-        output.set_field_type(t);
+        output.set_type(t);
         if let Some(t_name) = t_name {
             output.set_type_name(t_name.path);
         }
 
         output.set_number(input.number);
         if let Some(default) = input.options.as_slice().by_name("default") {
-            let default = match output.get_field_type() {
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_STRING => {
+            let default = match output.type_() {
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_STRING => {
                     if let model::ProtobufConstant::String(ref s) = *default {
                         s.decode_utf8()?
                     } else {
                         return Err(ConvertError::DefaultValueIsNotStringLiteral);
                     }
                 }
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_BYTES => {
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_BYTES => {
                     if let model::ProtobufConstant::String(ref s) = *default {
                         s.escaped.clone()
                     } else {
@@ -664,7 +664,7 @@ impl<'a> Resolver<'a> {
             output.set_default_value(default);
         }
 
-        output.set_options(self.field_options(&input.options)?);
+        *output.options.mut_or_insert_default() = self.field_options(&input.options)?;
 
         if let Some(oneof_index) = oneof_index {
             output.set_oneof_index(oneof_index);
@@ -736,68 +736,68 @@ impl<'a> Resolver<'a> {
         input: &model::FieldType,
         path_in_file: &RelativePath,
     ) -> (
-        protobuf::descriptor::FieldDescriptorProto_Type,
+        protobuf::descriptor::field_descriptor_proto::Type,
         Option<AbsolutePath>,
     ) {
         match *input {
             model::FieldType::Bool => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_BOOL,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_BOOL,
                 None,
             ),
             model::FieldType::Int32 => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_INT32,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_INT32,
                 None,
             ),
             model::FieldType::Int64 => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_INT64,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_INT64,
                 None,
             ),
             model::FieldType::Uint32 => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_UINT32,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_UINT32,
                 None,
             ),
             model::FieldType::Uint64 => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_UINT64,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_UINT64,
                 None,
             ),
             model::FieldType::Sint32 => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_SINT32,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_SINT32,
                 None,
             ),
             model::FieldType::Sint64 => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_SINT64,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_SINT64,
                 None,
             ),
             model::FieldType::Fixed32 => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_FIXED32,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_FIXED32,
                 None,
             ),
             model::FieldType::Fixed64 => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_FIXED64,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_FIXED64,
                 None,
             ),
             model::FieldType::Sfixed32 => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_SFIXED32,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_SFIXED32,
                 None,
             ),
             model::FieldType::Sfixed64 => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_SFIXED64,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_SFIXED64,
                 None,
             ),
             model::FieldType::Float => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_FLOAT,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_FLOAT,
                 None,
             ),
             model::FieldType::Double => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_DOUBLE,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_DOUBLE,
                 None,
             ),
             model::FieldType::String => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_STRING,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_STRING,
                 None,
             ),
             model::FieldType::Bytes => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_BYTES,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_BYTES,
                 None,
             ),
             model::FieldType::MessageOrEnum(ref name) => {
@@ -809,12 +809,12 @@ impl<'a> Resolver<'a> {
                 type_name.push_relative(path_in_file);
                 type_name.push_simple(&Resolver::map_entry_name_for_field_name(name));
                 (
-                    protobuf::descriptor::FieldDescriptorProto_Type::TYPE_MESSAGE,
+                    protobuf::descriptor::field_descriptor_proto::Type::TYPE_MESSAGE,
                     Some(type_name),
                 )
             }
             model::FieldType::Group(..) => (
-                protobuf::descriptor::FieldDescriptorProto_Type::TYPE_GROUP,
+                protobuf::descriptor::field_descriptor_proto::Type::TYPE_GROUP,
                 None,
             ),
         }
@@ -852,14 +852,12 @@ impl<'a> Resolver<'a> {
     ) -> ConvertResult<protobuf::descriptor::EnumDescriptorProto> {
         let mut output = protobuf::descriptor::EnumDescriptorProto::new();
         output.set_name(input.name.clone());
-        output.set_value(
-            input
-                .values
-                .iter()
-                .map(|v| self.enum_value(&v.name, v.number))
-                .collect(),
-        );
-        output.set_options(self.enum_options(&input.options)?);
+        output.value = input
+            .values
+            .iter()
+            .map(|v| self.enum_value(&v.name, v.number))
+            .collect();
+        *output.options.mut_or_insert_default() = self.enum_options(&input.options)?;
         Ok(output)
     }
 
@@ -1008,11 +1006,17 @@ fn syntax(input: model::Syntax) -> String {
     }
 }
 
-fn label(input: model::Rule) -> protobuf::descriptor::FieldDescriptorProto_Label {
+fn label(input: model::Rule) -> protobuf::descriptor::field_descriptor_proto::Label {
     match input {
-        model::Rule::Optional => protobuf::descriptor::FieldDescriptorProto_Label::LABEL_OPTIONAL,
-        model::Rule::Required => protobuf::descriptor::FieldDescriptorProto_Label::LABEL_REQUIRED,
-        model::Rule::Repeated => protobuf::descriptor::FieldDescriptorProto_Label::LABEL_REPEATED,
+        model::Rule::Optional => {
+            protobuf::descriptor::field_descriptor_proto::Label::LABEL_OPTIONAL
+        }
+        model::Rule::Required => {
+            protobuf::descriptor::field_descriptor_proto::Label::LABEL_REQUIRED
+        }
+        model::Rule::Repeated => {
+            protobuf::descriptor::field_descriptor_proto::Label::LABEL_REPEATED
+        }
     }
 }
 
@@ -1031,35 +1035,27 @@ pub fn file_descriptor(
     output.set_package(input.package.clone());
     output.set_syntax(syntax(input.syntax));
 
-    let mut messages = protobuf::RepeatedField::new();
     for m in &input.messages {
-        messages.push(resolver.message(m, &RelativePath::empty())?);
+        output
+            .message_type
+            .push(resolver.message(m, &RelativePath::empty())?);
     }
 
-    output.set_message_type(messages);
-
-    let mut services = protobuf::RepeatedField::new();
     for s in &input.services {
-        services.push(resolver.service(s, &input.package)?);
+        output.service.push(resolver.service(s, &input.package)?);
     }
 
-    output.set_service(services);
+    output.enum_type = input
+        .enums
+        .iter()
+        .map(|e| resolver.enumeration(e))
+        .collect::<Result<_, _>>()?;
 
-    output.set_enum_type(
-        input
-            .enums
-            .iter()
-            .map(|e| resolver.enumeration(e))
-            .collect::<Result<_, _>>()?,
-    );
+    *output.options.mut_or_insert_default() = resolver.file_options(&input.options)?;
 
-    output.set_options(resolver.file_options(&input.options)?);
-
-    let mut extensions = protobuf::RepeatedField::new();
     for e in &input.extensions {
-        extensions.push(resolver.extension(e)?);
+        output.extension.push(resolver.extension(e)?);
     }
-    output.set_extension(extensions);
 
     Ok(output)
 }
