@@ -15,7 +15,7 @@ readme = "README.md"
 [dependencies]
 # lock home to avoid conflict with latest version
 home = "=0.5.9"
-protobuf-support = "3.2.0"
-protobuf = { version = "2.27.1" }
-protobuf-codegen = "3.5.1"
-ttrpc-compiler = "0.7.0"
+protobuf-support = "3.7.2"
+protobuf = "3.7.2"
+protobuf-codegen = "3.7.2"
+ttrpc-compiler = { version = "0.7.0", path = "../compiler" }

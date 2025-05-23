@@ -13,9 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use protobuf_codegen::code_writer::CodeWriter;
 use std::fmt;
 use std::str;
+
+pub mod scope;
+pub mod writer;
+
+use writer::CodeWriter;
 
 // A struct that divide a name into serveral parts that meets rust's guidelines.
 struct NameSpliter<'a> {
@@ -111,9 +115,9 @@ where
     F: Fn(&mut CodeWriter),
 {
     if public {
-        w.expr_block(&format!("pub async fn {}", sig), cb);
+        w.expr_block(format!("pub async fn {}", sig), cb);
     } else {
-        w.expr_block(&format!("async fn {}", sig), cb);
+        w.expr_block(format!("async fn {}", sig), cb);
     }
 }
 
@@ -129,6 +133,15 @@ where
     F: Fn(&mut CodeWriter),
 {
     async_fn_block(w, false, sig, cb);
+}
+
+// proto_name_to_rs is constructor as "{proto_path_to_rust_mod}.rs"
+// see https://github.com/stepancheg/rust-protobuf/blob/v3.7.2/protobuf-codegen/src/gen/paths.rs#L43
+pub fn proto_path_to_rust_mod(path: &str) -> String {
+    protobuf_codegen::proto_name_to_rs(path)
+        .strip_suffix(".rs")
+        .unwrap()
+        .to_string()
 }
 
 pub enum MethodType {
