@@ -1,18 +1,47 @@
-[package]
-name = "ttrpc"
-version = "0.8.4"
-authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
+[workspace]
+members = [
+    "./compiler",
+    "./ttrpc-codegen",
+    "./example",
+    "./"
+]
+resolver = "2"
+
+[workspace.package]
 edition = "2018"
 license = "Apache-2.0"
-keywords = ["ttrpc", "protobuf", "rpc"]
 readme = "README.md"
 repository = "https://github.com/containerd/ttrpc-rust"
 homepage = "https://github.com/containerd/ttrpc-rust"
+authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
+
+[workspace.dependencies]
+# The dependencies in this section can be used by the crates in this
+# workspace by specifying `workspace = true` instead of the crate
+# version. For example, for protobuf:
+#   protobuf = { workspace = true }
+ttrpc = { version = "0.8.4", path = "./" }
+ttrpc-codegen = { version = "0.5.0", path = "./ttrpc-codegen" }
+ttrpc-compiler = { version = "0.7.0", path = "./compiler" }
+protobuf = "3.7.2"
+protobuf-codegen = "3.7.2"
+protobuf-support = "3.7.2"
+
+[package]
+name = "ttrpc"
+version = "0.8.4"
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+keywords = ["ttrpc", "protobuf", "rpc"]
+readme = "README.md"
 description = "A Rust version of ttrpc."
 rust-version = "1.70"
 
 [dependencies]
-protobuf = { version = "3.7.2" }
+protobuf = { workspace = true }
 libc = { version = "0.2.59", features = [ "extra_traits" ] }
 nix = "0.26.2"
 log = "0.4"
@@ -33,7 +62,7 @@ tokio-vsock = { version = "0.7.0", optional = true }
 [build-dependencies]
 # lock home to avoid conflict with latest version
 home = "=0.5.9"
-protobuf-codegen = "3.7.2"
+protobuf-codegen = { workspace = true }
 
 [features]
 default = ["sync"]
