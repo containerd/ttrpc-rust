@@ -171,10 +171,12 @@ impl streaming_ttrpc::Streaming for StreamingService {
 async fn main() {
     simple_logging::log_to_stderr(LevelFilter::Info);
     let service = streaming_ttrpc::create_streaming(Arc::new(StreamingService {}));
-    utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
+
+    let sock_addr = utils::get_sock_addr();
+    utils::remove_if_sock_exist(sock_addr).unwrap();
 
     let mut server = Server::new()
-        .bind(utils::SOCK_ADDR)
+        .bind(sock_addr)
         .unwrap()
         .register_service(service);
 

@@ -58,9 +58,11 @@ fn main() {
     let hservice = health_ttrpc::create_health(Arc::new(HealthService {}));
     let aservice = agent_ttrpc::create_agent_service(Arc::new(AgentService {}));
 
-    utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
+    let sock_addr = utils::get_sock_addr();
+    utils::remove_if_sock_exist(sock_addr).unwrap();
+
     let mut server = ttrpc::Server::new()
-        .bind(utils::SOCK_ADDR)
+        .bind(sock_addr)
         .unwrap()
         .register_service(hservice)
         .register_service(aservice);

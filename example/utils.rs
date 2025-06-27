@@ -1,14 +1,42 @@
 #![allow(dead_code)]
+use clap::Parser;
+use log::warn;
 use std::io::Result;
 
 #[cfg(unix)]
-pub const SOCK_ADDR: &str = r"unix:///tmp/ttrpc-test";
+pub const SOCK_ADDR_LOCAL: &str = r"unix:///tmp/ttrpc-test";
 
 #[cfg(windows)]
-pub const SOCK_ADDR: &str = r"\\.\pipe\ttrpc-test";
+pub const SOCK_ADDR_LOCAL: &str = r"\\.\pipe\ttrpc-test";
+
+pub const SOCK_ADDR_TCP: &str = r"tcp://127.0.0.1:65500";
+
+#[derive(Debug, Default, Parser)]
+pub struct Cli {
+    #[arg(long = "tcp")]
+    #[arg(help = "Use a TCP socket instead of a local one")]
+    pub tcp: bool,
+}
+
+pub fn get_sock_addr() -> &'static str {
+    let cli = Cli::parse();
+    if cli.tcp {
+        if cfg!(windows) {
+            warn!("'--tcp' flag ignored; TCP sockets not supported on Windows");
+            return SOCK_ADDR_LOCAL;
+        }
+        SOCK_ADDR_TCP
+    } else {
+        SOCK_ADDR_LOCAL
+    }
+}
 
 #[cfg(unix)]
 pub fn remove_if_sock_exist(sock_addr: &str) -> Result<()> {
+    if sock_addr.starts_with("tcp://") {
+        return Ok(());
+    }
+
     let path = sock_addr
         .strip_prefix("unix://")
         .expect("socket address is not expected");
