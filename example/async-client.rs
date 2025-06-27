@@ -11,7 +11,9 @@ use ttrpc::r#async::Client;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let c = Client::connect(utils::SOCK_ADDR).await.unwrap();
+    let sock_addr = utils::get_sock_addr();
+    let c = Client::connect(sock_addr).await.unwrap();
+
     let hc = health_ttrpc::HealthClient::new(c.clone());
     let ac = agent_ttrpc::AgentServiceClient::new(c);
 

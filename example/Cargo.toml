@@ -23,7 +23,7 @@ ctrlc = { version = "3.0", features = ["termination"] }
 tokio = { version = "1.0.1", features = ["signal", "time"] }
 async-trait = "0.1.42"
 rand = "0.8.5"
-
+clap = { version = "4.5.40", features = ["derive"] }
 
 [[example]]
 name = "client"
