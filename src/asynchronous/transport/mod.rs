@@ -22,6 +22,9 @@ macro_rules! io_other {
 #[cfg(unix)]
 mod unix;
 
+#[cfg(unix)]
+mod tcp;
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod vsock;
 
@@ -41,6 +44,11 @@ impl Listener {
         #[cfg(unix)]
         if let Some(addr) = addr.strip_prefix("unix://") {
             return Self::bind_unix(addr);
+        }
+
+        #[cfg(unix)]
+        if let Some(addr) = addr.strip_prefix("tcp://") {
+            return Self::bind_tcp(addr);
         }
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -68,6 +76,11 @@ impl Socket {
         #[cfg(unix)]
         if let Some(addr) = addr.strip_prefix("unix://") {
             return Self::connect_unix(addr).await;
+        }
+
+        #[cfg(unix)]
+        if let Some(addr) = addr.strip_prefix("tcp://") {
+            return Self::connect_tcp(addr).await;
         }
 
         #[cfg(any(target_os = "linux", target_os = "android"))]

@@ -50,7 +50,9 @@ fn main() {
 fn connect_once() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
 
-    let c = Client::connect(utils::SOCK_ADDR).unwrap();
+    let sock_addr = utils::get_sock_addr();
+    let c = Client::connect(sock_addr).unwrap();
+
     let hc = health_ttrpc::HealthClient::new(c.clone());
     let ac = agent_ttrpc::AgentServiceClient::new(c);
 
