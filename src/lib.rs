@@ -76,3 +76,32 @@ cfg_async! {
     #[doc(hidden)]
     pub use asynchronous as r#async;
 }
+
+/// Macro to include the mod.rs file from the OUT_DIR.
+/// This is only work on out_dir not set and use 'gen_mod' feature.
+/// ```rust,ignore
+/// mod protocals {
+///     include_mod!();
+/// }
+/// ```
+/// [`OUT_DIR`]: https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts
+#[macro_export]
+macro_rules! include_mod {
+    () => {
+        include!(concat!(env!("OUT_DIR"), concat!("/", "mod.rs")));
+    };
+}
+
+/// Macro to include files ending with _ttrpc.rs from the OUT_DIR
+/// This is only work on out_dir not set.
+/// ```rust,ignore
+/// mod protocals {
+///     include_ttrpc!("helloworld");
+/// }
+/// ```
+#[macro_export]
+macro_rules! include_ttrpc {
+    ($name:expr) => {
+        include!(concat!(env!("OUT_DIR"), concat!("/", $name, "_ttrpc.rs")));
+    };
+}
