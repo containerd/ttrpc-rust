@@ -60,8 +60,6 @@ windows-sys = {version = "0.48", features = [ "Win32_Foundation", "Win32_Storage
 tokio-vsock = { version = "0.7.0", optional = true }
 
 [build-dependencies]
-# lock home to avoid conflict with latest version
-home = "=0.5.9"
 protobuf-codegen = { workspace = true }
 
 [features]
