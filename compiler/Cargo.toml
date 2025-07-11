@@ -12,8 +12,6 @@ repository = "https://github.com/containerd/ttrpc-rust/tree/master/compiler"
 homepage = "https://github.com/containerd/ttrpc-rust/tree/master/compiler"
 
 [dependencies]
-# lock home to avoid conflict with latest version
-home = "=0.5.9"
 protobuf = { workspace = true }
 protobuf-codegen = { workspace = true }
 prost = "0.8"
