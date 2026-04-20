@@ -230,8 +230,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn lookahead_char_is_in(&self, alphabet: &str) -> bool {
-        self.lookahead_char()
-            .map_or(false, |c| alphabet.contains(c))
+        self.lookahead_char().is_some_and(|c| alphabet.contains(c))
     }
 
     fn next_char_opt(&mut self) -> Option<char> {
@@ -912,13 +911,7 @@ impl<'a> Parser<'a> {
 
     fn next_ident_if_in(&mut self, idents: &[&str]) -> ParserResult<Option<String>> {
         let v = match self.lookahead()? {
-            Some(Token::Ident(next)) => {
-                if idents.iter().any(|i| i == next) {
-                    next.clone()
-                } else {
-                    return Ok(None);
-                }
-            }
+            Some(Token::Ident(next)) if idents.iter().any(|i| i == next) => next.clone(),
             _ => return Ok(None),
         };
         self.advance()?;

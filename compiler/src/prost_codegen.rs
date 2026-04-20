@@ -16,7 +16,7 @@ use derive_new::new;
 use prost::Message;
 use prost_build::{protoc, protoc_include, Config, Method, Service, ServiceGenerator};
 use prost_types::FileDescriptorSet;
-use std::io::{Error, ErrorKind, Read};
+use std::io::{Error, Read};
 use std::path::Path;
 use std::{fs, io, process::Command};
 
@@ -53,10 +53,10 @@ where
 
     let output = cmd.output()?;
     if !output.status.success() {
-        return Err(Error::new(
-            ErrorKind::Other,
-            format!("protoc failed: {}", String::from_utf8_lossy(&output.stderr)),
-        ));
+        return Err(Error::other(format!(
+            "protoc failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
     }
 
     let mut buf = Vec::new();

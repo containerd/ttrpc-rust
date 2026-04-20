@@ -38,7 +38,7 @@ trait ProtobufOptions {
     }
 }
 
-impl<'a> ProtobufOptions for &'a [model::ProtobufOption] {
+impl ProtobufOptions for &[model::ProtobufOption] {
     fn by_name(&self, name: &str) -> Option<&model::ProtobufConstant> {
         let option_name = name;
         for model::ProtobufOption { name, value } in *self {
@@ -359,10 +359,7 @@ impl<'a> LookupScope<'a> {
         current_path: &AbsolutePath,
         path: &RelativePath,
     ) -> Option<(AbsolutePath, MessageOrEnum)> {
-        let (first, rem) = match path.split_first_rem() {
-            Some(x) => x,
-            None => return None,
-        };
+        let (first, rem) = path.split_first_rem()?;
 
         if rem.is_empty() {
             match self.find_member(first) {

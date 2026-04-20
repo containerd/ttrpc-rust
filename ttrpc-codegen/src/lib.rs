@@ -265,13 +265,10 @@ impl<'a> Run<'a> {
         fs::File::open(fs_path)?.read_to_string(&mut content)?;
 
         let parsed = model::FileDescriptor::parse(content).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                WithFileError {
-                    file: format!("{}", fs_path.display()),
-                    error: e.into(),
-                },
-            )
+            io::Error::other(WithFileError {
+                file: format!("{}", fs_path.display()),
+                error: e.into(),
+            })
         })?;
 
         for import_path in &parsed.import_paths {
@@ -286,13 +283,10 @@ impl<'a> Run<'a> {
         let descriptor =
             convert::file_descriptor(protobuf_path.to_owned(), &parsed, &this_file_deps).map_err(
                 |e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        WithFileError {
-                            file: format!("{}", fs_path.display()),
-                            error: e.into(),
-                        },
-                    )
+                    io::Error::other(WithFileError {
+                        file: format!("{}", fs_path.display()),
+                        error: e.into(),
+                    })
                 },
             )?;
 
@@ -312,13 +306,10 @@ impl<'a> Run<'a> {
             }
         }
 
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "protobuf path {:?} is not found in import path {:?}",
-                protobuf_path, self.includes
-            ),
-        ))
+        Err(io::Error::other(format!(
+            "protobuf path {:?} is not found in import path {:?}",
+            protobuf_path, self.includes
+        )))
     }
 
     fn add_fs_file(&mut self, fs_path: &Path) -> io::Result<String> {
@@ -334,13 +325,10 @@ impl<'a> Run<'a> {
                 self.add_file(&protobuf_path, fs_path)?;
                 Ok(protobuf_path)
             }
-            None => Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "file {:?} must reside in include path {:?}",
-                    fs_path, self.includes
-                ),
-            )),
+            None => Err(io::Error::other(format!(
+                "file {:?} must reside in include path {:?}",
+                fs_path, self.includes
+            ))),
         }
     }
 }
