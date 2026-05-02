@@ -1,3 +1,7 @@
+// wait_with_output is eventually called, but clippy can't see through the
+// branching cleanup paths and flags `wait_with_output("server", server)`.
+#![allow(clippy::zombie_processes)]
+
 use std::{
     io::{BufRead, BufReader},
     process::{Child, Command},

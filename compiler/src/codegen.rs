@@ -724,9 +724,7 @@ pub fn gen(
             continue;
         }
 
-        results
-            .file
-            .extend(gen_file(file, &root_scope, customize).into_iter());
+        results.file.extend(gen_file(file, &root_scope, customize));
     }
 
     results
