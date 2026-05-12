@@ -13,7 +13,9 @@ use ttrpc::r#async::Client;
 async fn main() {
     simple_logging::log_to_stderr(log::LevelFilter::Info);
 
-    let c = Client::connect(utils::SOCK_ADDR).await.unwrap();
+    let sock_addr = utils::get_sock_addr();
+    let c = Client::connect(sock_addr).await.unwrap();
+
     let sc = streaming_ttrpc::StreamingClient::new(c);
 
     let _now = std::time::Instant::now();

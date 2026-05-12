@@ -28,7 +28,7 @@ struct NameSpliter<'a> {
 }
 
 impl<'a> NameSpliter<'a> {
-    fn new(s: &str) -> NameSpliter {
+    fn new(s: &str) -> NameSpliter<'_> {
         NameSpliter {
             name: s.as_bytes(),
             pos: 0,

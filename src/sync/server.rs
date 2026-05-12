@@ -401,7 +401,9 @@ impl Server {
                     let reaper_tx_child = reaper_tx.clone();
                     let pipe_connection_child = pipe_connection.clone();
 
-                    let handler = thread::Builder::new()
+                    let (sync_tx, sync_rx) = channel();
+
+                    let _ = thread::Builder::new()
                         .name("client_handler".into())
                         .spawn(move || {
                             debug!("Got new client");
@@ -505,25 +507,38 @@ impl Server {
                             drop(workload_rx);
                             handler.join().unwrap_or(());
                             reader.join().unwrap_or(());
+
+                            //wait untile this connection had been inserted connections map;
+                            sync_rx.recv().unwrap_or(());
+
                             // client_handler should not close fd before exit
                             // , which prevent fd reuse issue.
                             reaper_tx_child.send(pipe.id()).unwrap();
 
                             debug!("client thread quit");
                         })
-                        .unwrap();
+                        .map(|handler| {
+                            let mut cns = connections.lock().unwrap();
+                            let id = pipe_connection.id();
+                            cns.insert(
+                                id,
+                                Connection {
+                                    connection: pipe_connection,
+                                    handler: Some(handler),
+                                    quit: quit.clone(),
+                                },
+                            );
 
-                    let mut cns = connections.lock().unwrap();
-
-                    let id = pipe_connection.id();
-                    cns.insert(
-                        id,
-                        Connection {
-                            connection: pipe_connection,
-                            handler: Some(handler),
-                            quit: quit.clone(),
-                        },
-                    );
+                            // We need to ensure that only when the connection is successfully inserted into the
+                            // connections map can the handler send fd to notify the reaper to recycle the connection.
+                            // Otherwise, the handler may have been executed and sent fd to notify the reaper to recycle
+                            // the connection, and the connection has not been inserted into the map. Then the reaper cannot
+                            // find the corresponding connection after receiving the fd, and loses the opportunity to recycle
+                            // the connection, causing fd leakage;
+                            // Notify the handler continue, to send fd to reaper thread.
+                            sync_tx.send(()).unwrap_or(());
+                        })
+                        .map_err(|e| warn!("spawn handler thread failed with: {:?}", e));
                 } // end loop
 
                 // notify reaper thread to exit.
