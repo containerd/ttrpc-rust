@@ -21,7 +21,7 @@ simple-logging = "2.0.2"
 nix = "0.23.0"
 ttrpc = { path = "../", features = ["async"] }
 ctrlc = { version = "3.0", features = ["termination"] }
-tokio = { version = "1.0.1", features = ["signal", "time"] }
+tokio = { version = "1.0.1", features = ["signal", "time", "rt-multi-thread", "macros"] }
 async-trait = "0.1.42"
 rand = "0.8.5"
 clap = { version = "4.5.40", features = ["derive"] }
@@ -49,6 +49,14 @@ path = "./async-stream-server.rs"
 [[example]]
 name = "async-stream-client"
 path = "./async-stream-client.rs"
+
+[[example]]
+name = "async-stream-close-order"
+path = "./async-stream-close-order.rs"
+
+[[example]]
+name = "async-data-order"
+path = "./async-data-order.rs"
 
 [build-dependencies]
 ttrpc-codegen = { path = "../ttrpc-codegen"}

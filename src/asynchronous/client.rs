@@ -232,7 +232,7 @@ impl WriterDelegate for ClientWriter {
 }
 
 async fn get_resp_tx(
-    req_map: Arc<Mutex<HashMap<u32, ResultSender>>>,
+    req_map: &Arc<Mutex<HashMap<u32, ResultSender>>>,
     header: &MessageHeader,
 ) -> Option<ResultSender> {
     let resp_tx = match header.type_ {
@@ -313,26 +313,20 @@ impl ReaderDelegate for ClientReader {
     async fn exit(&self) {}
 
     async fn handle_err(&self, header: MessageHeader, e: Error) {
-        let req_map = self.streams.clone();
-        tokio::spawn(async move {
-            if let Some(resp_tx) = get_resp_tx(req_map, &header).await {
-                resp_tx
-                    .send(Err(e))
-                    .await
-                    .unwrap_or_else(|_e| error!("The request has returned"));
-            }
-        });
+        if let Some(resp_tx) = get_resp_tx(&self.streams, &header).await {
+            resp_tx
+                .send(Err(e))
+                .await
+                .unwrap_or_else(|_e| error!("The request has returned"));
+        }
     }
 
     async fn handle_msg(&self, msg: GenMessage) {
-        let req_map = self.streams.clone();
-        tokio::spawn(async move {
-            if let Some(resp_tx) = get_resp_tx(req_map, &msg.header).await {
-                resp_tx
-                    .send(Ok(msg))
-                    .await
-                    .unwrap_or_else(|_e| error!("The request has returned"));
-            }
-        });
+        if let Some(resp_tx) = get_resp_tx(&self.streams, &msg.header).await {
+            resp_tx
+                .send(Ok(msg))
+                .await
+                .unwrap_or_else(|_e| error!("The request has returned"));
+        }
     }
 }

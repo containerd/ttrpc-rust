@@ -109,3 +109,35 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[test]
+#[cfg(unix)]
+fn stream_close_order() -> Result<(), Box<dyn std::error::Error>> {
+    // Self-contained test: server + client in one process, multi-threaded
+    // runtime. Verifies that the final DATA frame of a server-streaming RPC
+    // is not dropped due to a race with the subsequent REMOTE_CLOSED frame.
+    let mut cmd = do_run_example("async-stream-close-order", &[]);
+    let mut child = cmd.spawn().unwrap();
+
+    let timeout = Duration::from_secs(120);
+    let start = std::time::Instant::now();
+    loop {
+        if start.elapsed() > timeout {
+            child.kill().unwrap_or(());
+            panic!("async-stream-close-order timed out");
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                wait_with_output("async-stream-close-order", child);
+                assert!(
+                    status.success(),
+                    "async-stream-close-order failed (data frames dropped)"
+                );
+                break;
+            }
+            Ok(None) => continue,
+            Err(e) => panic!("Error waiting for async-stream-close-order: {:?}", e),
+        }
+    }
+    Ok(())
+}
