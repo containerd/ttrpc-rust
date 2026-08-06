@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Sync client of ttrpc.
+//! Synchronous ttrpc client.
 
 use protobuf::Message;
 use std::collections::HashMap;
@@ -42,7 +42,10 @@ type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type ReciverMap = Arc<Mutex<HashMap<u32, mpsc::SyncSender<Result<Vec<u8>>>>>>;
 
-/// A ttrpc Client (sync).
+/// A cloneable, synchronous ttrpc connection.
+///
+/// Generated service clients wrap this type and use [`Client::request`] internally. Clones share
+/// the same connection and may issue concurrent requests.
 #[derive(Clone)]
 pub struct Client {
     _connection: Arc<ClientConnection>,
@@ -51,6 +54,14 @@ pub struct Client {
 }
 
 impl Client {
+    /// Connects to a ttrpc server at `sockaddr`.
+    ///
+    /// See the [crate-level transport table](crate#transport-addresses) for supported address
+    /// formats.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is unsupported or the transport cannot connect.
     pub fn connect(sockaddr: &str) -> Result<Client> {
         let conn = ClientConnection::client_connect(sockaddr)?;
 
@@ -95,7 +106,14 @@ impl Client {
     }
 
     #[cfg(unix)]
-    /// Initialize a new [`Client`] from raw file descriptor.
+    /// Creates a client from a connected Unix file descriptor.
+    ///
+    /// The client takes ownership of `fd` and closes it when the last clone is dropped. The caller
+    /// must not close or otherwise use the descriptor after calling this function.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the internal wake-up socket pair cannot be created.
     pub fn new(fd: std::os::unix::io::RawFd) -> Result<Client> {
         let conn =
             ClientConnection::new(fd).map_err(err_to_others_err!(e, "new ClientConnection"))?;
@@ -241,6 +259,16 @@ impl Client {
             _conn_ctx: conn_ctx,
         })
     }
+    /// Sends a unary request and blocks until its response arrives.
+    ///
+    /// A nonzero [`Request::timeout_nano`] limits how long this method waits. Generated clients
+    /// construct the request and decode its payload, so most applications do not call this method
+    /// directly.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the request is oversized, serialization or transport fails, the
+    /// timeout expires, the response is malformed, or the server returns a non-OK status.
     pub fn request(&self, req: Request) -> Result<Response> {
         check_oversize(req.compute_size() as usize, false)?;
 

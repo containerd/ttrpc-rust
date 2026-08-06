@@ -62,6 +62,9 @@ tokio-vsock = { version = "0.7.0", optional = true }
 [build-dependencies]
 protobuf-codegen = { workspace = true }
 
+[dev-dependencies]
+ttrpc-codegen = { workspace = true }
+
 [features]
 default = ["sync"]
 async = ["async-trait", "async-stream", "tokio", "futures", "tokio-vsock"]

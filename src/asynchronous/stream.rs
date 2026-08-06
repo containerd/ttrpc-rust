@@ -58,6 +58,10 @@ impl SendingMessage {
     }
 }
 
+/// Client-side handle for a bidirectional stream.
+///
+/// Requests of type `Q` and responses of type `P` can move independently. Use [`ClientStream::split`]
+/// when separate tasks should send and receive concurrently.
 #[derive(Debug)]
 pub struct ClientStream<Q, P> {
     tx: CSSender<Q>,
@@ -71,6 +75,7 @@ where
     <Q as Codec>::E: std::fmt::Display,
     <P as Codec>::E: std::fmt::Display,
 {
+    /// Wraps a low-level stream for use by generated client bindings.
     pub fn new(inner: StreamInner) -> Self {
         let (tx, rx) = inner.split();
         Self {
@@ -85,23 +90,35 @@ where
         }
     }
 
+    /// Splits the stream into independently owned sending and receiving halves.
     pub fn split(self) -> (CSSender<Q>, CSReceiver<P>) {
         (self.tx, self.rx)
     }
 
+    /// Sends one request message.
+    ///
+    /// See [`CSSender::send`] for failure cases.
     pub async fn send(&self, req: &Q) -> Result<()> {
         self.tx.send(req).await
     }
 
+    /// Closes the request-sending half of this stream.
+    ///
+    /// The response half remains available through [`ClientStream::recv`].
+    /// See [`CSSender::close_send`] for failure cases.
     pub async fn close_send(&self) -> Result<()> {
         self.tx.close_send().await
     }
 
+    /// Receives and decodes the next response message.
+    ///
+    /// See [`CSReceiver::recv`] for failure cases.
     pub async fn recv(&mut self) -> Result<P> {
         self.rx.recv().await
     }
 }
 
+/// Cloneable request-sending half of a client bidirectional stream.
 #[derive(Clone, Debug)]
 pub struct CSSender<Q> {
     tx: StreamSender,
@@ -113,6 +130,12 @@ where
     Q: Codec,
     <Q as Codec>::E: std::fmt::Display,
 {
+    /// Sends one request message.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if encoding or transport fails, the message is oversized, or the sending
+    /// half is closed.
     pub async fn send(&self, req: &Q) -> Result<()> {
         let msg_buf = req
             .encode()
@@ -120,11 +143,18 @@ where
         self.tx.send(msg_buf).await
     }
 
+    /// Closes the request-sending half.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::LocalClosed`] if already closed, or a transport error if the close frame
+    /// cannot be sent.
     pub async fn close_send(&self) -> Result<()> {
         self.tx.close_send().await
     }
 }
 
+/// Response-receiving half of a client bidirectional stream.
 #[derive(Debug)]
 pub struct CSReceiver<P> {
     rx: StreamReceiver,
@@ -136,12 +166,22 @@ where
     P: Codec,
     <P as Codec>::E: std::fmt::Display,
 {
+    /// Receives and decodes the next response message.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the peer closes the stream, reports a non-OK status, or sends a payload
+    /// that cannot be decoded as `P`.
     pub async fn recv(&mut self) -> Result<P> {
         let msg_buf = self.rx.recv().await?;
         P::decode(msg_buf).map_err(err_to_others_err!(e, "Decode message failed."))
     }
 }
 
+/// Server-side handle for a bidirectional stream.
+///
+/// Responses of type `P` and requests of type `Q` can move independently. Use
+/// [`ServerStream::split`] when separate tasks should send and receive concurrently.
 #[derive(Debug)]
 pub struct ServerStream<P, Q> {
     tx: SSSender<P>,
@@ -155,6 +195,7 @@ where
     <P as Codec>::E: std::fmt::Display,
     <Q as Codec>::E: std::fmt::Display,
 {
+    /// Wraps a low-level stream for use by generated server bindings.
     pub fn new(inner: StreamInner) -> Self {
         let (tx, rx) = inner.split();
         Self {
@@ -169,19 +210,28 @@ where
         }
     }
 
+    /// Splits the stream into independently owned sending and receiving halves.
     pub fn split(self) -> (SSSender<P>, SSReceiver<Q>) {
         (self.tx, self.rx)
     }
 
+    /// Sends one response message.
+    ///
+    /// See [`SSSender::send`] for failure cases.
     pub async fn send(&self, resp: &P) -> Result<()> {
         self.tx.send(resp).await
     }
 
+    /// Receives and decodes the next request message.
+    ///
+    /// Returns `Ok(None)` after a graceful client close.
+    /// See [`SSReceiver::recv`] for failure cases.
     pub async fn recv(&mut self) -> Result<Option<Q>> {
         self.rx.recv().await
     }
 }
 
+/// Cloneable response-sending half of a server bidirectional stream.
 #[derive(Clone, Debug)]
 pub struct SSSender<P> {
     tx: StreamSender,
@@ -193,6 +243,11 @@ where
     P: Codec,
     <P as Codec>::E: std::fmt::Display,
 {
+    /// Sends one response message.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if encoding or transport fails or the message is oversized.
     pub async fn send(&self, resp: &P) -> Result<()> {
         let msg_buf = resp
             .encode()
@@ -201,6 +256,7 @@ where
     }
 }
 
+/// Request-receiving half of a server bidirectional stream.
 #[derive(Debug)]
 pub struct SSReceiver<Q> {
     rx: StreamReceiver,
@@ -212,6 +268,13 @@ where
     Q: Codec,
     <Q as Codec>::E: std::fmt::Display,
 {
+    /// Receives and decodes the next request message.
+    ///
+    /// Returns `Ok(None)` after a graceful client close.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stream fails or a payload cannot be decoded as `Q`.
     pub async fn recv(&mut self) -> Result<Option<Q>> {
         let res = self.rx.recv().await;
 
@@ -225,6 +288,10 @@ where
     }
 }
 
+/// Client-side handle for a client-streaming RPC.
+///
+/// Send zero or more requests of type `Q`, then call [`ClientStreamSender::close_and_recv`] to
+/// close the sending half and receive the single response of type `P`.
 pub struct ClientStreamSender<Q, P> {
     inner: StreamInner,
     _send: PhantomData<Q>,
@@ -238,6 +305,7 @@ where
     <Q as Codec>::E: std::fmt::Display,
     <P as Codec>::E: std::fmt::Display,
 {
+    /// Wraps a low-level stream for use by generated client bindings.
     pub fn new(inner: StreamInner) -> Self {
         Self {
             inner,
@@ -246,6 +314,12 @@ where
         }
     }
 
+    /// Sends one request message.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if encoding or transport fails, the message is oversized, or the sending
+    /// half is closed.
     pub async fn send(&self, req: &Q) -> Result<()> {
         let msg_buf = req
             .encode()
@@ -253,6 +327,12 @@ where
         self.inner.send(msg_buf).await
     }
 
+    /// Closes the request stream and waits for the server's single response.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if closing or receiving fails, the server reports a non-OK status, or the
+    /// response cannot be decoded as `P`.
     pub async fn close_and_recv(&mut self) -> Result<P> {
         self.inner.close_send().await?;
         let msg_buf = self.inner.recv().await?;
@@ -260,6 +340,9 @@ where
     }
 }
 
+/// Server-side response sender for a server-streaming RPC.
+///
+/// The generated handler receives this value after the single request has been decoded.
 pub struct ServerStreamSender<P> {
     inner: StreamSender,
     _send: PhantomData<P>,
@@ -270,6 +353,7 @@ where
     P: Codec,
     <P as Codec>::E: std::fmt::Display,
 {
+    /// Wraps a low-level stream for use by generated server bindings.
     pub fn new(inner: StreamInner) -> Self {
         Self {
             inner: inner.split().0,
@@ -277,6 +361,11 @@ where
         }
     }
 
+    /// Sends one response message.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if encoding or transport fails or the message is oversized.
     pub async fn send(&self, resp: &P) -> Result<()> {
         let msg_buf = resp
             .encode()
@@ -285,6 +374,9 @@ where
     }
 }
 
+/// Client-side response receiver for a server-streaming RPC.
+///
+/// This type retains a client clone so the connection remains alive while responses are pending.
 pub struct ClientStreamReceiver<P> {
     inner: StreamReceiver,
     _recv: PhantomData<P>,
@@ -297,6 +389,7 @@ where
     P: Codec,
     <P as Codec>::E: std::fmt::Display,
 {
+    /// Wraps a low-level stream and retains `client_guard` for its lifetime.
     pub fn new(inner: StreamInner, _client_guard: Client) -> Self {
         Self {
             inner: inner.split().1,
@@ -305,6 +398,14 @@ where
         }
     }
 
+    /// Receives and decodes the next response message.
+    ///
+    /// Returns `Ok(None)` after a graceful server close.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stream fails, the server reports a non-OK status, or a payload
+    /// cannot be decoded as `P`.
     pub async fn recv(&mut self) -> Result<Option<P>> {
         let res = self.inner.recv().await;
         if matches!(res, Err(Error::Eof)) {
@@ -317,6 +418,7 @@ where
     }
 }
 
+/// Server-side request receiver for a client-streaming RPC.
 pub struct ServerStreamReceiver<Q> {
     inner: StreamReceiver,
     _recv: PhantomData<Q>,
@@ -327,6 +429,7 @@ where
     Q: Codec,
     <Q as Codec>::E: std::fmt::Display,
 {
+    /// Wraps a low-level stream for use by generated server bindings.
     pub fn new(inner: StreamInner) -> Self {
         Self {
             inner: inner.split().1,
@@ -334,6 +437,13 @@ where
         }
     }
 
+    /// Receives and decodes the next request message.
+    ///
+    /// Returns `Ok(None)` after a graceful client close.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stream fails or a payload cannot be decoded as `Q`.
     pub async fn recv(&mut self) -> Result<Option<Q>> {
         let res = self.inner.recv().await;
         if matches!(res, Err(Error::Eof)) {
@@ -354,12 +464,19 @@ async fn _recv(rx: &mut ResultReceiver) -> Result<GenMessage> {
     })
 }
 
+/// Endpoint role for a low-level stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
+    /// Client-side stream behavior.
     Client,
+    /// Server-side stream behavior.
     Server,
 }
 
+/// Untyped state shared by generated streaming bindings.
+///
+/// Most applications should use the typed stream wrappers rather than constructing this type
+/// directly.
 #[derive(Debug)]
 pub struct StreamInner {
     sender: StreamSender,
@@ -367,6 +484,10 @@ pub struct StreamInner {
 }
 
 impl StreamInner {
+    /// Creates low-level state for a registered stream.
+    ///
+    /// `sendable` and `recveivable` describe the permitted directions, while `kind` controls the
+    /// client- or server-side close semantics. This constructor is used by the ttrpc runtime.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         stream_id: u32,
@@ -403,24 +524,33 @@ impl StreamInner {
         (self.sender, self.receiver)
     }
 
+    /// Sends one untyped payload.
+    ///
+    /// See [`StreamSender::send`] for failure cases.
     pub async fn send(&self, buf: Vec<u8>) -> Result<()> {
         self.sender.send(buf).await
     }
 
+    /// Closes the sending half of this client-side stream.
+    ///
+    /// See [`StreamSender::close_send`] for failure cases.
     pub async fn close_send(&self) -> Result<()> {
         self.sender.close_send().await
     }
 
+    /// Receives the next untyped payload.
+    ///
+    /// See [`StreamReceiver::recv`] for failure cases.
     pub async fn recv(&mut self) -> Result<Vec<u8>> {
         self.receiver.recv().await
     }
 }
 
-/// Sends streaming DATA messages with optional payload transform.
+/// Untyped, cloneable sending half of a stream.
 ///
-/// Part of the extension framework's Injection Point 9/10.
-/// Each `send()` call applies `transform_outbound` to the payload
-/// before framing it as a DATA message.
+/// This is a low-level building block for generated bindings. When the extension framework is
+/// enabled, each [`StreamSender::send`] call applies the connection's outbound payload transform
+/// before framing the payload as a DATA message.
 #[derive(Clone, Debug)]
 pub struct StreamSender {
     tx: MessageSender,
@@ -431,13 +561,10 @@ pub struct StreamSender {
     conn_ctx: Arc<ConnectionContext>,
 }
 
-/// Receives streaming DATA messages.
+/// Untyped receiving half of a stream.
 ///
-/// Inbound transforms are applied in the connection read loop (wire order)
-/// before messages are routed here. `recv()` therefore receives payloads
-/// that are already decrypted and only needs to decode/pass through.
-///
-/// `handle_msg()` routes DATA messages to this receiver.
+/// Inbound transforms are applied in wire order before messages reach this receiver. Dropping this
+/// value unregisters the stream from its connection.
 #[derive(Debug)]
 pub struct StreamReceiver {
     rx: ResultReceiver,
@@ -455,10 +582,15 @@ impl Drop for StreamReceiver {
 }
 
 impl StreamSender {
-    /// Send a streaming DATA message.
+    /// Sends one untyped payload.
     ///
-    /// Applies `transform_outbound` (Injection Point 9/10) to `buf`,
-    /// then frames it as a DATA message and sends to the transport.
+    /// The connection's outbound payload transform is applied before the payload is framed as a
+    /// DATA message and sent to the transport.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stream is closed, the payload is oversized, transformation fails,
+    /// or transport fails.
     pub async fn send(&self, buf: Vec<u8>) -> Result<()> {
         debug_assert!(self.sendable);
         if self.local_closed.load(Ordering::Relaxed) {
@@ -473,6 +605,12 @@ impl StreamSender {
         Ok(())
     }
 
+    /// Closes the sending half of a client-side stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::LocalClosed`] if already closed, or a transport error if the close frame
+    /// cannot be sent.
     pub async fn close_send(&self) -> Result<()> {
         debug_assert_eq!(self.kind, Kind::Client);
         debug_assert!(self.sendable);
@@ -487,12 +625,15 @@ impl StreamSender {
 }
 
 impl StreamReceiver {
-    /// Receive the next streaming message.
+    /// Receives the next untyped payload or terminal response.
     ///
-    /// All inbound transforms are applied in the connection read loop
-    /// (wire order) before messages reach this receiver, so `recv()`
-    /// only decodes/passes through the pre-decoded payload.
-    /// Returns `Err(Error::Eof)` when the remote side closes the stream.
+    /// Inbound transforms are applied in wire order before messages reach this receiver.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::RemoteClosed`] after the remote half is closed, [`Error::Eof`] for a
+    /// graceful end-of-stream frame, [`Error::RpcStatus`] for a non-OK response, or another error
+    /// for malformed frames, transformation failures, and transport failures.
     pub async fn recv(&mut self) -> Result<Vec<u8>> {
         if self.remote_closed {
             return Err(Error::RemoteClosed);

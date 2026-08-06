@@ -7,13 +7,24 @@ use tokio_vsock::{VsockAddr, VsockListener, VsockStream, VMADDR_CID_ANY};
 use super::{Listener, Socket};
 
 impl Listener {
+    /// Binds a vsock address in `CID:PORT` form, without the `vsock://` scheme prefix.
+    ///
+    /// A CID of `-1` maps to `VMADDR_CID_ANY`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is invalid or the listener cannot be bound.
     pub fn bind_vsock(addr: impl AsRef<str>) -> IoResult<Self> {
         let addr = parse_vsock_addr(addr)?;
         Ok(Self::from(VsockListener::bind(addr)?))
     }
 
+    /// Creates a listener from an existing vsock descriptor.
+    ///
     /// # Safety
-    /// The file descriptor must represent a vsock listener.
+    ///
+    /// `fd` must be a valid, open vsock listener. The caller must transfer exclusive ownership and
+    /// must not close or use the descriptor afterward.
     pub unsafe fn from_raw_vsock_listener_fd(fd: RawFd) -> IoResult<Self> {
         let listener = unsafe { VsockListener::from_raw_fd(fd) };
         Ok(Self::from(listener))
@@ -21,6 +32,11 @@ impl Listener {
 }
 
 impl Socket {
+    /// Connects to a vsock address in `CID:PORT` form, without the `vsock://` scheme prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is invalid or the connection cannot be established.
     pub async fn connect_vsock(addr: impl AsRef<str>) -> IoResult<Self> {
         let addr = parse_vsock_addr(addr)?;
         Ok(Self::from(VsockStream::connect(addr).await?))

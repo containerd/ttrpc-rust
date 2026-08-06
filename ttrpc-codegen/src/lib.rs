@@ -1,32 +1,42 @@
 #![allow(dead_code)]
-//! API to generate .rs files for ttrpc from protobuf
+//! Pure-Rust build-time code generation for ttrpc services.
 //!
+//! `ttrpc-codegen` parses `.proto` files and generates Protocol Buffers messages, typed ttrpc
+//! clients, server traits, and registration helpers. It does not require a `protoc` executable.
 //!
-//!```no_run
-//!use ttrpc_codegen::{Customize, Codegen, ProtobufCustomize};
-//!# use std::path::Path;
+//! Add this crate under `[build-dependencies]` and invoke [`Codegen`] from `build.rs`.
 //!
-//!fn main() {
-//!#   let protos: Vec<&Path> = vec![];
-//!    let protobuf_customized = ProtobufCustomize::default().gen_mod_rs(false);
+//! # Examples
 //!
-//!    Codegen::new()
-//!        .out_dir("protocols/asynchronous")
-//!        .inputs(&protos)
-//!        .include("protocols/protos")
-//!        .rust_protobuf()
-//!        .customize(Customize {
-//!            async_all: true,
-//!            ..Default::default()
-//!        })
-//!        .rust_protobuf_customize(protobuf_customized.clone())
-//!        .run()
-//!        .expect("Gen async code failed.");
-//! }
+//! ```no_run
+//! use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
+//!
+//! # fn main() -> std::io::Result<()> {
+//! Codegen::new()
+//!     .out_dir(std::env::var("OUT_DIR").expect("OUT_DIR is set for build scripts"))
+//!     .input("proto/greeter.proto")
+//!     .include("proto")
+//!     .rust_protobuf()
+//!     .customize(Customize {
+//!         async_all: true,
+//!         gen_mod: true,
+//!         ..Default::default()
+//!     })
+//!     .rust_protobuf_customize(ProtobufCustomize::default().gen_mod_rs(true))
+//!     .run()?;
+//! # Ok(())
+//! # }
 //! ```
-//! If there's no out_dir and use 'gen_mod' feature
-//! You can use the following method to include the target file
+//!
+//! When no output directory is configured, [`Codegen::run`] uses Cargo's `OUT_DIR` environment
+//! variable. Generated module declarations can then be included with:
+//!
+//! ```ignore
 //! include!(concat!(env!("OUT_DIR"), "/mod.rs"));
+//! ```
+
+#![warn(missing_docs)]
+#![warn(rustdoc::broken_intra_doc_links)]
 
 pub use protobuf_codegen::{
     Customize as ProtobufCustomize, CustomizeCallback as ProtobufCustomizeCallback,
@@ -46,42 +56,42 @@ mod model;
 mod parser;
 mod str_lit;
 
-/// Invoke pure rust codegen.
+/// Builder for pure-Rust Protocol Buffers and ttrpc code generation.
 #[derive(Debug, Default)]
 pub struct Codegen {
-    /// --lang_out= param ,if out_dir is none ,will use env 'OUT_DIR' path
+    /// Output directory, or `OUT_DIR` when unset.
     out_dir: Option<PathBuf>,
-    /// -I args
+    /// Directories searched for imported `.proto` files.
     includes: Vec<PathBuf>,
-    /// List of .proto files to compile
+    /// `.proto` files to compile.
     inputs: Vec<PathBuf>,
-    /// Generate rust-protobuf files along with rust-gprc
+    /// Whether to generate `rust-protobuf` message files alongside service bindings.
     rust_protobuf: bool,
-    /// rust protobuf codegen
+    /// Underlying `rust-protobuf` generator configuration.
     rust_protobuf_codegen: protobuf_codegen::Codegen,
-    /// Customize code generation
+    /// ttrpc service generator configuration.
     customize: Customize,
 }
 
 impl Codegen {
-    /// Fresh new codegen object.
+    /// Creates an empty code generation builder.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set the output directory for codegen. Support None out_dir
+    /// Sets the output directory.
     pub fn out_dir(&mut self, out_dir: impl AsRef<Path>) -> &mut Self {
         self.out_dir = Some(out_dir.as_ref().to_owned());
         self
     }
 
-    /// Add an include directory.
+    /// Adds a directory searched for imported `.proto` files.
     pub fn include(&mut self, include: impl AsRef<Path>) -> &mut Self {
         self.includes.push(include.as_ref().to_owned());
         self
     }
 
-    /// Add include directories.
+    /// Adds directories searched for imported `.proto` files.
     pub fn includes(&mut self, includes: impl IntoIterator<Item = impl AsRef<Path>>) -> &mut Self {
         for include in includes {
             self.include(include);
@@ -89,13 +99,13 @@ impl Codegen {
         self
     }
 
-    /// Add an input (`.proto` file).
+    /// Adds a `.proto` file to compile.
     pub fn input(&mut self, input: impl AsRef<Path>) -> &mut Self {
         self.inputs.push(input.as_ref().to_owned());
         self
     }
 
-    /// Add inputs (`.proto` files).
+    /// Adds `.proto` files to compile.
     pub fn inputs(&mut self, inputs: impl IntoIterator<Item = impl AsRef<Path>>) -> &mut Self {
         for input in inputs {
             self.input(input);
@@ -103,19 +113,19 @@ impl Codegen {
         self
     }
 
-    /// Generate rust-protobuf files along with ttrpc-rust.
+    /// Enables generation of `rust-protobuf` message types alongside ttrpc services.
     pub fn rust_protobuf(&mut self) -> &mut Self {
         self.rust_protobuf = true;
         self
     }
 
-    /// Customize code generated by rust-protobuf-codegen.
+    /// Sets the `rust-protobuf` code generation options.
     pub fn rust_protobuf_customize(&mut self, customize: ProtobufCustomize) -> &mut Self {
         self.rust_protobuf_codegen.customize(customize);
         self
     }
 
-    /// Callback for dynamic per-element customization of rust-protobuf-codegen.
+    /// Sets a callback for per-element `rust-protobuf` customization.
     pub fn rust_protobuf_customize_callback(
         &mut self,
         customize: impl ProtobufCustomizeCallback,
@@ -124,14 +134,25 @@ impl Codegen {
         self
     }
 
-    /// Customize code generation.
+    /// Sets ttrpc client and server generation options.
     pub fn customize(&mut self, customize: Customize) -> &mut Self {
         self.customize = customize;
         self
     }
 
-    /// Like `protoc --rust_out=...` but without requiring `protoc` or `protoc-gen-rust`
-    /// commands in `$PATH`.
+    /// Parses the configured inputs and writes generated Rust files.
+    ///
+    /// This is equivalent to a `protoc`-based generation step but does not require `protoc` or
+    /// `protoc-gen-rust` in `PATH`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an input cannot be read or parsed, imports or types cannot be resolved,
+    /// or generated service files cannot be written.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `rust_protobuf` generation is enabled and message generation fails.
     pub fn run(&mut self) -> io::Result<()> {
         let includes: Vec<&Path> = self.includes.iter().map(|p| p.as_path()).collect();
         let inputs: Vec<&Path> = self.inputs.iter().map(|p| p.as_path()).collect();

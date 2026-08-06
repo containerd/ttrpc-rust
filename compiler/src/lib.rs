@@ -11,19 +11,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Low-level service generator for ttrpc Rust bindings.
 //!
-//! A compiler of ttrpc-rust.
+//! This crate turns Protocol Buffers file descriptors into generated ttrpc clients, server traits,
+//! and registration helpers. Most projects should use [`ttrpc-codegen`] from `build.rs`; it parses
+//! `.proto` files and calls this compiler internally. The `ttrpc_rust_plugin` binary exposes the
+//! same generator through the standard `protoc` plugin protocol.
 //!
-//! *generate rust version ttrpc code from proto files.*
-//!
-//!
-//! Usage
-//!
-//!- [Manual Generation](https://github.com/containerd/ttrpc-rust#1-generate-with-protoc-command) uses ttrpc-compiler as a protoc plugin
-//!
-//!- [Programmatic Generation](https://github.com/containerd/ttrpc-rust#2-generate-programmatically) uses ttrpc-compiler as a rust crate
+//! [`ttrpc-codegen`]: https://docs.rs/ttrpc-codegen
 
+#![warn(missing_docs)]
+#![warn(rustdoc::broken_intra_doc_links)]
+
+/// Generates ttrpc service bindings from Protocol Buffers descriptors.
 pub mod codegen;
+/// Legacy Prost-based code generation helpers.
 pub mod prost_codegen;
 mod util;
 
@@ -32,10 +34,10 @@ mod util;
 pub struct Customize {
     /// Indicates whether to generate async code for both server and client.
     pub async_all: bool,
-    /// Indicates whether to  generate async code for client.
+    /// Indicates whether to generate async code for the client.
     pub async_client: bool,
     /// Indicates whether to generate async code for server.
     pub async_server: bool,
-    /// Gen mod rs in mod.rs
+    /// Generates or updates `mod.rs` in the output directory.
     pub gen_mod: bool,
 }

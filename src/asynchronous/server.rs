@@ -44,8 +44,14 @@ use crate::r#async::{MethodHandler, StreamHandler, TtrpcContext};
 const DEFAULT_CONN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Dispatch table for one generated async service.
+///
+/// Values of this type are created by generated `create_*` helpers and passed to
+/// [`Server::register_service`].
 pub struct Service {
+    /// Unary methods indexed by their generated method name.
     pub methods: HashMap<String, Box<dyn MethodHandler + Send + Sync>>,
+    /// Streaming methods indexed by their generated method name.
     pub streams: HashMap<String, Arc<dyn StreamHandler + Send + Sync>>,
 }
 
@@ -59,7 +65,25 @@ impl Service {
     }
 }
 
-/// A ttrpc Server (async).
+/// A Tokio-based ttrpc server.
+///
+/// Bind or add a listener, register generated services, and then call [`Server::start`]. Starting
+/// the server spawns background tasks and returns immediately. Use [`Server::shutdown`] to stop
+/// accepting connections and wait for active connection tasks to exit.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ttrpc::r#async::Server;
+///
+/// # async fn run() -> ttrpc::Result<()> {
+/// let mut server = Server::new().bind("unix:///tmp/example.sock")?;
+/// // Register generated services with `server.register_service(...)`.
+/// server.start().await?;
+/// server.shutdown().await?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct Server {
     listeners: Vec<Listener>,
     services: Arc<HashMap<String, Service>>,
@@ -87,24 +111,43 @@ impl Default for Server {
 }
 
 impl Server {
+    /// Creates a server with no listeners or registered services.
     pub fn new() -> Server {
         Server::default()
     }
 
+    /// Binds and adds a listener for `sockaddr`.
+    ///
+    /// See the [crate-level transport table](crate#transport-addresses) for supported addresses.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is unsupported or the transport cannot be bound.
     pub fn bind(self, sockaddr: &str) -> Result<Self> {
         let listener =
             Listener::bind(sockaddr).map_err(err_to_others_err!(e, "Listener::bind error "))?;
         Ok(self.add_listener(listener))
     }
 
+    /// Adds a custom asynchronous listener.
+    ///
+    /// [`Server::start`] consumes the most recently added listener.
     pub fn add_listener(mut self, listener: Listener) -> Server {
         self.listeners.push(listener);
         self
     }
 
     #[cfg(unix)]
+    /// Adds a listener backed by an existing Unix socket descriptor.
+    ///
     /// # Safety
-    /// The file descriptor must represent a unix listener.
+    ///
+    /// `fd` must be a valid, open Unix listener. The caller must transfer exclusive ownership to
+    /// the server and must not close or use the descriptor afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the descriptor cannot be configured for asynchronous I/O.
     pub unsafe fn add_unix_listener(self, fd: RawFd) -> Result<Server> {
         let listener = Listener::from_raw_unix_listener_fd(fd)
             .map_err(err_to_others_err!(e, "from_raw_unix_listener_fd error"))?;
@@ -112,8 +155,16 @@ impl Server {
     }
 
     #[cfg(unix)]
+    /// Adds a listener backed by an existing TCP socket descriptor.
+    ///
     /// # Safety
-    /// The file descriptor must represent a unix listener.
+    ///
+    /// `fd` must be a valid, open TCP listener. The caller must transfer exclusive ownership to
+    /// the server and must not close or use the descriptor afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the descriptor cannot be configured for asynchronous I/O.
     pub unsafe fn add_tcp_listener(self, fd: RawFd) -> Result<Server> {
         let listener = Listener::from_raw_tcp_listener_fd(fd)
             .map_err(err_to_others_err!(e, "from_raw_tcp_listener_fd error"))?;
@@ -121,15 +172,23 @@ impl Server {
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
+    /// Adds a listener backed by an existing vsock descriptor.
+    ///
     /// # Safety
-    /// The file descriptor must represent a vsock listener.
+    ///
+    /// `fd` must be a valid, open vsock listener. The caller must transfer exclusive ownership to
+    /// the server and must not close or use the descriptor afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the descriptor cannot be configured for asynchronous I/O.
     pub unsafe fn add_vsock_listener(self, fd: RawFd) -> Result<Self> {
         let listener = Listener::from_raw_vsock_listener_fd(fd)
             .map_err(err_to_others_err!(e, "from_raw_unix_listener_fd error"))?;
         Ok(self.add_listener(listener))
     }
 
-    /// Register a hook called on every new accepted connection.
+    /// Registers a hook called on every new accepted connection.
     /// Replaces any previously registered hook.
     ///
     /// Note (Unix): the hook requires the accepted transport
@@ -144,6 +203,15 @@ impl Server {
         self
     }
 
+    /// Registers services produced by generated `create_*` helpers.
+    ///
+    /// Calling this method repeatedly combines services. Later registrations replace services
+    /// with the same fully qualified name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called after the server has started and its service map is already shared with a
+    /// background task.
     pub fn register_service(mut self, new: HashMap<String, Service>) -> Server {
         let services = Arc::get_mut(&mut self.services).unwrap();
         services.extend(new);
@@ -156,6 +224,17 @@ impl Server {
         })
     }
 
+    /// Starts accepting connections on the most recently added listener.
+    ///
+    /// This method spawns a background accept task and returns immediately.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server has no listener.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called outside a Tokio runtime.
     pub async fn start(&mut self) -> Result<()> {
         let incoming = self.get_listener()?;
         self.do_start(incoming).await
@@ -232,6 +311,7 @@ impl Server {
         Ok(())
     }
 
+    /// Stops the listener, closes active connections, and releases the listener.
     pub async fn shutdown(&mut self) -> Result<()> {
         self.stop_listen().await;
         self.disconnect().await;
@@ -239,6 +319,10 @@ impl Server {
         Ok(())
     }
 
+    /// Notifies active connections to close and waits for their tasks to exit.
+    ///
+    /// This leaves the listener stopped or running in its current state. The wait is bounded by
+    /// the server's internal shutdown timeout.
     pub async fn disconnect(&mut self) {
         self.shutdown.shutdown();
 
@@ -252,6 +336,10 @@ impl Server {
         trace!("wait connection exit.");
     }
 
+    /// Stops accepting new connections while preserving the listener for a later [`Server::start`].
+    ///
+    /// Existing connections remain active until [`Server::disconnect`] or [`Server::shutdown`] is
+    /// called.
     pub async fn stop_listen(&mut self) {
         if let Some(tx) = self.stop_listen_tx.take() {
             let (fd_tx, mut fd_rx) = channel(1);

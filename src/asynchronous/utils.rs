@@ -232,15 +232,21 @@ macro_rules! async_client_stream_receive {
     };
 }
 
-/// Trait that implements handler which is a proxy to the desired method (async).
+/// Dispatches a request to an asynchronous unary service method.
+///
+/// This trait is implemented by generated service bindings.
 #[async_trait]
 pub trait MethodHandler {
+    /// Handles one decoded unary request and returns its response.
     async fn handler(&self, ctx: TtrpcContext, req: Request) -> Result<Response>;
 }
 
-/// Trait that implements handler which is a proxy to the stream (async).
+/// Dispatches a request to an asynchronous streaming service method.
+///
+/// This trait is implemented by generated service bindings.
 #[async_trait]
 pub trait StreamHandler {
+    /// Handles one streaming request.
     async fn handler(
         &self,
         ctx: TtrpcContext,
@@ -248,17 +254,20 @@ pub trait StreamHandler {
     ) -> Result<Option<Response>>;
 }
 
-/// The context of ttrpc (async).
+/// Server-side context for an asynchronous request.
 ///
-/// Implements [`Default`] so test/mock code can construct a context with
-/// `..Default::default()` and only specify the fields they need.
+/// Generated service traits receive this value by reference. It implements [`Default`] so test and
+/// mock code can specify only the fields it needs.
 #[derive(Debug, Default)]
 pub struct TtrpcContext {
+    /// Wire header associated with the request.
     pub mh: MessageHeader,
+    /// Request metadata grouped by key.
     pub metadata: HashMap<String, Vec<String>>,
+    /// Client-provided timeout in nanoseconds, or zero if no timeout was set.
     pub timeout_nano: i64,
 
-    /// Opaque per-connection data from [`AcceptHook`](crate::security_extension::AcceptHook). Immutable after accept.
+    /// Opaque per-connection data supplied by an accept hook. Immutable after accept.
     /// See [`ConnectionData`](crate::security_extension::ConnectionData) for full contract.
     /// Empty when `security_extension` is not enabled.
     pub connection_data: Arc<ConnectionData>,

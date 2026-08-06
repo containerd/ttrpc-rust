@@ -11,14 +11,30 @@ use tokio::net::{UnixListener, UnixStream};
 use super::{Listener, Socket};
 
 impl Listener {
+    /// Binds a Unix domain socket address without the `unix://` scheme prefix.
+    ///
+    /// On Linux and Android, an address beginning with `@` selects the abstract namespace.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is invalid, already in use, or cannot be configured for
+    /// asynchronous I/O.
     pub fn bind_unix(addr: impl AsRef<str>) -> IoResult<Self> {
         let addr = parse_unix_addr(addr)?;
         let listener = StdUnixListener::bind_addr(&addr)?;
         Self::try_from(listener)
     }
 
+    /// Creates a listener from an existing Unix socket descriptor.
+    ///
     /// # Safety
-    /// The file descriptor must represent a unix listener.
+    ///
+    /// `fd` must be a valid, open Unix listener. The caller must transfer exclusive ownership and
+    /// must not close or use the descriptor afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the descriptor cannot be configured for asynchronous I/O.
     pub unsafe fn from_raw_unix_listener_fd(fd: std::os::fd::RawFd) -> IoResult<Self> {
         let listener = unsafe { StdUnixListener::from_raw_fd(fd) };
         Self::try_from(listener)
@@ -26,14 +42,27 @@ impl Listener {
 }
 
 impl Socket {
+    /// Connects to a Unix domain socket address without the `unix://` scheme prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is invalid or the connection cannot be established.
     pub async fn connect_unix(addr: impl AsRef<str>) -> IoResult<Self> {
         let addr = parse_unix_addr(addr)?;
         let socket = StdUnixStream::connect_addr(&addr)?;
         Self::try_from(socket)
     }
 
+    /// Creates a connected socket from an existing Unix socket descriptor.
+    ///
     /// # Safety
-    /// The file descriptor must represent a unix socket.
+    ///
+    /// `fd` must be a valid, open, connected Unix socket. The caller must transfer exclusive
+    /// ownership and must not close or use the descriptor afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the descriptor cannot be configured for asynchronous I/O.
     pub unsafe fn from_raw_unix_socket_fd(fd: RawFd) -> IoResult<Self> {
         let socket = unsafe { StdUnixStream::from_raw_fd(fd) };
         Self::try_from(socket)

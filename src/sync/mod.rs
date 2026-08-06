@@ -3,7 +3,24 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-//! Server and Client in sync mode.
+//! Thread-based ttrpc clients and servers.
+//!
+//! The synchronous runtime is enabled by the default `sync` feature. Generated client methods
+//! block the calling thread until a response arrives or the request timeout expires. A [`Server`]
+//! accepts connections and dispatches generated service handlers on a configurable worker pool.
+//!
+//! # Examples
+//!
+//! ```no_run
+//! use ttrpc::sync::Client;
+//!
+//! # fn main() -> ttrpc::Result<()> {
+//! let client = Client::connect("unix:///run/my-service.sock")?;
+//! // Pass `client` to a generated service client.
+//! # drop(client);
+//! # Ok(())
+//! # }
+//! ```
 
 mod channel;
 mod client;

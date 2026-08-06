@@ -163,17 +163,28 @@ macro_rules! client_request {
     };
 }
 
-/// The context of ttrpc (sync).
+/// Server-side context for a synchronous request.
+///
+/// Generated service traits receive this value by reference. Application handlers commonly use
+/// [`TtrpcContext::metadata`] and [`TtrpcContext::timeout_nano`]; the remaining fields support the
+/// generated dispatch layer.
 #[derive(Debug)]
 pub struct TtrpcContext {
+    /// File descriptor for the client connection handling this request.
     #[cfg(unix)]
     pub fd: std::os::unix::io::RawFd,
+    /// Native connection handle for the client handling this request.
     #[cfg(windows)]
     pub fd: i32,
+    /// Receives a notification when the connection is cancelled.
     pub cancel_rx: crossbeam::channel::Receiver<()>,
+    /// Wire header associated with the request.
     pub mh: MessageHeader,
+    /// Channel used by generated handlers to send the response frame.
     pub res_tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+    /// Request metadata grouped by key.
     pub metadata: HashMap<String, Vec<String>>,
+    /// Client-provided timeout in nanoseconds, or zero if no timeout was set.
     pub timeout_nano: i64,
     /// Per-connection extension context (opaque data + optional payload transform).
     /// Immutable after accept. Default (empty data, no transform) when no hook is configured.
@@ -192,7 +203,14 @@ impl TtrpcContext {
     }
 }
 
-/// Trait that implements handler which is a proxy to the desired method (sync).
+/// Dispatches a request to a synchronous service method.
+///
+/// This trait is implemented by generated service bindings.
 pub trait MethodHandler {
+    /// Handles one decoded ttrpc request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request cannot be decoded, dispatched, or answered.
     fn handler(&self, ctx: TtrpcContext, req: Request) -> Result<()>;
 }
