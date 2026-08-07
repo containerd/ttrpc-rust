@@ -570,7 +570,7 @@ impl HandlerContext {
 
         let task = spawn(async move { stream.handler(ctx, si).await });
 
-        if !no_data {
+        if !no_data && !req.payload.is_empty() {
             // Fake the first data message.
             let msg = GenMessage {
                 header: MessageHeader::new_data(stream_id, req.payload.len() as u32),
