@@ -13,7 +13,7 @@ readme = "README.md"
 
 
 [dependencies]
-protobuf-support = { workspace = true }
 protobuf = { workspace = true }
 protobuf-codegen = { workspace = true }
+protobuf-parse = { workspace = true }
 ttrpc-compiler = { workspace = true }
