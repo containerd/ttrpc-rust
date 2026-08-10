@@ -17,3 +17,6 @@ protobuf = { workspace = true }
 protobuf-codegen = { workspace = true }
 protobuf-parse = { workspace = true }
 ttrpc-compiler = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

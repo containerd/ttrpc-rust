@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package well_known;
+
+import "google/protobuf/descriptor.proto";
+import "google/protobuf/timestamp.proto";
+
+message TimestampedRequest {
+  google.protobuf.Timestamp created_at = 1;
+}
+
+service Clock {
+  rpc Now(google.protobuf.Timestamp) returns (google.protobuf.Timestamp);
+  rpc Describe(google.protobuf.FileDescriptorProto) returns (google.protobuf.FileDescriptorProto);
+  rpc ExtensionRange(google.protobuf.DescriptorProto.ExtensionRange) returns (google.protobuf.DescriptorProto.ExtensionRange);
+  rpc Echo(TimestampedRequest) returns (TimestampedRequest);
+}

@@ -128,6 +128,9 @@ fn main() {
 }
 ```
 
+Canonical Google well-known type imports, such as `google/protobuf/timestamp.proto`, are available
+automatically and do not require an additional include path.
+
 Include the generated modules in your crate:
 
 ```rust

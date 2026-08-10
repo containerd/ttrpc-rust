@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package well_known_streaming;
+
+import "google/protobuf/timestamp.proto";
+
+service Clock {
+  rpc Watch(google.protobuf.Timestamp) returns (stream google.protobuf.Timestamp);
+  rpc Collect(stream google.protobuf.Timestamp) returns (google.protobuf.Timestamp);
+  rpc Exchange(stream google.protobuf.Timestamp) returns (stream google.protobuf.Timestamp);
+}

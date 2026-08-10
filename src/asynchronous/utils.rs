@@ -16,8 +16,8 @@ use crate::proto::{MessageHeader, Request, Response};
 /// Handle request in async mode.
 #[macro_export]
 macro_rules! async_request_handler {
-    ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
-        let mut req = super::$server::$req_type::new();
+    ($class: ident, $ctx: ident, $req: ident, $req_type: path, $req_fn: ident) => {
+        let mut req = <$req_type>::new();
         {
             let mut s = CodedInputStream::from_bytes(&$req.payload);
             req.merge_from(&mut s)
@@ -48,6 +48,15 @@ macro_rules! async_request_handler {
         }
 
         return Ok(res);
+    };
+    ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
+        $crate::async_request_handler!(
+            $class,
+            $ctx,
+            $req,
+            super::$server::$req_type,
+            $req_fn
+        )
     };
 }
 
@@ -85,9 +94,9 @@ macro_rules! async_client_streamimg_handler {
 /// Handle server streaming in async mode.
 #[macro_export]
 macro_rules! async_server_streamimg_handler {
-    ($class: ident, $ctx: ident, $inner: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
+    ($class: ident, $ctx: ident, $inner: ident, $req_type: path, $req_fn: ident) => {
         let req_buf = $inner.recv().await?;
-        let req = <super::$server::$req_type as ::ttrpc::proto::Codec>::decode(&req_buf)
+        let req = <$req_type as ::ttrpc::proto::Codec>::decode(&req_buf)
             .map_err(|e| ::ttrpc::Error::Others(e.to_string()))?;
         let stream = ::ttrpc::r#async::ServerStreamSender::new($inner);
         match $class.service.$req_fn(&$ctx, req, stream).await {
@@ -110,6 +119,15 @@ macro_rules! async_server_streamimg_handler {
                 return Ok(Some(res));
             }
         }
+    };
+    ($class: ident, $ctx: ident, $inner: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
+        $crate::async_server_streamimg_handler!(
+            $class,
+            $ctx,
+            $inner,
+            super::$server::$req_type,
+            $req_fn
+        )
     };
 }
 

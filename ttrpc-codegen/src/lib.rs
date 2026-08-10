@@ -75,6 +75,9 @@ impl Codegen {
     }
 
     /// Adds a directory searched for imported `.proto` files.
+    ///
+    /// Canonical Google well-known type imports are resolved automatically and
+    /// do not need to be present in an include directory.
     pub fn include(&mut self, include: impl AsRef<Path>) -> &mut Self {
         self.includes.push(include.as_ref().to_owned());
         self
