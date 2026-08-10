@@ -110,7 +110,12 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
         {
             run_example("server", "client", "example", &["--tcp"])?;
             run_example("async-server", "async-client", "example", &["--tcp"])?;
-            run_example("async-stream-server", "async-stream-client", "example", &["--tcp"])?;
+            run_example(
+                "async-stream-server",
+                "async-stream-client",
+                "example",
+                &["--tcp"],
+            )?;
         }
     }
 
@@ -121,8 +126,12 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(unix)]
         run_example("async-server", "async-client", "example2", &[])?;
         #[cfg(unix)]
-        run_example("async-stream-server", "async-stream-client", "example2", &[])?;
-    }
+        run_example(
+            "async-stream-server",
+            "async-stream-client",
+            "example2",
+            &[],
+        )?;
     }
 
     Ok(())

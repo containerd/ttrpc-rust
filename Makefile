@@ -23,7 +23,7 @@ build: debug
 
 .PHONY: test
 test:
-ifeq ($OS,Windows_NT)
+ifeq ($(OS),Windows_NT)
 	cargo test --features sync,async,rustprotobuf
 else
 	# cargo test --all-features --verbose

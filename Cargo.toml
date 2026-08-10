@@ -5,6 +5,13 @@ members = [
     "./example",
     "./"
 ]
+# The prost-based codegen crate and its example live outside this workspace:
+# they are standalone crates and intentionally kept decoupled from the
+# rustprotobuf-oriented workspace members above.
+exclude = [
+    "./codegen",
+    "./example2",
+]
 resolver = "2"
 
 [workspace.package]
@@ -41,7 +48,7 @@ description = "A Rust version of ttrpc."
 rust-version = "1.70"
 
 [dependencies]
-prost = { version = "0.11", optional = true }
+prost = { version = "0.13", optional = true }
 protobuf = { workspace = true, optional = true }
 libc = { version = "0.2.59", features = [ "extra_traits" ] }
 nix = "0.26.2"
@@ -74,5 +81,7 @@ prost = ["dep:prost", "dep:prost-build"]
 rustprotobuf = ["dep:protobuf"]
 
 [package.metadata.docs.rs]
-all-features = true
+# "prost" and "rustprotobuf" are mutually exclusive, so don't build with
+# all-features; pick one backend together with the runtime features.
+features = ["sync", "async", "rustprotobuf"]
 rustdoc-args = ["--cfg", "docsrs"]

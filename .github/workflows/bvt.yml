@@ -40,6 +40,9 @@ jobs:
           make -C ttrpc-codegen
           make -C example build-examples
           make -C example2 build-examples
+        # Keep bash so a native-command failure on Windows isn't masked by a
+        # later successful command (PowerShell swallows non-zero exits).
+        shell: bash
 
   deny:
     runs-on: ubuntu-latest

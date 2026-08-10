@@ -39,7 +39,16 @@ fn generate_ttrpc(out_dir: &str) {
 
     // read ttrpc.rs
     let ttrpc_path = format!("{}/ttrpc.rs", out_dir);
-    let content = fs::read_to_string(&ttrpc_path).expect("Failed to read ttrpc.rs");
+    // prost generates the `Code` enum variants in PascalCase (e.g. `Ok`,
+    // `Cancelled`), but the rest of this crate references the original
+    // SCREAMING_SNAKE_CASE names (e.g. `OK`, `CANCELLED`) that the
+    // rustprotobuf backend keeps verbatim. Rewrite the generated variants
+    // back so both backends expose the same public `Code` API.
+    let mut content = fs::read_to_string(&ttrpc_path).expect("Failed to read ttrpc.rs");
+    // The proto doc comments use indented list items that newer toolchains
+    // flag via clippy::doc_overindented_list_items. Silence it for the
+    // generated module.
+    content = format!("#![allow(clippy::doc_overindented_list_items)]\n{content}");
 
     // define the enum value name pairs
     let replacements = [
@@ -62,20 +71,17 @@ fn generate_ttrpc(out_dir: &str) {
         ("DataLoss", "DATA_LOSS"),
     ];
 
-    // replace the enum value in the file
-    let mut modified_content = content.clone();
-
-    // replace the enum definition
+    // replace the enum value in the file in place
     for (pascal_case, upper_case) in &replacements {
         // replace the enum definition line
         let enum_pattern = format!("    {} = ", pascal_case);
         let enum_replacement = format!("    {} = ", upper_case);
-        modified_content = modified_content.replace(&enum_pattern, &enum_replacement);
+        content = content.replace(&enum_pattern, &enum_replacement);
 
         // replace the as_str_name function
         let match_pattern = format!("            Self::{} => ", pascal_case);
         let match_replacement = format!("            Self::{} => ", upper_case);
-        modified_content = modified_content.replace(&match_pattern, &match_replacement);
+        content = content.replace(&match_pattern, &match_replacement);
 
         // replace the from_str_name function
         let from_str_pattern = format!(
@@ -86,9 +92,9 @@ fn generate_ttrpc(out_dir: &str) {
             "            \"{}\" => Some(Self::{})",
             upper_case, upper_case
         );
-        modified_content = modified_content.replace(&from_str_pattern, &from_str_replacement);
+        content = content.replace(&from_str_pattern, &from_str_replacement);
     }
 
     // write the modified content back to the file
-    fs::write(&ttrpc_path, modified_content).expect("Failed to write modified ttrpc.rs");
+    fs::write(&ttrpc_path, content).expect("Failed to write modified ttrpc.rs");
 }

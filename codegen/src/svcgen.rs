@@ -21,10 +21,14 @@ impl TtrpcServiceGenerator {
 
 impl ServiceGenerator for TtrpcServiceGenerator {
     fn finalize(&mut self, _buf: &mut String) {}
-    fn finalize_package(&mut self, _package: &str, _buf: &mut String) {}
+    fn finalize_package(&mut self, _package: &str, buf: &mut String) {
+        // prost-build calls `generate` once per service but appends every service
+        // of a package into the same module buffer, so package-level imports must
+        // be emitted exactly once here to avoid duplicate-import errors (E0252).
+        self.generate_type_aliases(buf);
+    }
     /// Generate services
     fn generate(&mut self, service: Service, buf: &mut String) {
-        self.generate_type_aliases(buf);
         self.generate_trait(&service, buf);
         self.generate_method_handlers(&service, buf);
         self.generate_creating_service_method(&service, buf);
@@ -137,7 +141,7 @@ impl TtrpcServiceGenerator {
     }
 
     fn method_handler_token(&self, service: &Service, method: &Method) -> TokenStream {
-        let struct_name = format_ident!("{}Method", to_camel_case(method.proto_name.as_str()));
+        let struct_name = self.method_handler_type(service, method);
         let service_name = format_ident!("{}", service.name);
         let method_handler_impl = if async_on(self.async_mode, Side::Server) {
             self.method_handler_impl_async_token(&struct_name, method)
@@ -155,7 +159,7 @@ impl TtrpcServiceGenerator {
     fn method_handler_impl_sync_token(&self, struct_name: &Ident, method: &Method) -> TokenStream {
         let mod_path = ttrpc_mod();
         let context = self.ttrpc_context(false);
-        let input_type = format_ident!("{}", method.input_type);
+        let input_type = type_token(&method.input_type);
         let method_name = format_ident!("{}", self.method_name_rust(method));
         quote!(
             impl #mod_path::MethodHandler for #struct_name {
@@ -170,7 +174,7 @@ impl TtrpcServiceGenerator {
     fn method_handler_impl_async_token(&self, struct_name: &Ident, method: &Method) -> TokenStream {
         let mod_path = ttrpc_mod();
         let context = self.ttrpc_context(true);
-        let input_type = format_ident!("{}", method.input_type);
+        let input_type = type_token(&method.input_type);
         let method_name = format_ident!("{}", self.method_name_rust(method));
 
         let (handler_trait, inner_token, result_type_token, handler_token) =
@@ -226,7 +230,7 @@ impl TtrpcServiceGenerator {
         let mod_path = ttrpc_mod();
         let method_inserts: Vec<_> = service.methods.iter().map(|method| {
             let key = format!("/{}.{}/{}", service.package, service.name, method.proto_name);
-            let mm = format_ident!("{}Method", to_camel_case(&method.proto_name));
+            let mm = self.method_handler_type(service, method);
             quote!(
                 methods.insert(
                     #key.to_string(),
@@ -254,7 +258,7 @@ impl TtrpcServiceGenerator {
         };
         let method_inserts: Vec<_> = service.methods.iter().map(|method| {
             let key = method.proto_name.to_string();
-            let mm = format_ident!("{}Method", to_camel_case(&method.proto_name));
+            let mm = self.method_handler_type(service, method);
             match MethodType::from_method(method) {
                 MethodType::Unary => {
                     quote!(
@@ -432,6 +436,17 @@ impl TtrpcServiceGenerator {
         to_snake_case(&method.name)
     }
 
+    /// Build the per-method handler type name. Including the service name avoids
+    /// collisions when two services in the same package expose a method with the
+    /// same proto name (e.g. `Foo.Get` and `Bar.Get` both generating `GetMethod`).
+    fn method_handler_type(&self, service: &Service, method: &Method) -> Ident {
+        format_ident!(
+            "{}{}Method",
+            to_camel_case(service.name.as_str()),
+            to_camel_case(method.proto_name.as_str()),
+        )
+    }
+
     fn client_type(&self, service: &Service) -> String {
         format!("{}Client", service.name)
     }
@@ -500,4 +515,92 @@ fn async_on(mode: AsyncMode, side: Side) -> bool {
     mode == AsyncMode::All
         || (side == Side::Server && mode == AsyncMode::Server)
         || (side == Side::Client && mode == AsyncMode::Client)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use prost_types::{MethodOptions, ServiceOptions};
+
+    fn make_service(package: &str, name: &str, method: &str, input_type: &str) -> Service {
+        Service {
+            name: name.to_string(),
+            proto_name: name.to_string(),
+            package: package.to_string(),
+            comments: Default::default(),
+            methods: vec![Method {
+                name: method.to_string(),
+                proto_name: method.to_string(),
+                comments: Default::default(),
+                input_type: input_type.to_string(),
+                output_type: "()".to_string(),
+                input_proto_type: String::new(),
+                output_proto_type: String::new(),
+                options: MethodOptions::default(),
+                client_streaming: false,
+                server_streaming: false,
+            }],
+            options: ServiceOptions::default(),
+        }
+    }
+
+    /// Two services in the same package that expose a method with the same proto
+    /// name must produce distinct handler types, and package-level imports must
+    /// be emitted exactly once (otherwise E0252 on multi-service packages).
+    #[test]
+    fn overlapping_method_names_do_not_collide() {
+        let mut gen = TtrpcServiceGenerator::new(AsyncMode::None);
+        // Use a qualified input type path to also exercise the path-aware
+        // conversion (format_ident! would panic on such a path).
+        let foo = make_service("test.pkg", "Foo", "Get", "super::google::protobuf::Empty");
+        let bar = make_service("test.pkg", "Bar", "Get", "super::google::protobuf::Empty");
+
+        let mut buf = String::new();
+        gen.generate(foo, &mut buf);
+        gen.generate(bar, &mut buf);
+        gen.finalize_package("test.pkg", &mut buf);
+
+        // The service name is now part of the handler type to avoid collisions.
+        assert!(
+            buf.contains("FooGetMethod"),
+            "missing FooGetMethod in:\n{buf}"
+        );
+        assert!(
+            buf.contains("BarGetMethod"),
+            "missing BarGetMethod in:\n{buf}"
+        );
+        // Package-level imports are emitted once via finalize_package. The
+        // generated token stream uses spaces around `::`.
+        assert_eq!(
+            buf.matches("collections :: HashMap").count(),
+            1,
+            "package imports emitted more than once in:\n{buf}"
+        );
+        // The qualified input type path survives the conversion.
+        assert!(
+            buf.contains("protobuf :: Empty"),
+            "qualified input type path not preserved in:\n{buf}"
+        );
+    }
+
+    /// A schema without a `package` declaration must still generate without
+    /// panicking.
+    #[test]
+    fn packageless_schema_generates() {
+        let mut gen = TtrpcServiceGenerator::new(AsyncMode::None);
+        let svc = make_service("", "Bare", "Do", "Request");
+
+        let mut buf = String::new();
+        gen.generate(svc, &mut buf);
+        gen.finalize_package("", &mut buf);
+
+        assert!(
+            buf.contains("BareDoMethod"),
+            "missing BareDoMethod in:\n{buf}"
+        );
+        assert!(
+            buf.contains("trait Bare"),
+            "missing service trait in:\n{buf}"
+        );
+    }
 }

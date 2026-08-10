@@ -13,10 +13,14 @@ readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# This crate is intentionally a standalone workspace root (decoupled from the
+# rustprotobuf-oriented root workspace).
+[workspace]
+
 [dependencies]
-prost = "0.11"
-prost-types = "0.11"
-prost-build = "0.11"
+prost = "0.13"
+prost-types = "0.13"
+prost-build = "0.13"
 proc-macro2 = "1.0"
 quote = "1.0"
 anyhow = "^1.0"
