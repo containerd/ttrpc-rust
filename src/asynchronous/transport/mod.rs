@@ -1,5 +1,7 @@
 use std::io::{Error as IoError, Result as IoResult};
 use std::pin::Pin;
+#[cfg(feature = "security_extension")]
+use std::os::unix::io::RawFd;
 
 use futures::stream::{BoxStream, Stream, StreamExt as _};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -8,7 +10,16 @@ trait AsyncReadWrite: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite> AsyncReadWrite for T {}
 
 pub struct Listener(BoxStream<'static, IoResult<Socket>>);
-pub struct Socket(Pin<Box<dyn AsyncReadWrite + Send + Sync + 'static>>);
+/// A type-erased async socket.
+///
+/// On Unix with the `security_extension` feature, stores the raw fd for
+/// [`AcceptHook`](crate::security_extension::AcceptHook) access.
+/// See `crate::security_extension` module doc for full architecture.
+pub struct Socket {
+    inner: Pin<Box<dyn AsyncReadWrite + Send + Sync + 'static>>,
+    #[cfg(feature = "security_extension")]
+    raw_fd: Option<RawFd>,
+}
 
 macro_rules! io_other {
     ($fmt_str:literal, $($args:expr),*) => {
@@ -32,6 +43,12 @@ mod vsock;
 mod windows;
 
 impl Listener {
+    /// Create a listener from a generic async stream of sockets.
+    ///
+    /// **Note**: This uses [`Socket::new`] which does **not** capture the
+    /// raw fd. For platform-specific listeners (Unix, TCP, vsock), prefer
+    /// the `From<XxxListener>` impls which capture the raw fd via
+    /// `Socket::from()` — required by [`AcceptHook`](crate::security_extension::AcceptHook).
     pub fn new<S: AsyncRead + AsyncWrite + Send + Sync + 'static>(
         listener: impl Stream<Item = IoResult<S>> + Send + 'static,
     ) -> Self {
@@ -66,8 +83,26 @@ impl Listener {
 }
 
 impl Socket {
+    /// Create a socket from any `AsyncRead + AsyncWrite` type.
     pub fn new(socket: impl AsyncRead + AsyncWrite + Send + Sync + 'static) -> Self {
-        Self(Box::pin(socket))
+        Self {
+            inner: Box::pin(socket),
+            #[cfg(feature = "security_extension")]
+            raw_fd: None,
+        }
+    }
+
+    #[cfg(feature = "security_extension")]
+    pub(crate) fn with_raw_fd(socket: impl AsyncRead + AsyncWrite + Send + Sync + 'static, fd: RawFd) -> Self {
+        Self {
+            inner: Box::pin(socket),
+            raw_fd: Some(fd),
+        }
+    }
+
+    #[cfg(feature = "security_extension")]
+    pub fn as_raw_fd(&self) -> Option<RawFd> {
+        self.raw_fd
     }
 
     pub async fn connect(addr: impl AsRef<str>) -> IoResult<Self> {
@@ -118,7 +153,7 @@ impl AsyncRead for Socket {
         cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        self.get_mut().0.as_mut().poll_read(cx, buf)
+        self.get_mut().inner.as_mut().poll_read(cx, buf)
     }
 }
 
@@ -128,21 +163,21 @@ impl AsyncWrite for Socket {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        self.get_mut().0.as_mut().poll_write(cx, buf)
+        self.get_mut().inner.as_mut().poll_write(cx, buf)
     }
 
     fn poll_flush(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
-        self.get_mut().0.as_mut().poll_flush(cx)
+        self.get_mut().inner.as_mut().poll_flush(cx)
     }
 
     fn poll_shutdown(
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
-        self.get_mut().0.as_mut().poll_shutdown(cx)
+        self.get_mut().inner.as_mut().poll_shutdown(cx)
     }
 
     fn poll_write_vectored(
@@ -150,10 +185,10 @@ impl AsyncWrite for Socket {
         cx: &mut std::task::Context<'_>,
         bufs: &[std::io::IoSlice<'_>],
     ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        self.get_mut().0.as_mut().poll_write_vectored(cx, bufs)
+        self.get_mut().inner.as_mut().poll_write_vectored(cx, bufs)
     }
 
     fn is_write_vectored(&self) -> bool {
-        self.0.is_write_vectored()
+        self.inner.is_write_vectored()
     }
 }

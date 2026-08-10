@@ -66,6 +66,7 @@ protobuf-codegen = { workspace = true }
 default = ["sync"]
 async = ["async-trait", "async-stream", "tokio", "futures", "tokio-vsock"]
 sync = []
+security_extension = []
 
 [package.metadata.docs.rs]
 all-features = true

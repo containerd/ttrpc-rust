@@ -189,6 +189,9 @@ impl MessageHeader {
 }
 
 /// Generic message of ttrpc.
+///
+/// Constructed internally by the ttrpc framework and is not intended to be
+/// built directly by downstream code.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct GenMessage {
     pub header: MessageHeader,
@@ -209,6 +212,32 @@ impl From<Error> for GenMessageError {
 
 #[cfg(feature = "async")]
 impl GenMessage {
+    /// Create a DATA message.
+    pub(crate) fn new_data(stream_id: u32, payload: Vec<u8>) -> Self {
+        Self {
+            header: MessageHeader::new_data(stream_id, payload.len() as u32),
+            payload,
+        }
+    }
+
+    /// Create a RESPONSE message.
+    pub(crate) fn new_response(stream_id: u32, payload: Vec<u8>) -> Self {
+        Self {
+            header: MessageHeader::new_response(stream_id, payload.len() as u32),
+            payload,
+        }
+    }
+
+    /// Create a DATA close message (FLAG_REMOTE_CLOSED | FLAG_NO_DATA).
+    pub(crate) fn new_close(stream_id: u32) -> Self {
+        let mut header = MessageHeader::new_data(stream_id, 0);
+        header.set_flags(FLAG_REMOTE_CLOSED | FLAG_NO_DATA);
+        Self {
+            header,
+            payload: Vec::new(),
+        }
+    }
+
     /// Encodes a MessageHeader to writer.
     pub async fn write_to(
         &self,
