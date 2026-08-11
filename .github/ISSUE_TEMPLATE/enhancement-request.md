@@ -18,7 +18,3 @@ Describe how specifically you think it could be improved.
 **Additional Information**
 
 Anything else to add?
-
-**Before raising this feature request**
-
-Have you looked at the [limitations document](https://github.com/kata-containers/documentation/blob/master/Limitations.md)?

@@ -1,5 +1,8 @@
 # ttrpc-rust project maintainers
 #
+# The core containerd maintainers are additional maintainers for this project:
+# https://github.com/containerd/.project/blob/main/MAINTAINERS
+#
 # COMMITTERS
 # GitHub ID, Name, Email address
 teawater, Hui Zhu, teawater@antfin.com

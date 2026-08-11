@@ -215,6 +215,12 @@ make check-all
 
 ## Project details
 
-`ttrpc-rust` is a non-core [containerd](https://containerd.io/) subproject. Governance and contribution guidelines are maintained in the [containerd project repository](https://github.com/containerd/project); repository maintainers are listed in [MAINTAINERS](https://github.com/containerd/ttrpc-rust/blob/master/MAINTAINERS).
+`ttrpc-rust` is a **non-core** containerd subproject, licensed under the [Apache License 2.0](./LICENSE).
 
-Licensed under the [Apache License 2.0](https://github.com/containerd/ttrpc-rust/blob/master/LICENSE).
+As a containerd subproject, you will find the:
+
+- [Project governance](https://github.com/containerd/.project/blob/main/GOVERNANCE.md),
+- [Maintainers](./MAINTAINERS),
+- and [Contributing guidelines](https://github.com/containerd/.project/blob/main/CONTRIBUTING.md)
+
+information in the [`containerd/.project`](https://github.com/containerd/.project) repository.

@@ -22,7 +22,3 @@ A clear and concise description of any alternative solutions or features you've 
 **Additional context**
 
 Add any other context or screenshots about the feature request here.
-
-**Before raising this feature request**
-
-Have you looked at the [limitations document](https://github.com/kata-containers/documentation/blob/master/Limitations.md)?
