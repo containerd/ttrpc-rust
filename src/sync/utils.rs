@@ -4,10 +4,9 @@
 //
 
 use crate::error::{Error, Result};
-#[allow(unused_imports)]
-use crate::proto::{
-    check_oversize, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
-};
+#[cfg(not(feature = "prost"))]
+use crate::proto::{check_oversize, Codec};
+use crate::proto::{MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 
 use std::collections::HashMap;
 

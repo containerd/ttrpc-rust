@@ -13,8 +13,7 @@
 // limitations under the License.
 
 //! Error and Result of ttrpc and relevant functions, macros.
-#[allow(unused_imports)]
-use crate::proto::{self, Code, Response, Status};
+use crate::proto::{Code, Response, Status};
 use std::result;
 use thiserror::Error;
 

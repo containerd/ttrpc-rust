@@ -122,7 +122,6 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "prost")]
     {
         println!("Running examples with prost feature");
-        // run_example("server", "client", "example2", &[])?;
         #[cfg(unix)]
         run_example("async-server", "async-client", "example2", &[])?;
         #[cfg(unix)]
