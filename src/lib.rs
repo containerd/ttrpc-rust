@@ -87,9 +87,10 @@ pub use crate::security_extension::ConnectionContext;
 cfg_sync! {
     pub mod sync;
     #[doc(hidden)]
+    #[allow(deprecated)]
     pub use sync::response_to_channel;
     #[doc(inline)]
-    pub use sync::{MethodHandler, TtrpcContext};
+    pub use sync::{send_response, MethodHandler, TtrpcContext};
     pub use sync::Client;
     #[doc(inline)]
     pub use sync::Server;

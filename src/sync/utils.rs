@@ -3,44 +3,103 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::error::{Error, Result};
+use crate::error::{get_status, Error, Result};
 use crate::proto::{
-    check_oversize, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
+    Codec, Code, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
 };
+use crate::ConnectionContext;
+use crate::security_extension::serialize_aad;
 use std::collections::HashMap;
+use std::sync::Arc;
 
-/// Response message through a channel.
-/// Eventually  the message will sent to Client.
-pub fn response_to_channel(
+/// Send a [`Response`] through the channel with full outbound pipeline.
+///
+/// Encodes the response, applies the connection transform (if any), and
+/// sends the result through `tx`. Handles oversize responses safely:
+///
+/// 1. **Pre-check**: verifies the raw payload fits within the transform-safe
+///    limit (`ConnectionContext::max_raw_payload_len`). If it doesn't, builds
+///    a small error response instead — avoiding state advancement of stateful
+///    transforms (e.g., AEAD nonce counters) on data that would be rejected.
+/// 2. **Transform**: applies `transform_outbound` and the post-transform
+///    size guard exactly once.
+///
+/// This single-pass design prevents the double-transform bug where a
+/// stateful cipher would produce undecryptable output on a fallback message.
+pub fn send_response(
     stream_id: u32,
     res: Response,
     tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+    ctx: &ConnectionContext,
 ) -> Result<()> {
     let mut buf = res.encode().map_err(err_to_others_err!(e, ""))?;
 
-    if let Err(e) = check_oversize(buf.len(), true) {
-        let resp: Response = e.into();
-        buf = resp.encode().map_err(err_to_others_err!(e, ""))?;
-    };
+    // Pre-check: ensure raw payload fits within the transform-safe limit.
+    let max_len = ctx.max_raw_payload_len();
+    if buf.len() > max_len {
+        let err_msg = format!(
+            "response payload {} bytes exceeds safe limit {} bytes (after transform overhead)",
+            buf.len(),
+            max_len
+        );
+        let err_resp: Response =
+            Error::RpcStatus(get_status(Code::INVALID_ARGUMENT, err_msg)).into();
+        buf = err_resp.encode().map_err(err_to_others_err!(e, ""))?;
+    }
 
+    // Build the header early so we can serialize AAD for the transform.
+    // `length` is excluded from AAD, so the placeholder value doesn't matter.
+    let aad = serialize_aad(&MessageHeader::new_response(stream_id, 0));
     let mh = MessageHeader {
-        length: buf.len() as u32,
+        length: 0, // Will be set by send_response_sync after transform.
         stream_id,
         type_: MESSAGE_TYPE_RESPONSE,
         flags: 0,
     };
 
-    tx.send((mh, buf)).map_err(err_to_others_err!(e, ""))?;
+    // ── Serialize transform + enqueue ──
+    ctx.send_response_sync(buf, &aad, &tx, mh)?;
 
     Ok(())
 }
 
+/// Response message through a channel. Eventually the message will be sent
+/// to Client.
+///
+/// # Deprecated
+///
+/// This helper does **not** apply the connection's payload transform.
+/// On an encrypted connection, responses sent through this function
+/// **leak as plaintext** and an encrypted client will fail to decode them.
+///
+/// Use [`TtrpcContext::respond`] (from generated `request_handler!` macros or
+/// hand-written handlers) or [`send_response`] with the connection's
+/// [`ConnectionContext`] instead.
+#[deprecated(
+    since = "0.9.0",
+    note = "Bypasses payload transform. Use TtrpcContext::respond() or send_response() instead."
+)]
+pub fn response_to_channel(
+    stream_id: u32,
+    res: Response,
+    tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+) -> Result<()> {
+    let ctx = ConnectionContext::default();
+    send_response(stream_id, res, tx, &ctx)
+}
+
+/// Send an error as a transform-aware response through the channel.
+///
+/// If the connection has a [`PayloadTransform`](crate::security_extension::PayloadTransform)
+/// configured, the error response is encrypted before being sent so the
+/// client can decode it on an encrypted connection.
 pub fn response_error_to_channel(
     stream_id: u32,
     e: Error,
     tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
+    ctx: &ConnectionContext,
 ) -> Result<()> {
-    response_to_channel(stream_id, e.into(), tx)
+    send_response(stream_id, e.into(), tx, ctx)
 }
 
 /// Handle request in sync mode.
@@ -74,7 +133,7 @@ macro_rules! request_handler {
                 }
             },
         }
-        ::ttrpc::response_to_channel($ctx.mh.stream_id, res, $ctx.res_tx)?
+        $ctx.respond($ctx.mh.stream_id, res)?
     };
 }
 
@@ -116,6 +175,21 @@ pub struct TtrpcContext {
     pub res_tx: std::sync::mpsc::Sender<(MessageHeader, Vec<u8>)>,
     pub metadata: HashMap<String, Vec<String>>,
     pub timeout_nano: i64,
+    /// Per-connection extension context (opaque data + optional payload transform).
+    /// Immutable after accept. Default (empty data, no transform) when no hook is configured.
+    pub conn_ctx: Arc<ConnectionContext>,
+}
+
+impl TtrpcContext {
+    /// Encode, optionally transform, and send a response through this context's channel.
+    ///
+    /// This is the preferred way to send responses from within a [`MethodHandler`]
+    /// implementation. The response is encoded, the connection's
+    /// [`PayloadTransform`](crate::security_extension::PayloadTransform) is applied (if any),
+    /// an oversize check is performed, and the result is sent to the client.
+    pub fn respond(&self, stream_id: u32, res: Response) -> Result<()> {
+        send_response(stream_id, res, self.res_tx.clone(), self.conn_ctx.as_ref())
+    }
 }
 
 /// Trait that implements handler which is a proxy to the desired method (sync).

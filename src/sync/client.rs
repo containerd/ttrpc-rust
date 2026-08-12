@@ -14,9 +14,6 @@
 
 //! Sync client of ttrpc.
 
-#[cfg(unix)]
-use std::os::unix::io::RawFd;
-
 use protobuf::Message;
 use std::collections::HashMap;
 use std::sync::mpsc;
@@ -28,8 +25,15 @@ use crate::error::{Error, Result};
 use crate::proto::{
     check_oversize, Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
 };
+use crate::security_extension::serialize_aad;
 use crate::sync::channel::{read_message, write_message};
 use crate::sync::sys::ClientConnection;
+
+#[cfg(feature = "security_extension")]
+use std::os::unix::io::RawFd;
+use crate::ConnectionContext;
+#[cfg(feature = "security_extension")]
+use crate::security_extension::{ConnectHook, HookOutput};
 
 #[cfg(windows)]
 use super::sys::PipeConnection;
@@ -43,25 +47,72 @@ type ReciverMap = Arc<Mutex<HashMap<u32, mpsc::SyncSender<Result<Vec<u8>>>>>>;
 pub struct Client {
     _connection: Arc<ClientConnection>,
     sender_tx: Sender,
+    _conn_ctx: Arc<ConnectionContext>,
 }
 
 impl Client {
     pub fn connect(sockaddr: &str) -> Result<Client> {
         let conn = ClientConnection::client_connect(sockaddr)?;
 
-        Self::new_client(conn)
+        Self::new_client(conn, None)
+    }
+
+    /// Create a sync client with a [`ConnectHook`] for security negotiation.
+    ///
+    /// The hook is invoked with the connection's raw file descriptor before
+    /// any ttrpc messages are exchanged. It can perform handshakes and return
+    /// a [`PayloadTransform`](crate::security_extension::PayloadTransform) for
+    /// connection-level encryption.
+    ///
+    /// The fd is captured by a `ClientConnection`
+    /// **before** the hook runs, so if the hook rejects, the connection's
+    /// `Drop` impl closes the fd and prevents leaks.
+    #[cfg(feature = "security_extension")]
+    pub fn with_hook<H: ConnectHook + 'static>(fd: RawFd, hook: H) -> Result<Client> {
+        // Take ownership of the fd BEFORE invoking the hook. ClientConnection
+        // has a Drop impl that closes `fd` (and its internal socket_pair), so
+        // if the hook rejects we just propagate the error and the Drop cleanup
+        // releases the fd — no leak, no double-close.
+        let conn = ClientConnection::new(fd)
+            .map_err(err_to_others_err!(e, "new ClientConnection"))?;
+        let output = hook.on_connect(fd).map_err(|e| {
+            Error::Others(format!(
+                "sync client connect hook failed (fd={}): {}",
+                fd, e
+            ))
+        })?;
+        Self::new_client(conn, Some(output))
+    }
+
+    /// Returns the per-connection metadata from the [`ConnectHook`].
+    ///
+    /// This is the [`ConnectionData`](crate::security_extension::ConnectionData)
+    /// returned by the hook during connection establishment. Empty (default)
+    /// when no hook was configured.
+    #[cfg(feature = "security_extension")]
+    pub fn connection_data(&self) -> &crate::security_extension::ConnectionData {
+        &self._conn_ctx.data
     }
 
     #[cfg(unix)]
     /// Initialize a new [`Client`] from raw file descriptor.
-    pub fn new(fd: RawFd) -> Result<Client> {
+    pub fn new(fd: std::os::unix::io::RawFd) -> Result<Client> {
         let conn =
             ClientConnection::new(fd).map_err(err_to_others_err!(e, "new ClientConnection"))?;
 
-        Self::new_client(conn)
+        Self::new_client(conn, None)
     }
 
-    fn new_client(pipe_client: ClientConnection) -> Result<Client> {
+    fn new_client(
+        pipe_client: ClientConnection,
+        #[cfg(feature = "security_extension")]
+        hook_output: Option<HookOutput>,
+        #[cfg(not(feature = "security_extension"))] _hook_output: Option<()>,
+    ) -> Result<Client> {
+        #[cfg(feature = "security_extension")]
+        let conn_ctx = Arc::new(ConnectionContext::new(hook_output));
+        #[cfg(not(feature = "security_extension"))]
+        let conn_ctx = Arc::new(ConnectionContext::default());
         let client = Arc::new(pipe_client);
         let weak_client = Arc::downgrade(&client);
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
@@ -72,6 +123,7 @@ impl Client {
         let sender_client = connection.clone();
 
         //Sender
+        let sender_ctx = conn_ctx.clone();
         thread::spawn(move || {
             let mut stream_id: u32 = 1;
             for (buf, recver_tx) in rx.iter() {
@@ -84,6 +136,28 @@ impl Client {
                 }
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
+
+                // ── outbound transform ──
+                let (mh, buf) = match sender_ctx.outbound_buf(
+                    buf,
+                    &serialize_aad(&mh),
+                    false,
+                ) {
+                    Ok(transformed) => {
+                        mh.length = transformed.len() as u32;
+                        (mh, transformed)
+                    }
+                    Err(e) => {
+                        {
+                            let mut map = receiver_map.lock().unwrap();
+                            map.remove(&current_stream_id);
+                        }
+                        recver_tx
+                            .send(Err(e))
+                            .unwrap_or_else(|_e| error!("The request has returned"));
+                        continue;
+                    }
+                };
 
                 if let Err(e) = write_message(&sender_client, mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
@@ -105,6 +179,7 @@ impl Client {
         //ClientConnection's drop will be not call until the thread finished. It means if all the external references are finished,
         //this thread should be release.
         let receiver_client = weak_client.clone();
+        let receiver_ctx = conn_ctx.clone();
         thread::spawn(move || {
             loop {
                 //The count of ClientConnection's Arc will be add one , and back to original value when this code ends. 
@@ -124,7 +199,15 @@ impl Client {
                 }
 
                 match read_message(&receiver_connection) {
-                    Ok((mh, buf)) => {
+                    Ok((mh, y)) => {
+                        let buf = match y {
+                            Ok(data) => receiver_ctx.inbound_buf(
+                                data,
+                                &serialize_aad(&mh),
+                                false,
+                            ),
+                            Err(e) => Err(e),
+                        };
                         trans_resp(recver_map_orig.clone(), mh, buf);
                     }
                     Err(x) => match x {
@@ -155,6 +238,7 @@ impl Client {
         Ok(Client {
             _connection: client,
             sender_tx,
+            _conn_ctx: conn_ctx,
         })
     }
     pub fn request(&self, req: Request) -> Result<Response> {

@@ -27,13 +27,35 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 
-use super::utils::{response_error_to_channel, response_to_channel};
+use super::utils::{response_error_to_channel, send_response};
 use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
 use crate::sync::sys::{PipeConnection, PipeListener};
 use crate::{MethodHandler, TtrpcContext};
+use crate::ConnectionContext;
+use crate::security_extension::serialize_aad;
+
+#[cfg(feature = "security_extension")]
+use crate::security_extension::{AcceptHook, HookError};
+
+/// Invoke an [`AcceptHook`] for a newly accepted connection and wrap the
+/// output in a [`ConnectionContext`].
+///
+/// Returns `Ok(ConnectionContext::default())` when `hook` is `None`. On hook
+/// failure the error is forwarded to the caller so it can log, close the
+/// rejected connection, and continue the accept loop.
+#[cfg(feature = "security_extension")]
+fn connection_context_from_hook(
+    fd: i32,
+    hook: Option<&Arc<dyn AcceptHook>>,
+) -> std::result::Result<ConnectionContext, HookError> {
+    match hook {
+        Some(h) => h.on_accept(fd).map(|o| ConnectionContext::new(Some(o))),
+        None => Ok(ConnectionContext::default()),
+    }
+}
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -60,6 +82,8 @@ pub struct Server {
     thread_count_min: usize,
     thread_count_max: usize,
     accept_retry_interval: Duration,
+    #[cfg(feature = "security_extension")]
+    accept_hook: Option<Arc<dyn AcceptHook>>,
 }
 
 struct Connection {
@@ -93,6 +117,7 @@ struct ThreadS<'a> {
     default: usize,
     min: usize,
     max: usize,
+    conn_ctx: &'a Arc<ConnectionContext>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -107,6 +132,7 @@ fn start_method_handler_thread(
     cancel_rx: crossbeam::channel::Receiver<()>,
     min: usize,
     max: usize,
+    conn_ctx: Arc<ConnectionContext>,
 ) {
     thread::spawn(move || {
         while !quit.load(Ordering::SeqCst) {
@@ -142,7 +168,12 @@ fn start_method_handler_thread(
                     buf = y;
                 }
                 Ok((mh, Err(e))) => {
-                    if let Err(x) = response_error_to_channel(mh.stream_id, e, res_tx.clone()) {
+                    if let Err(x) = response_error_to_channel(
+                        mh.stream_id,
+                        e,
+                        res_tx.clone(),
+                        conn_ctx.as_ref(),
+                    ) {
                         debug!("response_error_to_channel get error {:?}", x);
                         quit_connection(quit, control_tx);
                         break;
@@ -168,7 +199,12 @@ fn start_method_handler_thread(
                 let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
                 let mut res = Response::new();
                 res.set_status(status);
-                if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
+                if let Err(x) = send_response(
+                    mh.stream_id,
+                    res,
+                    res_tx.clone(),
+                    conn_ctx.as_ref(),
+                ) {
                     debug!("response_to_channel get error {:?}", x);
                     quit_connection(quit, control_tx);
                     break;
@@ -184,7 +220,12 @@ fn start_method_handler_thread(
                 let status = get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
                 let mut res = Response::new();
                 res.set_status(status);
-                if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
+                if let Err(x) = send_response(
+                    mh.stream_id,
+                    res,
+                    res_tx.clone(),
+                    conn_ctx.as_ref(),
+                ) {
                     info!("response_to_channel get error {:?}", x);
                     quit_connection(quit, control_tx);
                     break;
@@ -198,6 +239,7 @@ fn start_method_handler_thread(
                 res_tx: res_tx.clone(),
                 metadata: context::from_pb(&req.metadata),
                 timeout_nano: req.timeout_nano,
+                conn_ctx: conn_ctx.clone(),
             };
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);
@@ -224,6 +266,7 @@ fn start_method_handler_threads(num: usize, ts: &ThreadS) {
             ts.cancel_rx.clone(),
             ts.min,
             ts.max,
+            ts.conn_ctx.clone(),
         );
     }
 }
@@ -248,6 +291,8 @@ impl Default for Server {
             thread_count_min: DEFAULT_WAIT_THREAD_COUNT_MIN,
             thread_count_max: DEFAULT_WAIT_THREAD_COUNT_MAX,
             accept_retry_interval: DEFAULT_ACCEPT_RETRY_INTERVAL,
+            #[cfg(feature = "security_extension")]
+            accept_hook: None,
         }
     }
 }
@@ -314,6 +359,23 @@ impl Server {
         self
     }
 
+    /// Set a hook invoked on each accepted connection (Unix only).
+    ///
+    /// The hook receives the connection's raw file descriptor and can perform
+    /// authentication, peer identity inspection, or handshake negotiation.
+    /// It returns [`HookOutput`](crate::security_extension::HookOutput) with optional
+    /// per-connection data and a
+    /// [`PayloadTransform`](crate::security_extension::PayloadTransform) for encryption.
+    ///
+    /// If the hook returns an error, the connection is closed and the accept
+    /// loop continues to the next connection.
+    #[cfg(feature = "security_extension")]
+    pub fn set_accept_hook<H: AcceptHook + 'static>(mut self, hook: H) -> Self {
+        let hook: Arc<dyn AcceptHook> = Arc::new(hook);
+        self.accept_hook = Some(hook);
+        self
+    }
+
     pub fn start_listen(&mut self) -> Result<()> {
         let connections = self.connections.clone();
 
@@ -363,6 +425,9 @@ impl Server {
             }
         };
 
+        #[cfg(feature = "security_extension")]
+        let accept_hook = self.accept_hook.clone();
+
         let handler = thread::Builder::new()
             .name("listener_loop".into())
             .spawn(move || {
@@ -395,11 +460,38 @@ impl Server {
                         }
                     };
 
+                    // ── Accept hook invocation ──
+                    #[cfg(feature = "security_extension")]
+                    let conn_ctx = match connection_context_from_hook(
+                        pipe_connection.id(),
+                        accept_hook.as_ref(),
+                    ) {
+                        Ok(ctx) => Arc::new(ctx),
+                        Err(e) => {
+                            let fd = pipe_connection.id();
+                            log::warn!("accept hook failed: {:?}", e);
+                            // Close the rejected connection; PipeConnection has no
+                            // Drop impl so the fd must be closed explicitly.
+                            if let Err(ce) = pipe_connection.close() {
+                                log::warn!(
+                                    "failed to close rejected connection (fd={}): {:?}",
+                                    fd,
+                                    ce
+                                );
+                            }
+                            continue;
+                        }
+                    };
+                    #[cfg(not(feature = "security_extension"))]
+                    let conn_ctx = Arc::new(ConnectionContext::default());
+
                     let methods = methods.clone();
                     let quit = Arc::new(AtomicBool::new(false));
                     let child_quit = quit.clone();
                     let reaper_tx_child = reaper_tx.clone();
                     let pipe_connection_child = pipe_connection.clone();
+                    let reader_ctx = conn_ctx.clone();
+                    let handler_ctx = conn_ctx.clone();
 
                     let (sync_tx, sync_rx) = channel();
 
@@ -438,7 +530,22 @@ impl Server {
                                 while !quit_reader.load(Ordering::SeqCst) {
                                     let msg = read_message(&pipe_reader);
                                     match msg {
-                                        Ok((x, y)) => {
+                                        Ok((mut x, y)) => {
+                                            // ── inbound transform ──
+                                            let y = match y {
+                                                Ok(data) => {
+                                                    let res = reader_ctx.inbound_buf(
+                                                        data,
+                                                        &serialize_aad(&x),
+                                                        true,
+                                                    );
+                                                    if let Ok(ref buf) = res {
+                                                        x.length = buf.len() as u32;
+                                                    }
+                                                    res
+                                                }
+                                                Err(e) => Err(e),
+                                            };
                                             let res = workload_tx.send((x, y));
                                             match res {
                                                 Ok(_) => {}
@@ -490,6 +597,7 @@ impl Server {
                                 default,
                                 min,
                                 max,
+                                conn_ctx: &handler_ctx,
                             };
                             start_method_handler_threads(ts.default, &ts);
 
