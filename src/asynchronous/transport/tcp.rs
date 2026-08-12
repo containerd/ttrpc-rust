@@ -1,7 +1,5 @@
 use std::convert::TryFrom;
 use std::io::{Error as IoError, Result as IoResult};
-#[cfg(feature = "security_extension")]
-use std::os::fd::AsRawFd as _;
 use std::os::fd::{FromRawFd as _, RawFd};
 use std::net::{
     SocketAddr, TcpListener as StdTcpListener, TcpStream as StdTcpStream,
@@ -70,15 +68,7 @@ impl TryFrom<StdTcpListener> for Listener {
 
 impl From<TcpStream> for Socket {
     fn from(socket: TcpStream) -> Self {
-        #[cfg(feature = "security_extension")]
-        {
-            let fd = socket.as_raw_fd();
-            Socket::with_raw_fd(socket, fd)
-        }
-        #[cfg(not(feature = "security_extension"))]
-        {
-            Socket::new(socket)
-        }
+        Socket::from_fd_aware(socket)
     }
 }
 

@@ -105,6 +105,24 @@ impl Socket {
         self.raw_fd
     }
 
+    /// Create a socket from a stream, capturing the raw fd on Unix when
+    /// `security_extension` is enabled. Eliminates per-transport cfg branching
+    /// in `From<XxxStream> for Socket` impls.
+    #[cfg(unix)]
+    pub(crate) fn from_fd_aware<S: std::os::unix::io::AsRawFd + AsyncRead + AsyncWrite + Send + Sync + 'static>(
+        socket: S,
+    ) -> Self {
+        #[cfg(feature = "security_extension")]
+        {
+            let fd = socket.as_raw_fd();
+            Self::with_raw_fd(socket, fd)
+        }
+        #[cfg(not(feature = "security_extension"))]
+        {
+            Self::new(socket)
+        }
+    }
+
     pub async fn connect(addr: impl AsRef<str>) -> IoResult<Self> {
         let addr = addr.as_ref();
 

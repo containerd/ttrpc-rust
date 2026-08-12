@@ -15,6 +15,9 @@ use async_trait::async_trait;
 use tokio::{self, sync::mpsc, task};
 
 use crate::error::{get_rpc_status, Error, Result};
+use crate::ConnectionContext;
+#[cfg(feature = "security_extension")]
+use crate::security_extension::ConnectHook;
 use crate::proto::{
     Code, Codec, GenMessage, Message, MessageHeader, Request, Response, FLAG_NO_DATA,
     FLAG_REMOTE_CLOSED, FLAG_REMOTE_OPEN, MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
@@ -34,6 +37,7 @@ pub struct Client {
     req_tx: MessageSender,
     next_stream_id: Arc<AtomicU32>,
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
+    conn_ctx: Arc<ConnectionContext>,
 }
 
 impl Client {
@@ -41,7 +45,7 @@ impl Client {
         let socket = Socket::connect(sockaddr)
             .await
             .map_err(err_to_others_err!(e, "Socket::connect error "))?;
-        Ok(Self::new(socket))
+        Self::new_inner(socket, None)
     }
 
     #[cfg(unix)]
@@ -54,45 +58,120 @@ impl Client {
 
     /// Initialize a new [`Client`].
     pub fn new(stream: Socket) -> Client {
-        let (req_tx, rx): (MessageSender, MessageReceiver) = mpsc::channel(100);
+        Self::new_inner(stream, None)
+            .expect("new_inner without hook cannot fail")
+    }
 
+    /// Initialize a new [`Client`] with a connection hook.
+    ///
+    /// The hook is invoked synchronously during construction, receiving the
+    /// socket's raw file descriptor so it can inspect peer identity (e.g.,
+    /// via `getpeername`). Its [`HookOutput`](crate::security_extension::HookOutput)
+    /// — connection metadata and optional payload transform — is stored in the
+    /// client's [`ConnectionContext`](crate::security_extension::ConnectionContext)
+    /// before this method returns.
+    ///
+    /// # Blocking behavior
+    ///
+    /// The hook may perform synchronous I/O (e.g., a cryptographic handshake).
+    /// If called from an async context on a `current_thread` runtime, wrap the
+    /// call in [`tokio::task::spawn_blocking`] to avoid stalling the executor:
+    ///
+    /// ```ignore
+    /// let client = tokio::task::spawn_blocking(|| {
+    ///     Client::with_hook(stream, hook)
+    /// }).await??;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connect hook rejects or otherwise fails,
+    /// allowing the caller to handle the failure. The socket is consumed
+    /// regardless; on failure the caller should open a new connection.
+    #[cfg(feature = "security_extension")]
+    pub fn with_hook<H: ConnectHook + 'static>(stream: Socket, hook: H) -> Result<Client> {
+        Self::new_inner(stream, Some(Box::new(hook)))
+    }
+
+    /// Returns the per-connection metadata from the [`ConnectHook`].
+    ///
+    /// This is the [`ConnectionData`](crate::security_extension::ConnectionData)
+    /// returned by the hook during connection establishment. Empty (default)
+    /// when no hook was configured.
+    #[cfg(feature = "security_extension")]
+    pub fn connection_data(&self) -> &crate::security_extension::ConnectionData {
+        &self.conn_ctx.data
+    }
+
+    fn new_inner(
+        stream: Socket,
+        #[cfg(feature = "security_extension")] hook: Option<Box<dyn ConnectHook>>,
+        #[cfg(not(feature = "security_extension"))] _hook: Option<()>,
+    ) -> Result<Client> {
+        // ── Injection Point 5/10: connect hook ──
+        // Call connect hook if set, create ConnectionContext from output
+        #[cfg(feature = "security_extension")]
+        let conn_ctx = match hook {
+            Some(h) => match stream.as_raw_fd() {
+                Some(fd) => match h.on_connect(fd) {
+                    Ok(output) => Arc::new(ConnectionContext::new(Some(output))),
+                    Err(e) => {
+                        return Err(Error::Others(format!(
+                            "client connect hook failed (fd={}): {}",
+                            fd, e
+                        )));
+                    }
+                },
+                None => {
+                    return Err(Error::Others(
+                        "client connect hook configured but socket has no raw fd; construct the Socket via Socket::connect or Socket::from(<platform stream>)".to_string(),
+                    ));
+                }
+            },
+            None => Arc::new(ConnectionContext::default()),
+        };
+        #[cfg(not(feature = "security_extension"))]
+        let conn_ctx = Arc::new(ConnectionContext::default());
+
+        let (req_tx, rx): (MessageSender, MessageReceiver) = mpsc::channel(100);
         let req_map = Arc::new(Mutex::new(HashMap::new()));
         let delegate = ClientBuilder {
             rx: Some(rx),
             streams: req_map.clone(),
+            conn_ctx: conn_ctx.clone(),
         };
 
         let conn = Connection::new(stream, delegate);
-        // Long-running receiver task
         tokio::spawn(async move { conn.run().await });
 
-        Client {
+        Ok(Client {
             req_tx,
             next_stream_id: Arc::new(AtomicU32::new(1)),
             streams: req_map,
-        }
+            conn_ctx,
+        })
     }
 
-    /// Requsts a unary request and returns with response.
+    /// Requests a unary request and returns with response.
     pub async fn request(&self, req: Request) -> Result<Response> {
         let timeout_nano = req.timeout_nano;
         let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
 
-        let msg: GenMessage = Message::new_request(stream_id, req)?
+        let mut msg: GenMessage = Message::new_request(stream_id, req)?
             .try_into()
             .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
 
         let (tx, mut rx): (ResultSender, ResultReceiver) = mpsc::channel(100);
-
         self.streams
             .lock()
             .map_err(|_| Error::Others("Failed to acquire lock on streams".to_string()))?
             .insert(stream_id, tx);
 
-        self.req_tx
-            .send(SendingMessage::new(msg))
-            .await
-            .map_err(|_| Error::LocalClosed)?;
+        // ── Injection Point 6/10: unary REQUEST transform_outbound ──
+        if let Err(e) = self.conn_ctx.transform_send(&mut msg, &self.req_tx, false, false).await {
+            self.streams.lock().unwrap().remove(&stream_id);
+            return Err(e);
+        }
 
         let result = if timeout_nano == 0 {
             rx.recv().await.ok_or(Error::RemoteClosed)?
@@ -151,10 +230,11 @@ impl Client {
             .map_err(|_| Error::Others("Failed to acquire lock on streams".to_string()))?
             .insert(stream_id, tx);
 
-        self.req_tx
-            .send(SendingMessage::new(msg))
-            .await
-            .map_err(|e| Error::Others(format!("Send packet to sender error {e:?}")))?;
+        // ── Injection Point 8/10: stream-init REQUEST transform_outbound ──
+        if let Err(e) = self.conn_ctx.transform_send(&mut msg, &self.req_tx, false, false).await {
+            self.streams.lock().unwrap().remove(&stream_id);
+            return Err(e);
+        }
 
         Ok(StreamInner::new(
             stream_id,
@@ -164,6 +244,7 @@ impl Client {
             streaming_server,
             Kind::Client,
             self.streams.clone(),
+            self.conn_ctx.clone(),
         ))
     }
 }
@@ -172,6 +253,7 @@ impl Client {
 struct ClientBuilder {
     rx: Option<MessageReceiver>,
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
+    conn_ctx: Arc<ConnectionContext>,
 }
 
 impl Builder for ClientBuilder {
@@ -184,11 +266,11 @@ impl Builder for ClientBuilder {
             ClientReader {
                 shutdown_waiter: waiter,
                 streams: self.streams.clone(),
+                conn_ctx: self.conn_ctx.clone(),
             },
             ClientWriter {
                 rx: self.rx.take().unwrap(),
                 shutdown_notifier: notifier,
-
                 streams: self.streams.clone(),
             },
         )
@@ -286,6 +368,7 @@ async fn get_resp_tx(
 struct ClientReader {
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
     shutdown_waiter: shutdown::Waiter,
+    conn_ctx: Arc<ConnectionContext>,
 }
 
 #[async_trait]
@@ -326,13 +409,62 @@ impl ReaderDelegate for ClientReader {
 
     async fn handle_msg(&self, msg: GenMessage) {
         let req_map = self.streams.clone();
+        let conn_ctx = self.conn_ctx.clone();
+
+        // ── Inbound transform in wire order ──
+        // Apply transform here (in the connection read loop) before spawning
+        // a handler task. This ensures deterministic nonce sequencing for
+        // stateful transforms (e.g., AEAD) regardless of task scheduling.
+        let mut msg = msg;
+        let result = conn_ctx.inbound(&mut msg, false);
+
         tokio::spawn(async move {
             if let Some(resp_tx) = get_resp_tx(req_map, &msg.header).await {
                 resp_tx
-                    .send(Ok(msg))
+                    .send(result.map(|_| msg))
                     .await
                     .unwrap_or_else(|_e| error!("The request has returned"));
             }
         });
+    }
+}
+
+#[cfg(all(test, feature = "security_extension"))]
+mod tests {
+    use super::*;
+    use crate::security_extension::{ConnectHook, ConnectionData, HookError, HookOutput};
+
+    #[derive(Debug)]
+    struct DummyConnectHook;
+
+    impl ConnectHook for DummyConnectHook {
+        fn on_connect(
+            &self,
+            _fd: std::os::unix::io::RawFd,
+        ) -> std::result::Result<HookOutput, HookError> {
+            Ok(HookOutput {
+                data: ConnectionData::new(),
+                payload_transform: None,
+            })
+        }
+    }
+
+    /// Constructing a Socket via Socket::new() leaves raw_fd == None.
+    /// Client::with_hook must fail in that case instead of silently skipping
+    /// the hook and using an untransformed connection.
+    #[test]
+    fn with_hook_requires_raw_fd() {
+        let (client, _server) = tokio::io::duplex(64);
+        let socket = Socket::new(client);
+        let err = match Client::with_hook(socket, DummyConnectHook) {
+            Ok(_) => panic!("hook configured but no fd -> should fail"),
+            Err(e) => e,
+        };
+        let err_str = format!("{}", err);
+        assert!(
+            err_str.contains("socket has no raw fd"),
+            "error should tell caller to use Socket::connect / Socket::from: {}",
+            err_str
+        );
     }
 }

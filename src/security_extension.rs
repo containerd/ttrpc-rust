@@ -488,6 +488,9 @@ mod hooks {
         /// races with stateful transforms (e.g., AEAD nonce counters).
         #[cfg(feature = "async")]
         async_outbound_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
+        /// Sync-path outbound lock (analogous to `async_outbound_lock` for tokio paths).
+        #[cfg(feature = "sync")]
+        sync_outbound_lock: std::sync::Mutex<()>,
     }
 
     impl ConnectionContext {
@@ -499,21 +502,11 @@ mod hooks {
                     payload_transform: o.payload_transform.map(Arc::from),
                     #[cfg(feature = "async")]
                     async_outbound_lock: Arc::new(tokio::sync::Mutex::new(())),
+                    #[cfg(feature = "sync")]
+                    sync_outbound_lock: std::sync::Mutex::new(()),
                 },
                 None => Self::default(),
             }
-        }
-
-        /// Acquire the outbound serialization lock.
-        ///
-        /// Callers **must** hold this guard across both `outbound()` and the
-        /// subsequent `tx.send()` to ensure transform + enqueue are atomic.
-        /// This prevents wire-order races with stateful transforms (e.g.,
-        /// AEAD nonce counters) when multiple handler tasks respond
-        /// concurrently on the same connection.
-        #[cfg(feature = "async")]
-        pub async fn lock_outbound(&self) -> tokio::sync::MutexGuard<'_, ()> {
-            self.async_outbound_lock.lock().await
         }
 
         /// Maximum raw (pre-transform) payload size that is guaranteed to fit
@@ -672,6 +665,75 @@ mod hooks {
             }
             check_oversize(msg.payload.len(), rpc_error)
         }
+
+        /// Atomically: reserve capacity → lock outbound → transform → send.
+        ///
+        /// Reserves channel capacity first (cancellable await), then acquires
+        /// the outbound lock and transforms (non-cancellable). This prevents
+        /// nonce desynchronization if the future is cancelled after advancing
+        /// the stateful transform but before the frame reaches the channel.
+        ///
+        /// When `await_ack` is true, waits for the writer task to confirm the
+        /// frame reached the transport (needed for streaming paths that depend
+        /// on write success before updating state). When false, returns after
+        /// enqueue — suitable for unary request/response paths where the caller
+        /// applies its own timeout on the reply.
+        #[cfg(feature = "async")]
+        pub async fn transform_send(
+            &self,
+            msg: &mut crate::proto::GenMessage,
+            tx: &tokio::sync::mpsc::Sender<crate::asynchronous::SendingMessage>,
+            rpc_error: bool,
+            await_ack: bool,
+        ) -> Result<(), Error> {
+            // Reserve capacity first — this is the only cancellable await point.
+            // If cancelled here, no nonce has been advanced.
+            let permit = tx
+                .reserve()
+                .await
+                .map_err(|e| Error::Others(format!("reserve channel capacity failed: {e}")))?;
+
+            let _guard = self.async_outbound_lock.lock().await;
+            self.outbound(msg, rpc_error)?;
+            let taken = std::mem::take(msg);
+
+            // From here on: no await until the frame is in the channel.
+            // permit.send() is synchronous — cannot be cancelled.
+            if await_ack {
+                let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+                permit.send(crate::asynchronous::SendingMessage::new_with_result(
+                    taken, result_tx,
+                ));
+                drop(_guard);
+                result_rx
+                    .await
+                    .map_err(|_| Error::Others("writer task dropped result channel".to_string()))?
+            } else {
+                permit.send(crate::asynchronous::SendingMessage::new(taken));
+                Ok(())
+            }
+        }
+
+        /// Sync-path equivalent of [`transform_send`](Self::transform_send).
+        /// Serializes `outbound_buf` + `tx.send` under a std mutex to prevent
+        /// nonce ordering races across concurrent handler threads.
+        #[cfg(feature = "sync")]
+        pub fn send_response_sync(
+            &self,
+            mut buf: Vec<u8>,
+            aad: &[u8],
+            tx: &std::sync::mpsc::Sender<(crate::proto::MessageHeader, Vec<u8>)>,
+            mh: crate::proto::MessageHeader,
+        ) -> Result<(), Error> {
+            let _guard = self.sync_outbound_lock.lock().unwrap();
+            buf = self.outbound_buf(buf, aad, true)?;
+            let mh = crate::proto::MessageHeader {
+                length: buf.len() as u32,
+                ..mh
+            };
+            tx.send((mh, buf))
+                .map_err(|e| Error::Others(format!("send to wire channel failed: {e}")))
+        }
     }
 } // mod hooks
 
@@ -714,9 +776,6 @@ mod hooks {
 
     #[allow(dead_code)]
     impl ConnectionContext {
-        /// No-op: no stateful transform when security_extension is disabled.
-        pub async fn lock_outbound(&self) {}
-
         /// No-op transform always reports the full limit (no overhead).
         pub fn max_raw_payload_len(&self) -> usize {
             crate::proto::MESSAGE_LENGTH_MAX
@@ -760,6 +819,54 @@ mod hooks {
         ) -> Result<Vec<u8>, Error> {
             check_oversize(data.len(), rpc_error)?;
             Ok(data)
+        }
+
+        /// Size-check + enqueue (no transform, no lock when security_extension is disabled).
+        #[cfg(feature = "async")]
+        pub async fn transform_send(
+            &self,
+            msg: &mut crate::proto::GenMessage,
+            tx: &tokio::sync::mpsc::Sender<crate::asynchronous::SendingMessage>,
+            rpc_error: bool,
+            await_ack: bool,
+        ) -> Result<(), Error> {
+            self.outbound(msg, rpc_error)?;
+            let permit = tx
+                .reserve()
+                .await
+                .map_err(|e| Error::Others(format!("reserve channel capacity failed: {e}")))?;
+            let taken = std::mem::take(msg);
+            if await_ack {
+                let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+                permit.send(crate::asynchronous::SendingMessage::new_with_result(
+                    taken, result_tx,
+                ));
+                result_rx
+                    .await
+                    .map_err(|_| Error::Others("writer task dropped result channel".to_string()))?
+            } else {
+                permit.send(crate::asynchronous::SendingMessage::new(taken));
+                Ok(())
+            }
+        }
+
+        /// Sync-path size-check + enqueue (no transform, no lock needed when
+        /// security_extension is disabled — no stateful transforms exist).
+        #[cfg(feature = "sync")]
+        pub fn send_response_sync(
+            &self,
+            buf: Vec<u8>,
+            _aad: &[u8],
+            tx: &std::sync::mpsc::Sender<(crate::proto::MessageHeader, Vec<u8>)>,
+            mh: crate::proto::MessageHeader,
+        ) -> Result<(), Error> {
+            check_oversize(buf.len(), true)?;
+            let mh = crate::proto::MessageHeader {
+                length: buf.len() as u32,
+                ..mh
+            };
+            tx.send((mh, buf))
+                .map_err(|e| Error::Others(format!("send to wire channel failed: {e}")))
         }
     }
 } // mod hooks

@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt as _;
-use protobuf::Message as _;
+use protobuf::Message as PbMessage;
 use tokio::{
     self, select, spawn,
     sync::mpsc::{channel, Sender},
@@ -26,9 +26,12 @@ use crate::asynchronous::stream::SendingMessage;
 use crate::asynchronous::transport::{Listener, Socket};
 use crate::context;
 use crate::error::{get_status, Error, Result};
+use crate::ConnectionContext;
+#[cfg(feature = "security_extension")]
+use crate::security_extension::{AcceptHook, ServerExtensionConfig};
 use crate::proto::{
     check_oversize, Code, Codec, GenMessage, Message, MessageHeader, Request, Response, Status,
-    FLAG_NO_DATA, FLAG_REMOTE_CLOSED, MESSAGE_TYPE_DATA, MESSAGE_TYPE_REQUEST,
+    FLAG_NO_DATA, MESSAGE_TYPE_DATA, MESSAGE_TYPE_REQUEST,
 };
 use crate::r#async::connection::*;
 use crate::r#async::shutdown;
@@ -63,6 +66,11 @@ pub struct Server {
 
     shutdown: shutdown::Notifier,
     stop_listen_tx: Option<Sender<Sender<Listener>>>,
+
+    // ── Connection Extension Framework ──
+    // See crate::security_extension for full architecture documentation.
+    #[cfg(feature = "security_extension")]
+    accept_hook: Option<Arc<dyn AcceptHook>>,
 }
 
 impl Default for Server {
@@ -72,6 +80,8 @@ impl Default for Server {
             services: Arc::new(HashMap::new()),
             shutdown: shutdown::with_timeout(DEFAULT_SERVER_SHUTDOWN_TIMEOUT).0,
             stop_listen_tx: None,
+            #[cfg(feature = "security_extension")]
+            accept_hook: None,
         }
     }
 }
@@ -119,6 +129,21 @@ impl Server {
         Ok(self.add_listener(listener))
     }
 
+    /// Register a hook called on every new accepted connection.
+    /// Replaces any previously registered hook.
+    ///
+    /// Note (Unix): the hook requires the accepted transport
+    /// [`Socket`](crate::asynchronous::transport::Socket) to carry a captured
+    /// raw fd (`Socket::as_raw_fd() != None`). This is true for listeners
+    /// created via `Server::bind()` / `Listener::from(<platform listener>)`,
+    /// but not for sockets produced by `Listener::new()` / `Socket::new()`.
+    #[cfg(feature = "security_extension")]
+    pub fn set_accept_hook<H: AcceptHook + 'static>(mut self, hook: H) -> Self {
+        let hook: Arc<dyn AcceptHook> = Arc::new(hook);
+        self.accept_hook = Some(hook);
+        self
+    }
+
     pub fn register_service(mut self, new: HashMap<String, Service>) -> Server {
         let services = Arc::get_mut(&mut self.services).unwrap();
         services.extend(new);
@@ -136,6 +161,7 @@ impl Server {
         self.do_start(incoming).await
     }
 
+    // ── Connection Extension: Injection Point 1/10 (accept hook) ──
     async fn do_start(&mut self, mut incoming: Listener) -> Result<()> {
         let services = self.services.clone();
 
@@ -143,6 +169,11 @@ impl Server {
 
         let (stop_listen_tx, mut stop_listen_rx) = channel(1);
         self.stop_listen_tx = Some(stop_listen_tx);
+
+        #[cfg(feature = "security_extension")]
+        let server_ext = Arc::new(ServerExtensionConfig {
+            accept_hook: self.accept_hook.clone(),
+        });
 
         spawn(async move {
             loop {
@@ -152,12 +183,33 @@ impl Server {
                             // Accept a new connection
                             match conn {
                                 Ok(conn) => {
-                                    // spawn a connection handler, would not block
-                                    spawn_connection_handler(
-                                        conn,
-                                        services.clone(),
-                                        shutdown_waiter.clone(),
-                                    ).await;
+                                    // Spawn hook + handler setup per-connection
+                                    // so the accept loop can immediately return
+                                    // to accepting new connections.
+                                    #[cfg(feature = "security_extension")]
+                                    let server_ext = server_ext.clone();
+                                    let services = services.clone();
+                                    let shutdown_waiter = shutdown_waiter.clone();
+                                    spawn(async move {
+                                        // ── Injection Point 1/10: accept hook ──
+                                        #[cfg(feature = "security_extension")]
+                                        let conn_ctx = match server_ext.on_accept(&conn).await {
+                                            Ok(output) => Arc::new(ConnectionContext::new(output)),
+                                            Err(e) => {
+                                                log::warn!("accept hook failed for connection: {:?}", e);
+                                                return;
+                                            }
+                                        };
+                                        #[cfg(not(feature = "security_extension"))]
+                                        let conn_ctx = Arc::new(ConnectionContext::default());
+
+                                        spawn_connection_handler(
+                                            conn,
+                                            services,
+                                            shutdown_waiter,
+                                            conn_ctx,
+                                        ).await;
+                                    });
                                 }
                                 Err(e) => {
                                     error!("incoming conn fail {:?}", e)
@@ -216,11 +268,13 @@ async fn spawn_connection_handler(
     conn: Socket,
     services: Arc<HashMap<String, Service>>,
     shutdown_waiter: shutdown::Waiter,
+    conn_ctx: Arc<ConnectionContext>,
 ) {
     let delegate = ServerBuilder {
         services,
         streams: Arc::new(Mutex::new(HashMap::new())),
         shutdown_waiter,
+        conn_ctx,
     };
     let conn = Connection::new(conn, delegate);
     spawn(async move {
@@ -237,6 +291,7 @@ struct ServerBuilder {
     services: Arc<HashMap<String, Service>>,
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
     shutdown_waiter: shutdown::Waiter,
+    conn_ctx: Arc<ConnectionContext>,
 }
 
 impl Builder for ServerBuilder {
@@ -255,6 +310,7 @@ impl Builder for ServerBuilder {
                 streams: self.streams.clone(),
                 server_shutdown: self.shutdown_waiter.clone(),
                 handler_shutdown: disconnect_notifier,
+                conn_ctx: self.conn_ctx.clone(),
             },
             ServerWriter {
                 rx,
@@ -284,6 +340,7 @@ struct ServerReader {
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
     server_shutdown: shutdown::Waiter,
     handler_shutdown: shutdown::Notifier,
+    conn_ctx: Arc<ConnectionContext>,
 }
 
 #[async_trait]
@@ -315,6 +372,27 @@ impl ReaderDelegate for ServerReader {
         //Check if it is already shutdown no need select wait
         if !handler_shutdown_waiter.is_shutdown() {
             let (wait_tx, wait_rx) = tokio::sync::oneshot::channel::<()>();
+
+            // ── Inbound transform for ALL frames in wire order ──
+            // Authenticate every inbound frame sequentially before any header
+            // validation or routing. This prevents:
+            // 1. Bypassing AAD verification by sending invalid stream_ids
+            // 2. Desynchronizing stateful transforms (counter-based nonce)
+            // The connection reader loop calls handle_msg sequentially,
+            // ensuring transforms execute in wire order.
+            let mut msg = msg;
+            let is_request = msg.header.type_ == MESSAGE_TYPE_REQUEST;
+            if let Err(e) = self.conn_ctx.inbound(&mut msg, is_request) {
+                // Transform failure: drop the frame silently.
+                // Do NOT use any unauthenticated header fields (type,
+                // stream_id) for routing — an attacker could tamper with
+                // them to redirect errors to unrelated active streams.
+                // Affected stream handlers will time out via their own
+                // request deadline or be cleaned up on disconnect.
+                error!("transform inbound failed (frame dropped): {}", e);
+                return;
+            }
+
             spawn(async move {
                 select! {
                     _ = context.handle_msg(msg, wait_tx) => {}
@@ -337,6 +415,7 @@ impl ServerReader {
             services: self.services.clone(),
             streams: self.streams.clone(),
             _handler_shutdown_waiter: self.handler_shutdown.subscribe(),
+            conn_ctx: self.conn_ctx.clone(),
         }
     }
 }
@@ -347,11 +426,12 @@ struct HandlerContext {
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
     // Used for waiting handler exit.
     _handler_shutdown_waiter: shutdown::Waiter,
+    conn_ctx: Arc<ConnectionContext>,
 }
 
 impl HandlerContext {
     async fn handle_err(&self, header: MessageHeader, e: Error) {
-        Self::respond(self.tx.clone(), header.stream_id, e.into())
+        self.respond(header.stream_id, e.into())
             .await
             .map_err(|e| {
                 error!("respond error got error {:?}", e);
@@ -362,8 +442,7 @@ impl HandlerContext {
         let stream_id = msg.header.stream_id;
 
         if (stream_id % 2) != 1 {
-            Self::respond_with_status(
-                self.tx.clone(),
+            self.respond_with_status(
                 stream_id,
                 get_status(Code::INVALID_ARGUMENT, "stream id must be odd"),
             )
@@ -375,60 +454,37 @@ impl HandlerContext {
             MESSAGE_TYPE_REQUEST => match self.handle_request(msg, wait_tx).await {
                 Ok(opt_msg) => match opt_msg {
                     Some(mut resp) => {
-                        // Server: check size before sending to client
                         if let Err(e) = check_oversize(resp.compute_size() as usize, true) {
                             resp = e.into();
                         }
-
-                        Self::respond(self.tx.clone(), stream_id, resp)
-                            .await
-                            .map_err(|e| {
-                                error!("respond got error {:?}", e);
-                            })
-                            .ok();
+                        if let Err(e) = self.respond(stream_id, resp).await {
+                            // respond() handles oversize internally via pre-check.
+                            // Remaining failures (channel closed, transform error)
+                            // are not recoverable per-request. The connection
+                            // stays open until the next read error or client
+                            // disconnect tears it down.
+                            error!("respond failed for stream {}: {}", stream_id, e);
+                        }
                     }
                     None => {
-                        let mut header = MessageHeader::new_data(stream_id, 0);
-                        header.set_flags(FLAG_REMOTE_CLOSED | FLAG_NO_DATA);
-                        let msg = GenMessage {
-                            header,
-                            payload: Vec::new(),
-                        };
-
-                        self.tx
-                            .send(SendingMessage::new(msg))
-                            .await
-                            .map_err(err_to_others_err!(e, "Send packet to sender error "))
-                            .ok();
+                        let mut msg = GenMessage::new_close(stream_id);
+                        if let Err(e) = self.conn_ctx.transform_send(&mut msg, &self.tx, false, false).await {
+                            error!("transform close message failed: {}", e);
+                        }
                     }
                 },
-                Err(status) => Self::respond_with_status(self.tx.clone(), stream_id, status).await,
+                Err(status) => self.respond_with_status(stream_id, status).await,
             },
             MESSAGE_TYPE_DATA => {
                 // no need to wait data message handling
                 drop(wait_tx);
-                // TODO(wllenyj): Compatible with golang behavior.
-                if (msg.header.flags & FLAG_REMOTE_CLOSED) == FLAG_REMOTE_CLOSED
-                    && !msg.payload.is_empty()
-                {
-                    Self::respond_with_status(
-                        self.tx.clone(),
-                        stream_id,
-                        get_status(
-                            Code::INVALID_ARGUMENT,
-                            format!(
-                                "Stream id {stream_id}: data close message connot include data"
-                            ),
-                        ),
-                    )
-                    .await;
-                    return;
-                }
+
+                // DATA transform already applied in ServerReader::handle_msg()
+                // (wire order, before spawn).
                 let stream_tx = self.streams.lock().unwrap().get(&stream_id).cloned();
                 if let Some(stream_tx) = stream_tx {
                     if let Err(e) = stream_tx.send(Ok(msg)).await {
-                        Self::respond_with_status(
-                            self.tx.clone(),
+                        self.respond_with_status(
                             stream_id,
                             get_status(
                                 Code::INVALID_ARGUMENT,
@@ -438,8 +494,7 @@ impl HandlerContext {
                         .await;
                     }
                 } else {
-                    Self::respond_with_status(
-                        self.tx.clone(),
+                    self.respond_with_status(
                         stream_id,
                         get_status(Code::INVALID_ARGUMENT, "Stream is no longer active"),
                     )
@@ -464,6 +519,9 @@ impl HandlerContext {
         //    return Err;
         //}
         // self.last_stream_id = header.stream_id;
+
+        // ── REQUEST transform_inbound already applied in ServerReader::handle_msg() ──
+        // (wire order, before any header validation or routing)
 
         let req_msg = Message::<Request>::try_from(msg)
             .map_err(|e| get_status(Code::INVALID_ARGUMENT, e.to_string()))?;
@@ -503,6 +561,7 @@ impl HandlerContext {
             mh: req_msg.header,
             metadata: context::from_pb(&req.metadata),
             timeout_nano: req.timeout_nano,
+            connection_data: self.conn_ctx.data.clone(),
         };
 
         let get_unknown_status_and_log_err = |e| {
@@ -560,18 +619,28 @@ impl HandlerContext {
             true,
             Kind::Server,
             self.streams.clone(),
+            self.conn_ctx.clone(),
         );
 
         let ctx = TtrpcContext {
             mh: req_msg.header,
             metadata: context::from_pb(&req.metadata),
             timeout_nano: req.timeout_nano,
+            connection_data: self.conn_ctx.data.clone(),
         };
 
         let task = spawn(async move { stream.handler(ctx, si).await });
 
         if !no_data {
-            // Fake the first data message.
+            // "Fake" the first DATA message from the stream-init REQUEST payload.
+            //
+            // `req.payload` has already been decrypted by `handle_request()`.
+            // The payload is decrypted exactly once regardless of transform type.
+            //
+            // For the common duplex streaming case (`streaming_client = true`,
+            // FLAG_NO_DATA set), this block is skipped and all DATA messages
+            // arrive via the normal `handle_msg` route where they are
+            // transformed in the connection reader (wire order).
             let msg = GenMessage {
                 header: MessageHeader::new_data(stream_id, req.payload.len() as u32),
                 payload: req.payload,
@@ -586,23 +655,41 @@ impl HandlerContext {
             .map_err(|e| get_status(Code::UNKNOWN, e))
     }
 
-    async fn respond(tx: MessageSender, stream_id: u32, resp: Response) -> Result<()> {
+    async fn respond(&self, stream_id: u32, resp: Response) -> Result<()> {
         let payload = resp
             .encode()
             .map_err(err_to_others_err!(e, "Encode Response failed."))?;
-        let msg = GenMessage {
-            header: MessageHeader::new_response(stream_id, payload.len() as u32),
-            payload,
+
+        // Pre-check: ensure raw payload fits within the transform-safe limit.
+        // This avoids calling transform_outbound on data that would be rejected
+        // post-transform, which would advance stateful transforms (e.g., AEAD
+        // nonce counters) without producing a sendable message.
+        let max_len = self.conn_ctx.max_raw_payload_len();
+        let payload = if payload.len() > max_len {
+            // Original too large — build a small error response that is
+            // guaranteed to fit after transform (single transform call).
+            let err_msg = format!(
+                "response payload {} bytes exceeds safe limit {} bytes (after transform overhead)",
+                payload.len(),
+                max_len
+            );
+            let err_resp: Response =
+                Error::RpcStatus(get_status(Code::INVALID_ARGUMENT, err_msg)).into();
+            err_resp
+                .encode()
+                .map_err(err_to_others_err!(e, "Encode error Response failed."))?
+        } else {
+            payload
         };
-        tx.send(SendingMessage::new(msg))
-            .await
-            .map_err(err_to_others_err!(e, "Send packet to sender error "))
+
+        let mut msg = GenMessage::new_response(stream_id, payload);
+        self.conn_ctx.transform_send(&mut msg, &self.tx, true, false).await
     }
 
-    async fn respond_with_status(tx: MessageSender, stream_id: u32, status: Status) {
+    async fn respond_with_status(&self, stream_id: u32, status: Status) {
         let mut resp = Response::new();
         resp.set_status(status);
-        Self::respond(tx, stream_id, resp)
+        self.respond(stream_id, resp)
             .await
             .map_err(|e| {
                 error!("respond with status got error {:?}", e);

@@ -1,5 +1,5 @@
 use std::io::{Error as IoError, Result as IoResult};
-use std::os::fd::{AsRawFd as _, FromRawFd as _, RawFd};
+use std::os::fd::{FromRawFd as _, RawFd};
 
 use async_stream::stream;
 use tokio_vsock::{VsockAddr, VsockListener, VsockStream, VMADDR_CID_ANY};
@@ -47,15 +47,7 @@ impl From<VsockListener> for Listener {
 
 impl From<VsockStream> for Socket {
     fn from(socket: VsockStream) -> Self {
-        #[cfg(feature = "security_extension")]
-        {
-            let fd = socket.as_raw_fd();
-            Socket::with_raw_fd(socket, fd)
-        }
-        #[cfg(not(feature = "security_extension"))]
-        {
-            Socket::new(socket)
-        }
+        Socket::from_fd_aware(socket)
     }
 }
 
