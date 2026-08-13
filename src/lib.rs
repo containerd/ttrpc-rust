@@ -24,6 +24,9 @@
 //!
 //! - `async`: Enables async server and client.
 //! - `sync`: Enables traditional sync server and client (default enabled).
+//! - `security_extension`: Enables the connection extension framework (AcceptHook,
+//!   ConnectHook, PayloadTransform) for per-connection security policies
+//!   such as encryption and authentication. Unix only.
 //!
 //! # Socket address
 //!
@@ -33,23 +36,30 @@
 //! - `unix://@/run/some.sock`: Abstract Unix domain socket.
 //! - `vsock://vsock://8:1024`: [vsock](https://man7.org/linux/man-pages/man7/vsock.7.html).
 //!
-//! For mscOS, ttrpc-rust **only** supports normal Unix domain socket:
+//! For macOS, ttrpc-rust **only** supports normal Unix domain socket:
 //!
 //! - `unix:///run/some.sock`: Normal Unix domain socket.
 //!
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+// The security_extension feature requires Unix platform.
+#[cfg(all(not(unix), feature = "security_extension"))]
+compile_error!("The 'security_extension' feature is only supported on Unix platforms.");
+
 #[macro_use]
 extern crate log;
 
 #[macro_use]
 pub mod error;
+#[cfg(feature = "sync")]
 #[macro_use]
 mod common;
 
 #[macro_use]
 mod macros;
+
+pub mod security_extension;
 
 pub mod context;
 
@@ -60,12 +70,27 @@ pub use self::proto::{Code, MessageHeader, Request, Response, Status};
 #[doc(inline)]
 pub use crate::error::{get_status, Error, Result};
 
+// Core extension types are always available.
+#[doc(inline)]
+pub use crate::security_extension::{ConnectionData, ConnectionDataExt, PayloadTransform};
+
+#[cfg(feature = "security_extension")]
+#[doc(inline)]
+pub use crate::security_extension::{
+    AcceptHook, ConnectHook, ConnectionContext, HookError, HookOutput,
+};
+
+#[cfg(not(feature = "security_extension"))]
+#[doc(hidden)]
+pub use crate::security_extension::ConnectionContext;
+
 cfg_sync! {
     pub mod sync;
     #[doc(hidden)]
+    #[allow(deprecated)]
     pub use sync::response_to_channel;
     #[doc(inline)]
-    pub use sync::{MethodHandler, TtrpcContext};
+    pub use sync::{send_response, MethodHandler, TtrpcContext};
     pub use sync::Client;
     #[doc(inline)]
     pub use sync::Server;

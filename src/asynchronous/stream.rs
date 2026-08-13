@@ -9,18 +9,22 @@ use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::ConnectionContext;
+
 use tokio::sync::mpsc;
 
 use super::Client;
 use crate::error::{Error, Result};
 use crate::proto::{
-    Code, Codec, GenMessage, MessageHeader, Response, FLAG_NO_DATA, FLAG_REMOTE_CLOSED,
-    MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
+    check_oversize, Code, Codec, GenMessage, Response, FLAG_NO_DATA,
+    FLAG_REMOTE_CLOSED, MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
 };
 
 pub type MessageSender = mpsc::Sender<SendingMessage>;
 pub type MessageReceiver = mpsc::Receiver<SendingMessage>;
 
+/// Internal message type for stream channels.
+///
 pub type ResultSender = mpsc::Sender<Result<GenMessage>>;
 pub type ResultReceiver = mpsc::Receiver<Result<GenMessage>>;
 
@@ -350,16 +354,6 @@ async fn _recv(rx: &mut ResultReceiver) -> Result<GenMessage> {
     })
 }
 
-async fn _send(tx: &MessageSender, msg: GenMessage) -> Result<()> {
-    let (res_tx, res_rx) = tokio::sync::oneshot::channel();
-    tx.send(SendingMessage::new_with_result(msg, res_tx))
-        .await
-        .map_err(|e| Error::Others(format!("Send data packet to sender error {:?}", e)))?;
-    res_rx
-        .await
-        .map_err(|e| Error::Others(format!("Failed to wait send result {:?}", e)))?
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Client,
@@ -373,7 +367,8 @@ pub struct StreamInner {
 }
 
 impl StreamInner {
-    pub fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
         stream_id: u32,
         tx: MessageSender,
         rx: ResultReceiver,
@@ -382,6 +377,7 @@ impl StreamInner {
         recveivable: bool,
         kind: Kind,
         streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
+        conn_ctx: Arc<ConnectionContext>,
     ) -> Self {
         Self {
             sender: StreamSender {
@@ -390,6 +386,7 @@ impl StreamInner {
                 sendable,
                 local_closed: Arc::new(AtomicBool::new(false)),
                 kind,
+                conn_ctx,
             },
             receiver: StreamReceiver {
                 rx,
@@ -419,6 +416,11 @@ impl StreamInner {
     }
 }
 
+/// Sends streaming DATA messages with optional payload transform.
+///
+/// Part of the extension framework's Injection Point 9/10.
+/// Each `send()` call applies `transform_outbound` to the payload
+/// before framing it as a DATA message.
 #[derive(Clone, Debug)]
 pub struct StreamSender {
     tx: MessageSender,
@@ -426,8 +428,16 @@ pub struct StreamSender {
     sendable: bool,
     local_closed: Arc<AtomicBool>,
     kind: Kind,
+    conn_ctx: Arc<ConnectionContext>,
 }
 
+/// Receives streaming DATA messages.
+///
+/// Inbound transforms are applied in the connection read loop (wire order)
+/// before messages are routed here. `recv()` therefore receives payloads
+/// that are already decrypted and only needs to decode/pass through.
+///
+/// `handle_msg()` routes DATA messages to this receiver.
 #[derive(Debug)]
 pub struct StreamReceiver {
     rx: ResultReceiver,
@@ -445,21 +455,20 @@ impl Drop for StreamReceiver {
 }
 
 impl StreamSender {
+    /// Send a streaming DATA message.
+    ///
+    /// Applies `transform_outbound` (Injection Point 9/10) to `buf`,
+    /// then frames it as a DATA message and sends to the transport.
     pub async fn send(&self, buf: Vec<u8>) -> Result<()> {
         debug_assert!(self.sendable);
         if self.local_closed.load(Ordering::Relaxed) {
             debug_assert_eq!(self.kind, Kind::Client);
             return Err(Error::LocalClosed);
         }
-        let header = MessageHeader::new_data(self.stream_id, buf.len() as u32);
-        let msg = GenMessage {
-            header,
-            payload: buf,
-        };
 
-        msg.check()?;
-
-        _send(&self.tx, msg).await?;
+        let mut msg = GenMessage::new_data(self.stream_id, buf);
+        // ── Injection Point 9/10: streaming DATA transform_outbound ──
+        self.conn_ctx.transform_send(&mut msg, &self.tx, false, true).await?;
 
         Ok(())
     }
@@ -470,19 +479,20 @@ impl StreamSender {
         if self.local_closed.load(Ordering::Relaxed) {
             return Err(Error::LocalClosed);
         }
-        let mut header = MessageHeader::new_data(self.stream_id, 0);
-        header.set_flags(FLAG_REMOTE_CLOSED | FLAG_NO_DATA);
-        let msg = GenMessage {
-            header,
-            payload: Vec::new(),
-        };
-        _send(&self.tx, msg).await?;
+        let mut msg = GenMessage::new_close(self.stream_id);
+        self.conn_ctx.transform_send(&mut msg, &self.tx, false, true).await?;
         self.local_closed.store(true, Ordering::Relaxed);
         Ok(())
     }
 }
 
 impl StreamReceiver {
+    /// Receive the next streaming message.
+    ///
+    /// All inbound transforms are applied in the connection read loop
+    /// (wire order) before messages reach this receiver, so `recv()`
+    /// only decodes/passes through the pre-decoded payload.
+    /// Returns `Err(Error::Eof)` when the remote side closes the stream.
     pub async fn recv(&mut self) -> Result<Vec<u8>> {
         if self.remote_closed {
             return Err(Error::RemoteClosed);
@@ -509,12 +519,26 @@ impl StreamReceiver {
                         "received data from non-streaming server.".to_string(),
                     ));
                 }
+                // Close-flag checks on pre-decoded payload.
+                // Transform was applied in wire order by the connection reader.
+                // A tampered close would have failed AEAD verification there
+                // and never reached this point.
                 if (msg.header.flags & FLAG_REMOTE_CLOSED) == FLAG_REMOTE_CLOSED {
                     self.remote_closed = true;
                     if (msg.header.flags & FLAG_NO_DATA) == FLAG_NO_DATA {
+                        // Enforce protocol invariant: close frame must carry
+                        // no payload after decryption. Prevents a peer from
+                        // smuggling data on a close frame.
+                        if !msg.payload.is_empty() {
+                            return Err(Error::Others(format!(
+                                "stream {}: close message cannot include data",
+                                self.stream_id
+                            )));
+                        }
                         return Err(Error::Eof);
                     }
                 }
+                check_oversize(msg.payload.len(), false)?;
                 msg.payload
             }
             _ => {

@@ -20,6 +20,7 @@ pub use self::stream::{
     SSSender, ServerStream, ServerStreamReceiver, ServerStreamSender, StreamInner, StreamReceiver,
     StreamSender,
 };
+pub(crate) use self::stream::SendingMessage;
 #[doc(inline)]
 pub use crate::r#async::client::Client;
 #[doc(inline)]

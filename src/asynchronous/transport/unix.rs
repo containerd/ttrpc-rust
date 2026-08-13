@@ -41,12 +41,20 @@ impl Socket {
 }
 
 impl From<UnixListener> for Listener {
+    /// Convert a `UnixListener` into a `Listener`.
+    ///
+    /// Uses `Box::pin(stream! {...})` directly (bypassing `Listener::new()`)
+    /// so each accepted connection goes through `Socket::from(socket)`,
+    /// which captures the raw fd when the `security_extension` feature is enabled.
     fn from(listener: UnixListener) -> Self {
-        Self::new(stream! {
+        Self(Box::pin(stream! {
             loop {
-                yield listener.accept().await.map(|(socket, _)| socket);
+                match listener.accept().await {
+                    Ok((socket, _)) => yield Ok(Socket::from(socket)),
+                    Err(e) => yield Err(e),
+                }
             }
-        })
+        }))
     }
 }
 
@@ -60,7 +68,7 @@ impl TryFrom<StdUnixListener> for Listener {
 
 impl From<UnixStream> for Socket {
     fn from(socket: UnixStream) -> Self {
-        Self::new(socket)
+        Socket::from_fd_aware(socket)
     }
 }
 

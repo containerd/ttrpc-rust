@@ -37,6 +37,16 @@ jobs:
         # https://github.com/actions/runner-images/issues/6668 
         shell: bash
 
+  security-extension:
+    name: Security Extension Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Run tests with security_extension
+        run: |
+          cargo test --features "async,sync,security_extension" --verbose
+
   deny:
     runs-on: ubuntu-latest
     strategy:

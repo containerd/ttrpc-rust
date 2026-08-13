@@ -5,10 +5,12 @@
 //
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::error::Result;
+use crate::security_extension::ConnectionData;
 use crate::proto::{MessageHeader, Request, Response};
 
 /// Handle request in async mode.
@@ -247,11 +249,19 @@ pub trait StreamHandler {
 }
 
 /// The context of ttrpc (async).
-#[derive(Debug)]
+///
+/// Implements [`Default`] so test/mock code can construct a context with
+/// `..Default::default()` and only specify the fields they need.
+#[derive(Debug, Default)]
 pub struct TtrpcContext {
     pub mh: MessageHeader,
     pub metadata: HashMap<String, Vec<String>>,
     pub timeout_nano: i64,
+
+    /// Opaque per-connection data from [`AcceptHook`](crate::security_extension::AcceptHook). Immutable after accept.
+    /// See [`ConnectionData`](crate::security_extension::ConnectionData) for full contract.
+    /// Empty when `security_extension` is not enabled.
+    pub connection_data: Arc<ConnectionData>,
 }
 
 pub(crate) fn get_path(service: &str, method: &str) -> String {
