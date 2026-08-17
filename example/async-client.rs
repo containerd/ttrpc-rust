@@ -39,9 +39,7 @@ async fn main() {
 
         assert_eq!(
             resp,
-            Err(ttrpc::Error::Others(
-                "Receive packet timeout Elapsed(())".into()
-            ))
+            Err(ttrpc::Error::Others("Request deadline elapsed".into()))
         );
 
         println!(
