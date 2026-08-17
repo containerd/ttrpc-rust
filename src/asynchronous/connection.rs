@@ -6,14 +6,106 @@
 
 use async_trait::async_trait;
 use log::{error, trace};
-use tokio::io::split;
-use tokio::sync::oneshot;
+use tokio::io::{split, AsyncWrite};
+use tokio::time::{sleep_until, Instant};
 use tokio::{io::ReadHalf, select, task};
 
-use crate::error::Error;
+use crate::error::{Error, Result};
 use crate::proto::{GenMessage, GenMessageError, MessageHeader};
 
 use super::{stream::SendingMessage, transport::Socket};
+
+enum WriteOutcome {
+    Complete(crate::error::Result<()>),
+    Discarded(Error),
+    Cancelled,
+    DeadlineElapsed,
+}
+
+pub(crate) fn request_timeout_error() -> Error {
+    Error::Others("Request deadline elapsed".to_string())
+}
+
+async fn write_message(
+    writer: &mut (impl AsyncWrite + Unpin),
+    sending_msg: &SendingMessage,
+) -> WriteOutcome {
+    let Some(control) = sending_msg.control.as_ref() else {
+        trace!("write message: {:?}", sending_msg.msg);
+        return WriteOutcome::Complete(sending_msg.msg.write_to(writer).await);
+    };
+    let deadline = control.deadline();
+
+    let expired = deadline.is_some_and(|deadline| deadline <= Instant::now());
+    if control.is_cancelled() {
+        return WriteOutcome::Discarded(Error::LocalClosed);
+    }
+    if expired {
+        return WriteOutcome::Discarded(request_timeout_error());
+    }
+
+    trace!("write message: {:?}", sending_msg.msg);
+    if let Some(deadline) = deadline {
+        select! {
+            biased;
+            result = sending_msg.msg.write_to(writer) => WriteOutcome::Complete(result),
+            _ = control.cancelled() => WriteOutcome::Cancelled,
+            _ = sleep_until(deadline) => WriteOutcome::DeadlineElapsed,
+        }
+    } else {
+        select! {
+            biased;
+            result = sending_msg.msg.write_to(writer) => WriteOutcome::Complete(result),
+            _ = control.cancelled() => WriteOutcome::Cancelled,
+        }
+    }
+}
+
+async fn run_writer(
+    mut writer: impl AsyncWrite + Unpin,
+    mut writer_delegate: impl WriterDelegate,
+) -> Result<()> {
+    let result = loop {
+        let Some(mut sending_msg) = writer_delegate.recv().await else {
+            break Ok(());
+        };
+
+        let failure = match write_message(&mut writer, &sending_msg).await {
+            WriteOutcome::Complete(Ok(())) => {
+                sending_msg.send_result(Ok(()));
+                continue;
+            }
+            WriteOutcome::Discarded(e) => {
+                sending_msg.send_result(Err(e));
+                continue;
+            }
+            WriteOutcome::Complete(Err(e)) => Some((e.clone(), e)),
+            WriteOutcome::Cancelled => Some((
+                Error::LocalClosed,
+                Error::Socket(
+                    "connection closed after a request was cancelled during write".to_string(),
+                ),
+            )),
+            WriteOutcome::DeadlineElapsed => Some((
+                request_timeout_error(),
+                Error::Socket(
+                    "connection closed after a request deadline elapsed during write".to_string(),
+                ),
+            )),
+        };
+
+        if let Some((message_error, connection_error)) = failure {
+            error!("write_message got error: {:?}", connection_error);
+            sending_msg.send_result(Err(message_error));
+            // Return without waiting for socket shutdown, which may never complete.
+            break Err(connection_error);
+        }
+    };
+
+    writer_delegate.exit().await;
+    trace!("Writer task exit.");
+    result
+}
 
 pub trait Builder {
     type Reader;
@@ -31,7 +123,7 @@ pub trait WriterDelegate {
 #[async_trait]
 pub trait ReaderDelegate {
     async fn wait_shutdown(&self);
-    async fn disconnect(&self, e: Error, task: &mut task::JoinHandle<()>);
+    async fn disconnect(&self, e: Error);
     async fn exit(&self);
     async fn handle_msg(&self, msg: GenMessage);
     async fn handle_err(&self, header: MessageHeader, e: Error);
@@ -39,13 +131,8 @@ pub trait ReaderDelegate {
 
 pub struct Connection<B: Builder> {
     reader: ReadHalf<Socket>,
-    writer_task: task::JoinHandle<()>,
+    writer_task: task::JoinHandle<Result<()>>,
     reader_delegate: B::Reader,
-    // Delivers a fatal write error from the writer task. Receiving a value
-    // means the writer hit an unrecoverable transport error and the whole
-    // connection must be torn down; the channel closing without a value means
-    // the writer stopped normally.
-    writer_error: oneshot::Receiver<Error>,
 }
 
 impl<B> Connection<B>
@@ -55,45 +142,17 @@ where
     B::Writer: WriterDelegate + Send + Sync + 'static,
 {
     pub fn new(conn: Socket, mut builder: B) -> Self {
-        let (reader, mut writer) = split(conn);
+        let (reader, writer) = split(conn);
 
-        let (reader_delegate, mut writer_delegate) = builder.build();
-        let (err_tx, err_rx) = oneshot::channel();
+        let (reader_delegate, writer_delegate) = builder.build();
 
         // Long-running sender task
-        let writer_task = tokio::spawn(async move {
-            while let Some(mut sending_msg) = writer_delegate.recv().await {
-                trace!("write message: {:?}", sending_msg.msg);
-                if let Err(e) = sending_msg.msg.write_to(&mut writer).await {
-                    error!("write_message got error: {:?}", e);
-                    // Report the failure to the caller awaiting this send.
-                    sending_msg.send_result(Err(e.clone()));
-                    // write_to uses write_all internally, so a failed write may
-                    // have left a partial frame on the wire, desynchronizing the
-                    // frame boundaries of every stream multiplexed on this
-                    // connection; it is no longer usable. (This can happen on an
-                    // otherwise healthy socket, e.g. ENOMEM when the kernel
-                    // cannot satisfy a high-order allocation under memory
-                    // fragmentation.) Report the error to Connection::run at once
-                    // and exit. Deliberately do NOT wait on writer.shutdown(): it
-                    // can block (some transports never complete poll_shutdown)
-                    // and would delay or prevent cleanup. run() closes the whole
-                    // connection; dropping this task drops the write half.
-                    let _ = err_tx.send(e);
-                    return;
-                }
-                sending_msg.send_result(Ok(()));
-            }
-            // The outbound channel closed: this is a normal shutdown.
-            writer_delegate.exit().await;
-            trace!("Writer task exit.");
-        });
+        let writer_task = tokio::spawn(run_writer(writer, writer_delegate));
 
         Self {
             reader,
             writer_task,
             reader_delegate,
-            writer_error: err_rx,
         }
     }
 
@@ -102,24 +161,23 @@ where
             mut reader,
             mut writer_task,
             reader_delegate,
-            mut writer_error,
         } = self;
         loop {
             select! {
-                // Fixed poll order: a write error wins over the shutdown
-                // notification the writer raises as it unwinds, and a pending
-                // shutdown wins over further reads. Both are idle during normal
-                // operation, so read_from is still reached every iteration.
+                // Writer failures take priority, then shutdown, then incoming frames.
                 biased;
-
-                werr = &mut writer_error => {
-                    // Ok(e): the writer hit a fatal transport error. Drive a
-                    // connection-wide teardown — fail every registered client
-                    // stream / stop the server handlers, and drop the read half
-                    // on exit. Err(_): the writer stopped without an error.
-                    if let Ok(e) = werr {
-                        trace!("Writer failed, tearing down connection: {:?}", e);
-                        reader_delegate.disconnect(e, &mut writer_task).await;
+                writer_result = &mut writer_task => {
+                    match writer_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            trace!("Write msg err: {:?}", e);
+                            reader_delegate.disconnect(e).await;
+                        }
+                        Err(e) => {
+                            let e = Error::Others(format!("Writer task failed: {e}"));
+                            error!("Write task err: {:?}", e);
+                            reader_delegate.disconnect(e).await;
+                        }
                     }
                     break;
                 }
@@ -140,7 +198,9 @@ where
 
                         Err(GenMessageError::InternalError(e)) => {
                             trace!("Read msg err: {:?}", e);
-                            reader_delegate.disconnect(e, &mut writer_task).await;
+                            writer_task.abort();
+                            let _ = (&mut writer_task).await;
+                            reader_delegate.disconnect(e).await;
                             break;
                         }
                     }

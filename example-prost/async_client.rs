@@ -35,11 +35,17 @@ async fn main() {
             )
             .await;
 
-        assert_eq!(
-            resp,
-            Err(ttrpc::Error::Others(
-                "Receive packet timeout Elapsed(())".into()
-            ))
+        // Either peer can report the deadline first, depending on scheduling.
+        assert!(
+            match &resp {
+                Err(ttrpc::Error::Others(message)) => message == "Request deadline elapsed",
+                Err(ttrpc::Error::RpcStatus(status)) => {
+                    status.code() == ttrpc::Code::DEADLINE_EXCEEDED
+                }
+                _ => false,
+            },
+            "expected a deadline error, got {:?}",
+            resp
         );
         println!(
             "Green Thread 1 - {} -> {:?} ended: {:?}",

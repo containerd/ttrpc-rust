@@ -188,6 +188,27 @@ pub(crate) use hooks::ServerExtensionConfig;
 #[cfg(feature = "security_extension")]
 pub use hooks::{AcceptHook, ConnectHook, HookError, HookOutput};
 
+#[cfg(feature = "async")]
+async fn reserve_message_slot<'a>(
+    tx: &'a tokio::sync::mpsc::Sender<crate::asynchronous::SendingMessage>,
+    deadline: Option<tokio::time::Instant>,
+) -> Result<tokio::sync::mpsc::Permit<'a, crate::asynchronous::SendingMessage>, Error> {
+    match tx.try_reserve() {
+        Ok(permit) => Ok(permit),
+        Err(_) => {
+            let reserve = tx.reserve();
+            if let Some(deadline) = deadline {
+                tokio::time::timeout_at(deadline, reserve)
+                    .await
+                    .map_err(|_| crate::asynchronous::request_timeout_error())?
+            } else {
+                reserve.await
+            }
+            .map_err(|e| Error::Others(format!("reserve channel capacity failed: {e}")))
+        }
+    }
+}
+
 // ── Feature-gated hook types ───────────────────────────────────────────────
 //
 // All hook-related items live in this inner module behind a single cfg gate.
@@ -703,30 +724,83 @@ mod hooks {
             rpc_error: bool,
             await_ack: bool,
         ) -> Result<(), Error> {
+            self.transform_send_inner(msg, tx, rpc_error, await_ack, None)
+                .await
+        }
+
+        #[cfg(feature = "async")]
+        pub(crate) async fn transform_send_with_control(
+            &self,
+            msg: &mut crate::proto::GenMessage,
+            tx: &tokio::sync::mpsc::Sender<crate::asynchronous::SendingMessage>,
+            rpc_error: bool,
+            await_ack: bool,
+            control: crate::asynchronous::MessageControl,
+        ) -> Result<(), Error> {
+            self.transform_send_inner(msg, tx, rpc_error, await_ack, Some(control))
+                .await
+        }
+
+        #[cfg(feature = "async")]
+        async fn transform_send_inner(
+            &self,
+            msg: &mut crate::proto::GenMessage,
+            tx: &tokio::sync::mpsc::Sender<crate::asynchronous::SendingMessage>,
+            rpc_error: bool,
+            await_ack: bool,
+            control: Option<crate::asynchronous::MessageControl>,
+        ) -> Result<(), Error> {
+            let deadline = control.as_ref().and_then(|control| control.deadline());
             // Reserve capacity first — this is the only cancellable await point.
             // If cancelled here, no nonce has been advanced.
-            let permit = tx
-                .reserve()
-                .await
-                .map_err(|e| Error::Others(format!("reserve channel capacity failed: {e}")))?;
+            let permit = reserve_message_slot(tx, deadline).await?;
 
-            let _guard = self.async_outbound_lock.lock().await;
+            let _guard = match self.async_outbound_lock.try_lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    let lock = self.async_outbound_lock.lock();
+                    if let Some(deadline) = deadline {
+                        tokio::time::timeout_at(deadline, lock)
+                            .await
+                            .map_err(|_| crate::asynchronous::request_timeout_error())?
+                    } else {
+                        lock.await
+                    }
+                }
+            };
             self.outbound(msg, rpc_error)?;
             let taken = std::mem::take(msg);
+
+            // A stateful transform may advance a nonce or counter. Once that
+            // happens, the frame must not be discarded by the writer on
+            // timeout or cancellation, or the peers will become desynchronized.
+            // The caller's deadline still bounds reserve and lock acquisition.
+            let control = if self.payload_transform.is_some() {
+                None
+            } else {
+                control
+            };
 
             // From here on: no await until the frame is in the channel.
             // permit.send() is synchronous — cannot be cancelled.
             if await_ack {
                 let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-                permit.send(crate::asynchronous::SendingMessage::new_with_result(
-                    taken, result_tx,
-                ));
+                let mut sending_msg =
+                    crate::asynchronous::SendingMessage::new_with_result(taken, result_tx);
+                sending_msg.control = control;
+                permit.send(sending_msg);
                 drop(_guard);
                 result_rx
                     .await
                     .map_err(|_| Error::Others("writer task dropped result channel".to_string()))?
             } else {
-                permit.send(crate::asynchronous::SendingMessage::new(taken));
+                let sending_msg = match control {
+                    Some(control) => {
+                        crate::asynchronous::SendingMessage::new_with_control(taken, control)
+                    }
+                    None => crate::asynchronous::SendingMessage::new(taken),
+                };
+                permit.send(sending_msg);
                 Ok(())
             }
         }
@@ -847,22 +921,53 @@ mod hooks {
             rpc_error: bool,
             await_ack: bool,
         ) -> Result<(), Error> {
-            self.outbound(msg, rpc_error)?;
-            let permit = tx
-                .reserve()
+            self.transform_send_inner(msg, tx, rpc_error, await_ack, None)
                 .await
-                .map_err(|e| Error::Others(format!("reserve channel capacity failed: {e}")))?;
+        }
+
+        #[cfg(feature = "async")]
+        pub(crate) async fn transform_send_with_control(
+            &self,
+            msg: &mut crate::proto::GenMessage,
+            tx: &tokio::sync::mpsc::Sender<crate::asynchronous::SendingMessage>,
+            rpc_error: bool,
+            await_ack: bool,
+            control: crate::asynchronous::MessageControl,
+        ) -> Result<(), Error> {
+            self.transform_send_inner(msg, tx, rpc_error, await_ack, Some(control))
+                .await
+        }
+
+        #[cfg(feature = "async")]
+        async fn transform_send_inner(
+            &self,
+            msg: &mut crate::proto::GenMessage,
+            tx: &tokio::sync::mpsc::Sender<crate::asynchronous::SendingMessage>,
+            rpc_error: bool,
+            await_ack: bool,
+            control: Option<crate::asynchronous::MessageControl>,
+        ) -> Result<(), Error> {
+            self.outbound(msg, rpc_error)?;
+            let deadline = control.as_ref().and_then(|control| control.deadline());
+            let permit = reserve_message_slot(tx, deadline).await?;
             let taken = std::mem::take(msg);
             if await_ack {
                 let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-                permit.send(crate::asynchronous::SendingMessage::new_with_result(
-                    taken, result_tx,
-                ));
+                let mut sending_msg =
+                    crate::asynchronous::SendingMessage::new_with_result(taken, result_tx);
+                sending_msg.control = control;
+                permit.send(sending_msg);
                 result_rx
                     .await
                     .map_err(|_| Error::Others("writer task dropped result channel".to_string()))?
             } else {
-                permit.send(crate::asynchronous::SendingMessage::new(taken));
+                let sending_msg = match control {
+                    Some(control) => {
+                        crate::asynchronous::SendingMessage::new_with_control(taken, control)
+                    }
+                    None => crate::asynchronous::SendingMessage::new(taken),
+                };
+                permit.send(sending_msg);
                 Ok(())
             }
         }

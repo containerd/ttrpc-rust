@@ -32,7 +32,8 @@ pub use self::stream::{
     SSSender, ServerStream, ServerStreamReceiver, ServerStreamSender, StreamInner, StreamReceiver,
     StreamSender,
 };
-pub(crate) use self::stream::SendingMessage;
+pub(crate) use self::stream::{MessageControl, SendingMessage};
+pub(crate) use connection::request_timeout_error;
 #[doc(inline)]
 pub use crate::r#async::client::Client;
 #[doc(inline)]

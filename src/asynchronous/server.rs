@@ -17,7 +17,6 @@ use futures::StreamExt as _;
 use tokio::{
     self, select, spawn,
     sync::mpsc::{channel, Sender},
-    task,
     time::timeout,
 };
 
@@ -435,7 +434,7 @@ impl ReaderDelegate for ServerReader {
         self.server_shutdown.wait_shutdown().await
     }
 
-    async fn disconnect(&self, _: Error, _: &mut task::JoinHandle<()>) {
+    async fn disconnect(&self, _: Error) {
         self.handler_shutdown.shutdown();
         // TODO: Don't wait for all requests to complete? when the connection is disconnected.
     }
