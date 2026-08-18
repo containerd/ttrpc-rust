@@ -15,8 +15,7 @@ use log::LevelFilter;
 
 use protocols::r#async::{agent, health, types};
 use ttrpc::asynchronous::Server;
-use ttrpc::error::{Error, Result};
-use ttrpc::proto::{Code, Status};
+use ttrpc::error::Result;
 
 use async_trait::async_trait;
 use tokio::signal::unix::{signal, SignalKind};
@@ -31,14 +30,9 @@ impl health::Health for HealthService {
         _ctx: &::ttrpc::r#async::TtrpcContext,
         _req: health::CheckRequest,
     ) -> Result<health::HealthCheckResponse> {
-        let mut status = Status::default();
-
-        status.code = Code::NOT_FOUND as i32;
-        status.message = "Just for fun".to_string();
-
-        sleep(std::time::Duration::from_secs(10)).await;
-
-        Err(Error::RpcStatus(status))
+        // Mock timeout
+        sleep(std::time::Duration::from_secs(1)).await;
+        unreachable!()
     }
 
     async fn version(
@@ -49,10 +43,8 @@ impl health::Health for HealthService {
         info!("version {:?}", req);
         info!("ctx {:?}", ctx);
         let mut rep = health::VersionCheckResponse::default();
-        rep.agent_version = "mock.0.1".to_string();
+        rep.agent_version = "mock 0.1".to_string();
         rep.grpc_version = "0.0.1".to_string();
-        let mut status = Status::default();
-        status.code = Code::NOT_FOUND as i32;
         Ok(rep)
     }
 }
@@ -86,13 +78,8 @@ impl agent::AgentService for AgentService {
 async fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
 
-    let h = Box::new(HealthService {}) as Box<dyn health::Health + Send + Sync>;
-    let h = Arc::new(h);
-    let hservice = health::create_health(h);
-
-    let a = Box::new(AgentService {}) as Box<dyn agent::AgentService + Send + Sync>;
-    let a = Arc::new(a);
-    let aservice = agent::create_agent_service(a);
+    let hservice = health::create_health(Arc::new(HealthService {}));
+    let aservice = agent::create_agent_service(Arc::new(AgentService {}));
 
     utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
 

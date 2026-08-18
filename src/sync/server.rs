@@ -19,10 +19,7 @@
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::time::Duration;
 
-#[cfg(feature = "prost")]
-use prost::Message;
-#[cfg(not(feature = "prost"))]
-use protobuf::{CodedInputStream, Message};
+use crate::proto::{Codec, ResponseInit};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
@@ -30,14 +27,35 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 
-use super::utils::response_error_to_channel;
-use crate::sync::utils::response_to_channel;
+use super::utils::{response_error_to_channel, send_response};
 use crate::context;
 use crate::error::{get_status, Error, Result};
-use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
+use crate::proto::{Code, MessageHeader, Request, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
 use crate::sync::sys::{PipeConnection, PipeListener};
 use crate::{MethodHandler, TtrpcContext};
+use crate::ConnectionContext;
+use crate::security_extension::serialize_aad;
+
+#[cfg(feature = "security_extension")]
+use crate::security_extension::{AcceptHook, HookError};
+
+/// Invoke an [`AcceptHook`] for a newly accepted connection and wrap the
+/// output in a [`ConnectionContext`].
+///
+/// Returns `Ok(ConnectionContext::default())` when `hook` is `None`. On hook
+/// failure the error is forwarded to the caller so it can log, close the
+/// rejected connection, and continue the accept loop.
+#[cfg(feature = "security_extension")]
+fn connection_context_from_hook(
+    fd: i32,
+    hook: Option<&Arc<dyn AcceptHook>>,
+) -> std::result::Result<ConnectionContext, HookError> {
+    match hook {
+        Some(h) => h.on_accept(fd).map(|o| ConnectionContext::new(Some(o))),
+        None => Ok(ConnectionContext::default()),
+    }
+}
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -52,7 +70,25 @@ type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
 type WorkloadSender = crossbeam::channel::Sender<(MessageHeader, Result<Vec<u8>>)>;
 type WorkloadReceiver = crossbeam::channel::Receiver<(MessageHeader, Result<Vec<u8>>)>;
 
-/// A ttrpc Server (sync).
+/// A configurable, thread-based ttrpc server.
+///
+/// Build a server by binding one listener and registering one or more generated services, then
+/// call [`Server::start`]. The listener and active connections remain running in background
+/// threads until [`Server::shutdown`] is called.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ttrpc::Server;
+///
+/// # fn main() -> ttrpc::Result<()> {
+/// let mut server = Server::new().bind("unix:///tmp/example.sock")?;
+/// // Register generated services with `server.register_service(...)`.
+/// server.start()?;
+/// server.shutdown();
+/// # Ok(())
+/// # }
+/// ```
 pub struct Server {
     listeners: Vec<Arc<PipeListener>>,
     listener_quit_flag: Arc<AtomicBool>,
@@ -64,6 +100,8 @@ pub struct Server {
     thread_count_min: usize,
     thread_count_max: usize,
     accept_retry_interval: Duration,
+    #[cfg(feature = "security_extension")]
+    accept_hook: Option<Arc<dyn AcceptHook>>,
 }
 
 struct Connection {
@@ -97,6 +135,7 @@ struct ThreadS<'a> {
     default: usize,
     min: usize,
     max: usize,
+    conn_ctx: &'a Arc<ConnectionContext>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -111,6 +150,7 @@ fn start_method_handler_thread(
     cancel_rx: crossbeam::channel::Receiver<()>,
     min: usize,
     max: usize,
+    conn_ctx: Arc<ConnectionContext>,
 ) {
     thread::spawn(move || {
         while !quit.load(Ordering::SeqCst) {
@@ -146,7 +186,12 @@ fn start_method_handler_thread(
                     buf = y;
                 }
                 Ok((mh, Err(e))) => {
-                    if let Err(x) = response_error_to_channel(mh.stream_id, e, res_tx.clone()) {
+                    if let Err(x) = response_error_to_channel(
+                        mh.stream_id,
+                        e,
+                        res_tx.clone(),
+                        conn_ctx.as_ref(),
+                    ) {
                         debug!("response_error_to_channel get error {:?}", x);
                         quit_connection(quit, control_tx);
                         break;
@@ -166,73 +211,38 @@ fn start_method_handler_thread(
             if mh.type_ != MESSAGE_TYPE_REQUEST {
                 continue;
             }
-            #[allow(unused_mut)]
-            #[allow(unused_assignments)]
-            let mut req: Request = Request::default();
-            #[cfg(not(feature = "prost"))]
-            {
-                let mut s = CodedInputStream::from_bytes(&buf);
-                req = Request::new();
-                if let Err(x) = req.merge_from(&mut s) {
+            let req = match <Request as Codec>::decode(&buf) {
+                Ok(req) => req,
+                Err(x) => {
                     let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
-                    let mut res = Response::new();
-                    res.set_status(status);
-                    if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
+                    let res = ResponseInit::init_status(status);
+                    if let Err(x) = send_response(
+                        mh.stream_id,
+                        res,
+                        res_tx.clone(),
+                        conn_ctx.as_ref(),
+                    ) {
                         debug!("response_to_channel get error {:?}", x);
                         quit_connection(quit, control_tx);
                         break;
                     }
                     continue;
                 }
-            }
-
-            #[cfg(feature = "prost")]
-            {
-                if let Err(x) = req.merge(&buf as &[u8]) {
-                    let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
-                    let res = Response {
-                        status: Some(status),
-                        ..Default::default()
-                    };
-                    if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
-                        debug!("response_to_channel get error {:?}", x);
-                        quit.store(true, Ordering::SeqCst);
-                        // the client connection would be closed and
-                        // the connection dealing main thread would have
-                        // exited.
-                        control_tx
-                            .send(())
-                            .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
-                        break;
-                    }
-                    continue;
-                }
-            }
-
+            };
             trace!("Got Message request {:?}", req);
 
             let path = format!("/{}/{}", req.service, req.method);
             let method = if let Some(x) = methods.get(&path) {
                 x
-            } else {   
-                let mut res;
-                let status;
-                #[cfg(not(feature = "prost"))]
-                {
-                    status =
-                    get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
-                    res = Response::new();
-                    res.set_status(status);
-                }
-
-                #[cfg(feature = "prost")]
-                {
-                    status =
-                    get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
-                    res = Response::default();
-                    res.status = Some(status);
-                }
-                if let Err(x) = response_to_channel(mh.stream_id, res, res_tx.clone()) {
+            } else {
+                let status = get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
+                let res = ResponseInit::init_status(status);
+                if let Err(x) = send_response(
+                    mh.stream_id,
+                    res,
+                    res_tx.clone(),
+                    conn_ctx.as_ref(),
+                ) {
                     info!("response_to_channel get error {:?}", x);
                     quit_connection(quit, control_tx);
                     break;
@@ -246,6 +256,7 @@ fn start_method_handler_thread(
                 res_tx: res_tx.clone(),
                 metadata: context::from_pb(&req.metadata),
                 timeout_nano: req.timeout_nano,
+                conn_ctx: conn_ctx.clone(),
             };
             if let Err(x) = method.handler(ctx, req) {
                 debug!("method handle {} get error {:?}", path, x);
@@ -272,6 +283,7 @@ fn start_method_handler_threads(num: usize, ts: &ThreadS) {
             ts.cancel_rx.clone(),
             ts.min,
             ts.max,
+            ts.conn_ctx.clone(),
         );
     }
 }
@@ -296,15 +308,27 @@ impl Default for Server {
             thread_count_min: DEFAULT_WAIT_THREAD_COUNT_MIN,
             thread_count_max: DEFAULT_WAIT_THREAD_COUNT_MAX,
             accept_retry_interval: DEFAULT_ACCEPT_RETRY_INTERVAL,
+            #[cfg(feature = "security_extension")]
+            accept_hook: None,
         }
     }
 }
 
 impl Server {
+    /// Creates a server with the default worker-pool configuration.
     pub fn new() -> Server {
         Server::default()
     }
 
+    /// Binds the server to `sockaddr`.
+    ///
+    /// A synchronous server supports one listener. See the
+    /// [crate-level transport table](crate#transport-addresses) for supported addresses.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a listener is already configured, the address is unsupported, or the
+    /// transport cannot be bound.
     pub fn bind(mut self, sockaddr: &str) -> Result<Server> {
         if !self.listeners.is_empty() {
             return Err(Error::Others(
@@ -319,6 +343,15 @@ impl Server {
     }
 
     #[cfg(unix)]
+    /// Adds a previously created listener file descriptor.
+    ///
+    /// The descriptor must refer to a listener compatible with the ttrpc transport. A synchronous
+    /// server supports one listener.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a listener is already configured or internal listener state cannot be
+    /// initialized.
     pub fn add_listener(mut self, fd: RawFd) -> Result<Server> {
         if !self.listeners.is_empty() {
             return Err(Error::Others(
@@ -333,6 +366,15 @@ impl Server {
         Ok(self)
     }
 
+    /// Registers methods produced by a generated `create_*` service helper.
+    ///
+    /// Calling this method repeatedly combines the methods from each service. Later registrations
+    /// replace methods with the same path.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called after the server has started and its service map is already shared with a
+    /// background task.
     pub fn register_service(
         mut self,
         methods: HashMap<String, Box<dyn MethodHandler + Send + Sync>>,
@@ -342,26 +384,57 @@ impl Server {
         self
     }
 
+    /// Sets the target number of idle worker threads.
+    ///
+    /// The value must be greater than the minimum and less than the maximum when the server starts.
     pub fn set_thread_count_default(mut self, count: usize) -> Server {
         self.thread_count_default = count;
         self
     }
 
+    /// Sets the idle-worker threshold below which the pool is replenished.
     pub fn set_thread_count_min(mut self, count: usize) -> Server {
         self.thread_count_min = count;
         self
     }
 
+    /// Sets the idle-worker threshold above which excess workers exit.
     pub fn set_thread_count_max(mut self, count: usize) -> Server {
         self.thread_count_max = count;
         self
     }
 
+    /// Sets the delay before retrying an accept that failed because of resource exhaustion.
     pub fn set_accept_retry_interval(mut self, interval: Duration) -> Server {
         self.accept_retry_interval = interval;
         self
     }
 
+    /// Sets a hook invoked on each accepted connection (Unix only).
+    ///
+    /// The hook receives the connection's raw file descriptor and can perform
+    /// authentication, peer identity inspection, or handshake negotiation.
+    /// It returns [`HookOutput`](crate::security_extension::HookOutput) with optional
+    /// per-connection data and a
+    /// [`PayloadTransform`](crate::security_extension::PayloadTransform) for encryption.
+    ///
+    /// If the hook returns an error, the connection is closed and the accept
+    /// loop continues to the next connection.
+    #[cfg(feature = "security_extension")]
+    pub fn set_accept_hook<H: AcceptHook + 'static>(mut self, hook: H) -> Self {
+        let hook: Arc<dyn AcceptHook> = Arc::new(hook);
+        self.accept_hook = Some(hook);
+        self
+    }
+
+    /// Starts the listener thread without validating worker-pool thresholds.
+    ///
+    /// Most callers should use [`Server::start`], which validates configuration first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no listener has been configured or a background thread cannot be
+    /// created.
     pub fn start_listen(&mut self) -> Result<()> {
         let connections = self.connections.clone();
 
@@ -411,6 +484,9 @@ impl Server {
             }
         };
 
+        #[cfg(feature = "security_extension")]
+        let accept_hook = self.accept_hook.clone();
+
         let handler = thread::Builder::new()
             .name("listener_loop".into())
             .spawn(move || {
@@ -443,11 +519,38 @@ impl Server {
                         }
                     };
 
+                    // ── Accept hook invocation ──
+                    #[cfg(feature = "security_extension")]
+                    let conn_ctx = match connection_context_from_hook(
+                        pipe_connection.id(),
+                        accept_hook.as_ref(),
+                    ) {
+                        Ok(ctx) => Arc::new(ctx),
+                        Err(e) => {
+                            let fd = pipe_connection.id();
+                            log::warn!("accept hook failed: {:?}", e);
+                            // Close the rejected connection; PipeConnection has no
+                            // Drop impl so the fd must be closed explicitly.
+                            if let Err(ce) = pipe_connection.close() {
+                                log::warn!(
+                                    "failed to close rejected connection (fd={}): {:?}",
+                                    fd,
+                                    ce
+                                );
+                            }
+                            continue;
+                        }
+                    };
+                    #[cfg(not(feature = "security_extension"))]
+                    let conn_ctx = Arc::new(ConnectionContext::default());
+
                     let methods = methods.clone();
                     let quit = Arc::new(AtomicBool::new(false));
                     let child_quit = quit.clone();
                     let reaper_tx_child = reaper_tx.clone();
                     let pipe_connection_child = pipe_connection.clone();
+                    let reader_ctx = conn_ctx.clone();
+                    let handler_ctx = conn_ctx.clone();
 
                     let (sync_tx, sync_rx) = channel();
 
@@ -486,7 +589,22 @@ impl Server {
                                 while !quit_reader.load(Ordering::SeqCst) {
                                     let msg = read_message(&pipe_reader);
                                     match msg {
-                                        Ok((x, y)) => {
+                                        Ok((mut x, y)) => {
+                                            // ── inbound transform ──
+                                            let y = match y {
+                                                Ok(data) => {
+                                                    let res = reader_ctx.inbound_buf(
+                                                        data,
+                                                        &serialize_aad(&x),
+                                                        true,
+                                                    );
+                                                    if let Ok(ref buf) = res {
+                                                        x.length = buf.len() as u32;
+                                                    }
+                                                    res
+                                                }
+                                                Err(e) => Err(e),
+                                            };
                                             let res = workload_tx.send((x, y));
                                             match res {
                                                 Ok(_) => {}
@@ -538,6 +656,7 @@ impl Server {
                                 default,
                                 min,
                                 max,
+                                conn_ctx: &handler_ctx,
                             };
                             start_method_handler_threads(ts.default, &ts);
 
@@ -600,6 +719,12 @@ impl Server {
         Ok(())
     }
 
+    /// Validates the configuration and starts accepting connections.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `minimum < default < maximum` does not hold, no listener is configured,
+    /// or a background thread cannot be created.
     pub fn start(&mut self) -> Result<()> {
         if self.thread_count_default >= self.thread_count_max {
             return Err(Error::Others(
@@ -616,6 +741,13 @@ impl Server {
         Ok(())
     }
 
+    /// Stops accepting new connections while leaving existing connections open.
+    ///
+    /// The returned server can be passed to [`Server::disconnect`] to close active connections.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no listener is configured.
     pub fn stop_listen(mut self) -> Self {
         self.listener_quit_flag.store(true, Ordering::SeqCst);
 
@@ -631,6 +763,10 @@ impl Server {
         self
     }
 
+    /// Closes active connections and waits for connection cleanup to finish.
+    ///
+    /// This method does not stop the listener; call [`Server::stop_listen`] first or use
+    /// [`Server::shutdown`].
     pub fn disconnect(mut self) {
         info!("begin to shutdown connection");
         let connections = self.connections.lock().unwrap();
@@ -650,6 +786,11 @@ impl Server {
         info!("reaper thread stopped");
     }
 
+    /// Stops accepting connections and closes all active connections.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no listener is configured.
     pub fn shutdown(self) {
         self.stop_listen().disconnect();
     }

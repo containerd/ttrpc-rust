@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Error and Result of ttrpc and relevant functions, macros.
+//! Error handling for clients, servers, transports, and streams.
+
 use crate::proto::{Code, Response, Status};
 use std::result;
 use thiserror::Error;
@@ -20,29 +21,37 @@ use thiserror::Error;
 /// The error type for ttrpc.
 #[derive(Error, Debug, Clone, PartialEq)]
 pub enum Error {
+    /// A transport or socket operation failed.
     #[error("socket err: {0}")]
     Socket(String),
 
+    /// The remote endpoint returned a non-OK ttrpc status.
     #[error("rpc status: {0:?}")]
     RpcStatus(Status),
 
+    /// A Unix platform operation failed.
     #[cfg(unix)]
     #[error("Nix error: {0}")]
     Nix(#[from] nix::Error),
 
+    /// A Windows platform operation failed with the contained error code.
     #[cfg(windows)]
     #[error("Windows error: {0}")]
     Windows(i32),
 
+    /// The local half of a stream has already been closed.
     #[error("ttrpc err: local stream closed")]
     LocalClosed,
 
+    /// The remote half of a stream has already been closed.
     #[error("ttrpc err: remote stream closed")]
     RemoteClosed,
 
+    /// The remote endpoint closed a stream without another message.
     #[error("eof")]
     Eof,
 
+    /// An error that does not fit a more specific category.
     #[error("ttrpc err: {0}")]
     Others(String),
 }
@@ -54,7 +63,7 @@ impl From<Error> for Response {
         } else {
             get_status(Code::UNKNOWN, e)
         };
-        #[cfg(not(feature = "prost"))]
+        #[cfg(feature = "rustprotobuf")]
         {
             let mut res = Response::new();
             res.set_status(status);
@@ -73,8 +82,8 @@ impl From<Error> for Response {
 /// A specialized Result type for ttrpc.
 pub type Result<T> = result::Result<T, Error>;
 
-#[cfg(not(feature = "prost"))]
-/// Get ttrpc::Status from ttrpc::Code and a message.
+/// Creates a ttrpc [`Status`] from a status [`Code`] and message.
+#[cfg(feature = "rustprotobuf")]
 pub fn get_status(c: Code, msg: impl ToString) -> Status {
     let mut status = Status::new();
     status.set_code(c);
@@ -83,8 +92,8 @@ pub fn get_status(c: Code, msg: impl ToString) -> Status {
     status
 }
 
+/// Creates a ttrpc [`Status`] from a status [`Code`] and message.
 #[cfg(feature = "prost")]
-/// Get ttrpc::Status from ttrpc::Code and a message.
 pub fn get_status(c: Code, msg: impl ToString) -> Status {
     Status {
         code: c as i32,
@@ -93,11 +102,16 @@ pub fn get_status(c: Code, msg: impl ToString) -> Status {
     }
 }
 
+/// Creates an [`Error::RpcStatus`] from a status code and message.
 pub fn get_rpc_status(c: Code, msg: impl ToString) -> Error {
     Error::RpcStatus(get_status(c, msg))
 }
 
 const SOCK_DICONNECTED: &str = "socket disconnected";
+/// Converts a low-level socket read result into a ttrpc error.
+///
+/// A zero-byte read is reported as a disconnected socket. Other failures become an
+/// `INVALID_ARGUMENT` RPC status containing `msg`.
 pub fn sock_error_msg(size: usize, msg: String) -> Error {
     if size == 0 {
         return Error::Socket(SOCK_DICONNECTED.to_string());

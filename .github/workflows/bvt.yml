@@ -20,6 +20,9 @@ jobs:
       - name: Check
         run: |
           make check-all
+          # The codegen crate is a standalone workspace root, so its checks
+          # must be invoked explicitly (protoc is required for its tests).
+          make -C codegen check
 
   make:
     name: Build
@@ -39,10 +42,21 @@ jobs:
           make -C compiler
           make -C ttrpc-codegen
           make -C example build-examples
-          make -C example2 build-examples
+          make -C example-prost build-examples
+          make -C codegen test
         # Keep bash so a native-command failure on Windows isn't masked by a
         # later successful command (PowerShell swallows non-zero exits).
         shell: bash
+
+  security-extension:
+    name: Security Extension Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Run tests with security_extension
+        run: |
+          cargo test --features "async,sync,security_extension" --verbose
 
   deny:
     runs-on: ubuntu-latest

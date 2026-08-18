@@ -3,6 +3,25 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+//! Cooperative shutdown notification.
+//!
+//! A [`Notifier`](crate::asynchronous::shutdown::Notifier) owns the shutdown state and one or more
+//! cloneable [`Waiter`](crate::asynchronous::shutdown::Waiter) values observe it. Dropping the
+//! notifier also initiates shutdown. This module is used by the async server and can also
+//! coordinate application tasks.
+//!
+//! # Examples
+//!
+//! ```
+//! # async fn run() {
+//! let (notifier, waiter) = ttrpc::r#async::shutdown::new();
+//!
+//! notifier.shutdown();
+//! waiter.wait_shutdown().await;
+//! assert!(waiter.is_shutdown());
+//! # }
+//! ```
+
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -24,34 +43,34 @@ impl Shared {
     }
 }
 
-/// Wait for the shutdown notification.
+/// A cloneable handle that waits for a shutdown notification.
+///
+/// Each clone counts as an active waiter until it is dropped. [`Notifier::wait_all_exit`] completes
+/// after every waiter has been dropped.
 #[derive(Debug)]
 pub struct Waiter {
     shared: Arc<Shared>,
 }
 
-/// Used to Notify all [`Waiter`s](Waiter) shutdown.
+/// Initiates shutdown and tracks active [`Waiter`] handles.
 ///
-/// No `Clone` is provided. If you want multiple instances, you can use `Arc<Notifier>`.
-/// Notifier will automatically call shutdown when dropping.
+/// `Notifier` is deliberately not [`Clone`]. Wrap it in [`std::sync::Arc`] when multiple tasks need
+/// to initiate or observe shutdown. Dropping it calls [`Notifier::shutdown`].
 #[derive(Debug)]
 pub struct Notifier {
     shared: Arc<Shared>,
     wait_time: Option<Duration>,
 }
 
-/// Create a new shutdown pair([`Notifier`], [`Waiter`]) without timeout.
-///
-/// The [`Notifier`]
+/// Creates a notifier and its first waiter without an exit timeout.
 pub fn new() -> (Notifier, Waiter) {
     _with_timeout(None)
 }
 
-/// Create a new shutdown pair with the specified [`Duration`].
+/// Creates a notifier and its first waiter with an exit timeout.
 ///
-/// The [`Duration`] is used to specify the timeout of the [`Notifier::wait_all_exit()`].
-///
-/// [`Duration`]: tokio::time::Duration
+/// `wait_time` limits [`Notifier::wait_all_exit`]; it does not delay or time out delivery of the
+/// shutdown notification itself.
 pub fn with_timeout(wait_time: Duration) -> (Notifier, Waiter) {
     _with_timeout(Some(wait_time))
 }
@@ -75,14 +94,14 @@ fn _with_timeout(wait_time: Option<Duration>) -> (Notifier, Waiter) {
 }
 
 impl Waiter {
-    /// Return `true` if the [`Notifier::shutdown()`] has been called.
-    ///
-    /// [`Notifier::shutdown()`]: Notifier::shutdown()
+    /// Returns `true` after [`Notifier::shutdown`] has been called or the notifier was dropped.
     pub fn is_shutdown(&self) -> bool {
         self.shared.is_shutdown()
     }
 
-    /// Waiting for the [`Notifier::shutdown()`] to be called.
+    /// Waits until shutdown has been requested.
+    ///
+    /// If shutdown was already requested, this method returns immediately.
     pub async fn wait_shutdown(&self) {
         while !self.is_shutdown() {
             let shutdown = self.shared.notify_shutdown.notified();
@@ -114,16 +133,14 @@ impl Drop for Waiter {
 }
 
 impl Notifier {
-    /// Return `true` if the [`Notifier::shutdown()`] has been called.
-    ///
-    /// [`Notifier::shutdown()`]: Notifier::shutdown()
+    /// Returns `true` after shutdown has been requested.
     pub fn is_shutdown(&self) -> bool {
         self.shared.is_shutdown()
     }
 
-    /// Notify all [`Waiter`s](Waiter) shutdown.
+    /// Requests shutdown and wakes all current waiters.
     ///
-    /// It will cause all calls blocking at `Waiter::wait_shutdown().await` to return.
+    /// Calling this method more than once has no additional effect.
     pub fn shutdown(&self) {
         let is_shutdown = self.shared.shutdown.swap(true, Ordering::Relaxed);
         if !is_shutdown {
@@ -131,17 +148,22 @@ impl Notifier {
         }
     }
 
-    /// Return the num of all [`Waiter`]s.
+    /// Returns the number of live [`Waiter`] handles.
     pub fn waiters(&self) -> usize {
         self.shared.waiters.load(Ordering::Relaxed)
     }
 
-    /// Create a new [`Waiter`].
+    /// Creates another waiter subscribed to this notifier.
     pub fn subscribe(&self) -> Waiter {
         Waiter::from_shared(self.shared.clone())
     }
 
-    /// Wait for all [`Waiter`]s to drop.
+    /// Waits for all [`Waiter`] handles to be dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`tokio::time::error::Elapsed`] if the timeout configured by [`with_timeout`]
+    /// expires first. A pair created by [`new`] waits without a timeout.
     pub async fn wait_all_exit(&self) -> Result<(), Elapsed> {
         //debug_assert!(self.shared.is_shutdown());
         if let Some(tm) = self.wait_time {

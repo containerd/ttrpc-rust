@@ -135,9 +135,7 @@ impl streaming::Streaming for StreamingService {
 async fn main() {
     simple_logging::log_to_stderr(LevelFilter::Info);
 
-    let s = Box::new(StreamingService {}) as Box<dyn streaming::Streaming + Send + Sync>;
-    let s = Arc::new(s);
-    let service = streaming::create_streaming(s);
+    let service = streaming::create_streaming(Arc::new(StreamingService {}));
 
     utils::remove_if_sock_exist(utils::SOCK_ADDR).unwrap();
 

@@ -21,25 +21,16 @@ impl TtrpcServiceGenerator {
 
 impl ServiceGenerator for TtrpcServiceGenerator {
     fn finalize(&mut self, _buf: &mut String) {}
-    fn finalize_package(&mut self, _package: &str, buf: &mut String) {
-        // prost-build calls `generate` once per service but appends every service
-        // of a package into the same module buffer, so package-level imports must
-        // be emitted exactly once here to avoid duplicate-import errors (E0252).
-        self.generate_type_aliases(buf);
-    }
+    fn finalize_package(&mut self, _package: &str, _buf: &mut String) {}
     /// Generate services
     fn generate(&mut self, service: Service, buf: &mut String) {
-        self.generate_trait(&service, buf);
-        self.generate_method_handlers(&service, buf);
-        self.generate_creating_service_method(&service, buf);
-        self.generate_client(&service, buf);
-    }
-}
-
-// Generator engine
-impl TtrpcServiceGenerator {
-    /// Generate type aliases at the beginning of the service
-    fn generate_type_aliases(&self, buf: &mut String) {
+        // Each service is wrapped in its own inline module to isolate name
+        // resolution: `async_trait`'s expansion and generated sibling
+        // messages may both reference names such as `Box`, and the module
+        // boundary keeps them from colliding. The wrapper is fully
+        // self-contained per `generate` call because prost-build may
+        // interleave services from different packages.
+        let module_name = self.service_module_name(&service);
         let async_trait_token = if self.async_mode != AsyncMode::None {
             quote!(
                 use async_trait::async_trait;
@@ -47,13 +38,34 @@ impl TtrpcServiceGenerator {
         } else {
             quote!()
         };
-        let type_aliases = quote!(
-            use std::collections::HashMap;
-            use std::sync::Arc;
-            use prost::Message;
-            #async_trait_token
-        );
-        buf.push_str(type_aliases.to_string().as_str());
+        buf.push_str(&format!(
+            "pub mod {} {{ #![allow(unused_imports)] {} ",
+            module_name, async_trait_token
+        ));
+
+        self.generate_trait(&service, buf);
+        self.generate_method_handlers(&service, buf);
+        self.generate_creating_service_method(&service, buf);
+        self.generate_client(&service, buf);
+
+        buf.push_str(&format!("}} pub use self :: {} :: * ;", module_name));
+    }
+}
+
+// Generator engine
+impl TtrpcServiceGenerator {
+    /// Name of the inline module that wraps one generated service.
+    fn service_module_name(&self, service: &Service) -> String {
+        format!("__ttrpc_services_{}", to_snake_case(&service.name))
+    }
+
+    /// Build a type token that refers to a generated protobuf message from
+    /// inside the service module. `super::` reaches the package module that
+    /// hosts the message modules (e.g. `super::super::google::protobuf::Empty`
+    /// for an imported type).
+    fn message_type(path: &str) -> TokenStream {
+        let ty = type_token(path);
+        quote!( super :: #ty )
     }
 
     /// Generate the service trait for the server.
@@ -89,8 +101,8 @@ impl TtrpcServiceGenerator {
         let name = format_ident!("{}", self.method_name_rust(method));
         let method_type = MethodType::from_method(method);
         // Input/output type
-        let input_type = type_token(&method.input_type);
-        let output_type = type_token(&method.output_type);
+        let input_type = Self::message_type(&method.input_type);
+        let output_type = Self::message_type(&method.output_type);
         let (req_type, resp_type) = match method_type {
             MethodType::Unary => (quote!( #input_type ), quote!( #output_type )),
             MethodType::ClientStreaming => (
@@ -107,10 +119,7 @@ impl TtrpcServiceGenerator {
             ),
         };
         let context = self.ttrpc_context(async_on(self.async_mode, Side::Server));
-        let err_msg = format!(
-            "{}.{}/{} is not supported",
-            service.package, service.name, method.proto_name
-        );
+        let err_msg = format!("{} is not supported", method_path(service, method));
         // Prepend a function prefix if necessary
         let async_token = if async_on(self.async_mode, Side::Server) {
             quote!(async)
@@ -150,7 +159,7 @@ impl TtrpcServiceGenerator {
         };
         quote!(
             struct #struct_name {
-                service: Arc<Box<dyn #service_name + Send + Sync>>,
+                service: ::std::sync::Arc<dyn #service_name + Send + Sync>,
             }
             #method_handler_impl
         )
@@ -159,7 +168,7 @@ impl TtrpcServiceGenerator {
     fn method_handler_impl_sync_token(&self, struct_name: &Ident, method: &Method) -> TokenStream {
         let mod_path = ttrpc_mod();
         let context = self.ttrpc_context(false);
-        let input_type = type_token(&method.input_type);
+        let input_type = Self::message_type(&method.input_type);
         let method_name = format_ident!("{}", self.method_name_rust(method));
         quote!(
             impl #mod_path::MethodHandler for #struct_name {
@@ -174,7 +183,7 @@ impl TtrpcServiceGenerator {
     fn method_handler_impl_async_token(&self, struct_name: &Ident, method: &Method) -> TokenStream {
         let mod_path = ttrpc_mod();
         let context = self.ttrpc_context(true);
-        let input_type = type_token(&method.input_type);
+        let input_type = Self::message_type(&method.input_type);
         let method_name = format_ident!("{}", self.method_name_rust(method));
 
         let (handler_trait, inner_token, result_type_token, handler_token) =
@@ -229,18 +238,18 @@ impl TtrpcServiceGenerator {
         let service_trait = format_ident!("{}", service.name);
         let mod_path = ttrpc_mod();
         let method_inserts: Vec<_> = service.methods.iter().map(|method| {
-            let key = format!("/{}.{}/{}", service.package, service.name, method.proto_name);
+            let key = method_path(service, method);
             let mm = self.method_handler_type(service, method);
             quote!(
                 methods.insert(
                     #key.to_string(),
-                    Box::new(#mm{service: service.clone()}) as Box<dyn #mod_path::MethodHandler + Send + Sync>);
+                    ::std::boxed::Box::new(#mm{service: ::std::clone::Clone::clone(&service)}) as ::std::boxed::Box<dyn #mod_path::MethodHandler + Send + Sync>);
             )
         }).collect();
 
         quote!(
-            pub fn #create_service_name(service: Arc<Box<dyn #service_trait + Send + Sync>>) -> HashMap<String, Box<dyn #mod_path::MethodHandler + Send + Sync>> {
-                let mut methods = HashMap::new();
+            pub fn #create_service_name(service: ::std::sync::Arc<dyn #service_trait + Send + Sync>) -> ::std::collections::HashMap<String, ::std::boxed::Box<dyn #mod_path::MethodHandler + Send + Sync>> {
+                let mut methods = ::std::collections::HashMap::new();
                 #(#method_inserts)*
                 methods
             }
@@ -252,9 +261,9 @@ impl TtrpcServiceGenerator {
         let service_trait = format_ident!("{}", service.name);
         let mod_path = ttrpc_mod();
         let stream_token = if self.has_stream_method(service) {
-            quote!( let mut streams = HashMap::new(); )
+            quote!( let mut streams = ::std::collections::HashMap::new(); )
         } else {
-            quote!( let streams = HashMap::new(); )
+            quote!( let streams = ::std::collections::HashMap::new(); )
         };
         let method_inserts: Vec<_> = service.methods.iter().map(|method| {
             let key = method.proto_name.to_string();
@@ -264,24 +273,24 @@ impl TtrpcServiceGenerator {
                     quote!(
                         methods.insert(
                             #key.to_string(),
-                            Box::new(#mm{service: service.clone()}) as Box<dyn #mod_path::r#async::MethodHandler + Send + Sync>); 
+                            ::std::boxed::Box::new(#mm{service: ::std::clone::Clone::clone(&service)}) as ::std::boxed::Box<dyn #mod_path::r#async::MethodHandler + Send + Sync>);
                     )
                 },
                 _ => {
                     quote!(
                         streams.insert(
                             #key.to_string(),
-                            Arc::new(#mm{service: service.clone()}) as Arc<dyn #mod_path::r#async::StreamHandler + Send + Sync>); 
+                            ::std::sync::Arc::new(#mm{service: ::std::clone::Clone::clone(&service)}) as ::std::sync::Arc<dyn #mod_path::r#async::StreamHandler + Send + Sync>); 
                     )
                 }
             }
         }).collect();
-        let service_path = format!("{}.{}", service.package, to_camel_case(&service.proto_name));
+        let service_path = service_full_name(service);
 
         quote!(
-            pub fn #create_service_name(service: Arc<Box<dyn #service_trait + Send + Sync>>) -> HashMap<String, #mod_path::r#async::Service> {
-                let mut ret = HashMap::new();
-                let mut methods = HashMap::new();
+            pub fn #create_service_name(service: ::std::sync::Arc<dyn #service_trait + Send + Sync>) -> ::std::collections::HashMap<String, #mod_path::r#async::Service> {
+                let mut ret = ::std::collections::HashMap::new();
+                let mut methods = ::std::collections::HashMap::new();
                 #stream_token
                 #(#method_inserts)*
                 ret.insert(#service_path.to_string(), #mod_path::r#async::Service{ methods, streams });
@@ -350,9 +359,9 @@ impl TtrpcServiceGenerator {
     fn sync_client_method_token(&self, service: &Service, method: &Method) -> TokenStream {
         let method_name = format_ident!("{}", method.name);
         let mod_path = ttrpc_mod();
-        let input = type_token(&method.input_type);
-        let output = type_token(&method.output_type);
-        let server_str = format!("{}.{}", service.package, service.name);
+        let input = Self::message_type(&method.input_type);
+        let output = Self::message_type(&method.output_type);
+        let server_str = service_full_name(service);
         let method_str = method.proto_name.to_string();
 
         match MethodType::from_method(method) {
@@ -374,9 +383,9 @@ impl TtrpcServiceGenerator {
     fn async_client_method_token(&self, service: &Service, method: &Method) -> TokenStream {
         let method_name = format_ident!("{}", method.name);
         let mod_path = ttrpc_mod();
-        let input = type_token(&method.input_type);
-        let output = type_token(&method.output_type);
-        let server_str = format!("{}.{}", service.package, service.name);
+        let input = Self::message_type(&method.input_type);
+        let output = Self::message_type(&method.output_type);
+        let server_str = service_full_name(service);
         let method_str = method.proto_name.to_string();
 
         let (mut arg_tokens, ret_token, body_token) = match MethodType::from_method(method) {
@@ -517,6 +526,23 @@ fn async_on(mode: AsyncMode, side: Side) -> bool {
         || (side == Side::Client && mode == AsyncMode::Client)
 }
 
+/// Fully-qualified service name used on the wire. The package prefix and
+/// separator are only present when the schema declares a package, so a
+/// package-less service is `Health` rather than `.Health`.
+fn service_full_name(service: &Service) -> String {
+    if service.package.is_empty() {
+        service.name.clone()
+    } else {
+        format!("{}.{}", service.package, service.name)
+    }
+}
+
+/// Fully-qualified method path used on the wire, e.g. `/grpc.Health/Check`
+/// or `/Health/Check` for a package-less schema.
+fn method_path(service: &Service, method: &Method) -> String {
+    format!("/{}/{}", service_full_name(service), method.proto_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,10 +581,17 @@ mod tests {
         let foo = make_service("test.pkg", "Foo", "Get", "super::google::protobuf::Empty");
         let bar = make_service("test.pkg", "Bar", "Get", "super::google::protobuf::Empty");
 
+        // Interleave services from two packages the way prost-build may,
+        // then finalize both packages; every wrapper must stay balanced.
+        let other = make_service("other.pkg", "Zoo", "Get", "Request");
         let mut buf = String::new();
         gen.generate(foo, &mut buf);
+        gen.generate(other, &mut buf);
         gen.generate(bar, &mut buf);
         gen.finalize_package("test.pkg", &mut buf);
+        gen.finalize_package("other.pkg", &mut buf);
+        buf.parse::<proc_macro2::TokenStream>()
+            .expect("generated buffer must lex");
 
         // The service name is now part of the handler type to avoid collisions.
         assert!(
@@ -569,12 +602,13 @@ mod tests {
             buf.contains("BarGetMethod"),
             "missing BarGetMethod in:\n{buf}"
         );
-        // Package-level imports are emitted once via finalize_package. The
-        // generated token stream uses spaces around `::`.
+        // Standard-library types are fully qualified instead of imported,
+        // so no `use` items are emitted (duplicate imports previously
+        // caused E0252 on multi-service packages).
         assert_eq!(
-            buf.matches("collections :: HashMap").count(),
-            1,
-            "package imports emitted more than once in:\n{buf}"
+            buf.matches("use std ::").count(),
+            0,
+            "std imports must not be emitted in:\n{buf}"
         );
         // The qualified input type path survives the conversion.
         assert!(
@@ -583,8 +617,8 @@ mod tests {
         );
     }
 
-    /// A schema without a `package` declaration must still generate without
-    /// panicking.
+    /// A schema without a `package` declaration must still generate valid
+    /// wire names: the separator is only added when a package is present.
     #[test]
     fn packageless_schema_generates() {
         let mut gen = TtrpcServiceGenerator::new(AsyncMode::None);
@@ -601,6 +635,36 @@ mod tests {
         assert!(
             buf.contains("trait Bare"),
             "missing service trait in:\n{buf}"
+        );
+        // No package: the method key and client service name must not start
+        // with a stray dot or contain an empty package segment.
+        assert!(
+            buf.contains("\"/Bare/Do\""),
+            "missing /Bare/Do method key in:\n{buf}"
+        );
+        assert!(
+            !buf.contains("\".\""),
+            "empty package leaked into a wire name in:\n{buf}"
+        );
+    }
+
+    /// Wire names for a packaged service keep the `package.Service` prefix.
+    #[test]
+    fn packaged_service_wire_names() {
+        let mut gen = TtrpcServiceGenerator::new(AsyncMode::None);
+        let svc = make_service("grpc", "Health", "Check", "CheckRequest");
+
+        let mut buf = String::new();
+        gen.generate(svc, &mut buf);
+        gen.finalize_package("grpc", &mut buf);
+
+        assert!(
+            buf.contains("\"/grpc.Health/Check\""),
+            "missing /grpc.Health/Check method key in:\n{buf}"
+        );
+        assert!(
+            buf.contains("\"grpc.Health\""),
+            "missing grpc.Health client service name in:\n{buf}"
         );
     }
 }

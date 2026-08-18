@@ -12,6 +12,11 @@ use windows_sys::Win32::Foundation::ERROR_PIPE_BUSY;
 use super::{Listener, Socket};
 
 impl Listener {
+    /// Binds a Windows named pipe such as `\\.\pipe\service`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the named pipe cannot be created.
     pub fn bind_named_pipe(addr: impl AsRef<str>) -> IoResult<Self> {
         let listener = ServerOptions::new()
             .first_pipe_instance(true)
@@ -21,6 +26,11 @@ impl Listener {
 }
 
 impl Socket {
+    /// Connects to a Windows named pipe, waiting while all pipe instances are busy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the named pipe cannot be opened.
     pub async fn connect_named_pipe(addr: impl AsRef<str>) -> IoResult<Self> {
         let client = loop {
             match ClientOptions::new().open(addr.as_ref()) {

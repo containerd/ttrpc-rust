@@ -4,28 +4,48 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+//! Low-level wire framing and codec primitives.
+//!
+//! Generated clients and servers handle these types automatically. They are public primarily for
+//! custom transports, generated bindings, and protocol tooling.
+
 #[allow(soft_unstable, clippy::type_complexity, clippy::too_many_arguments)]
 mod compiled {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 }
+// The schema keeps `package grpc`; the generated module differs by backend
+// (protobuf-codegen names output after the input file, prost-build after
+// the package), so re-export the backend-specific module uniformly.
+#[cfg(feature = "prost")]
+pub use compiled::grpc::*;
+#[cfg(feature = "rustprotobuf")]
 pub use compiled::ttrpc::*;
 
 use byteorder::{BigEndian, ByteOrder};
-#[cfg(not(feature = "prost"))]
+#[cfg(feature = "rustprotobuf")]
 use protobuf::{CodedInputStream, CodedOutputStream};
 
 use crate::error::{get_rpc_status, Error, Result as TtResult};
 
+/// Encoded length of a ttrpc message header, in bytes.
 pub const MESSAGE_HEADER_LENGTH: usize = 10;
+/// Maximum accepted payload length, in bytes.
 pub const MESSAGE_LENGTH_MAX: usize = 4 << 20;
+/// Buffer size used while discarding an oversized payload.
 pub const DEFAULT_PAGE_SIZE: usize = 4 << 10;
 
+/// Message type used for a request.
 pub const MESSAGE_TYPE_REQUEST: u8 = 0x1;
+/// Message type used for a response.
 pub const MESSAGE_TYPE_RESPONSE: u8 = 0x2;
+/// Message type used for a streaming data frame.
 pub const MESSAGE_TYPE_DATA: u8 = 0x3;
 
+/// Indicates that the sending endpoint has closed its stream half.
 pub const FLAG_REMOTE_CLOSED: u8 = 0x1;
+/// Indicates that the sending endpoint has opened its stream half.
 pub const FLAG_REMOTE_OPEN: u8 = 0x2;
+/// Indicates that a frame contains no payload.
 pub const FLAG_NO_DATA: u8 = 0x4;
 
 pub(crate) fn check_oversize(len: usize, return_rpc_error: bool) -> TtResult<()> {
@@ -67,12 +87,27 @@ async fn discard_message_body(
     Ok(())
 }
 
-/// Message header of ttrpc.
+/// The fixed-width header that precedes every ttrpc payload.
+///
+/// # Examples
+///
+/// ```
+/// use ttrpc::proto::{MessageHeader, MESSAGE_TYPE_REQUEST};
+///
+/// let header = MessageHeader::new_request(1, 128);
+/// assert_eq!(header.stream_id, 1);
+/// assert_eq!(header.length, 128);
+/// assert_eq!(header.type_, MESSAGE_TYPE_REQUEST);
+/// ```
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MessageHeader {
+    /// Length of the payload following this header, in bytes.
     pub length: u32,
+    /// Identifier used to correlate frames belonging to the same RPC or stream.
     pub stream_id: u32,
+    /// Frame kind; one of the `MESSAGE_TYPE_*` constants.
     pub type_: u8,
+    /// Bitset composed from the `FLAG_*` constants.
     pub flags: u8,
 }
 
@@ -189,16 +224,24 @@ impl MessageHeader {
     }
 }
 
-/// Generic message of ttrpc.
+/// A ttrpc frame with an untyped byte payload.
+///
+/// This type is constructed internally by the ttrpc runtime and is not normally built directly by
+/// applications.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct GenMessage {
+    /// Wire header describing the payload.
     pub header: MessageHeader,
+    /// Unencoded frame payload.
     pub payload: Vec<u8>,
 }
 
+/// Errors that can occur while reading an untyped ttrpc frame.
 #[derive(Debug, PartialEq)]
 pub enum GenMessageError {
+    /// An I/O, transport, or protocol error that should be handled locally.
     InternalError(Error),
+    /// A protocol error that should be returned to the peer for the associated header.
     ReturnError(MessageHeader, Error),
 }
 
@@ -210,7 +253,37 @@ impl From<Error> for GenMessageError {
 
 #[cfg(feature = "async")]
 impl GenMessage {
-    /// Encodes a MessageHeader to writer.
+    /// Create a DATA message.
+    pub(crate) fn new_data(stream_id: u32, payload: Vec<u8>) -> Self {
+        Self {
+            header: MessageHeader::new_data(stream_id, payload.len() as u32),
+            payload,
+        }
+    }
+
+    /// Create a RESPONSE message.
+    pub(crate) fn new_response(stream_id: u32, payload: Vec<u8>) -> Self {
+        Self {
+            header: MessageHeader::new_response(stream_id, payload.len() as u32),
+            payload,
+        }
+    }
+
+    /// Create a DATA close message (FLAG_REMOTE_CLOSED | FLAG_NO_DATA).
+    pub(crate) fn new_close(stream_id: u32) -> Self {
+        let mut header = MessageHeader::new_data(stream_id, 0);
+        header.set_flags(FLAG_REMOTE_CLOSED | FLAG_NO_DATA);
+        Self {
+            header,
+            payload: Vec::new(),
+        }
+    }
+
+    /// Writes the frame header and payload to an asynchronous writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Socket`] if the header or payload cannot be written.
     pub async fn write_to(
         &self,
         mut writer: impl tokio::io::AsyncWriteExt + Unpin,
@@ -226,7 +299,12 @@ impl GenMessage {
         Ok(())
     }
 
-    /// Decodes a MessageHeader from reader.
+    /// Reads a frame header and payload from an asynchronous reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GenMessageError::InternalError`] for I/O failures. Oversized payloads are
+    /// discarded and returned as [`GenMessageError::ReturnError`].
     pub async fn read_from(
         mut reader: impl tokio::io::AsyncReadExt + Unpin,
     ) -> std::result::Result<Self, GenMessageError> {
@@ -251,23 +329,163 @@ impl GenMessage {
         })
     }
 
+    /// Validates the payload length declared by the frame header.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `INVALID_ARGUMENT` RPC status if the payload exceeds [`MESSAGE_LENGTH_MAX`].
     pub fn check(&self) -> TtResult<()> {
         check_oversize(self.header.length as usize, true)
     }
 }
 
-/// TTRPC codec, only protobuf is supported.
+/// Encodes and decodes values carried by ttrpc frames.
+///
+/// The crate implements this trait for all [`protobuf::Message`] types.
 pub trait Codec {
+    /// Error returned while encoding or decoding the value.
     type E;
 
+    /// Returns the encoded size of this value in bytes.
     fn size(&self) -> u32;
+    /// Encodes this value into a newly allocated byte buffer.
     fn encode(&self) -> Result<Vec<u8>, Self::E>;
+    /// Decodes a value from `buf`.
     fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E>
     where
         Self: Sized;
+    /// Merges encoded bytes into an existing value.
+    fn merge(&mut self, buf: impl AsRef<[u8]>) -> Result<(), Self::E>;
 }
 
-#[cfg(not(feature = "prost"))]
+/// Backend-neutral [`Request`] builders used by the codegen macros.
+///
+/// This is an implementation detail of the generated-code pipeline and is
+/// not part of the stable public API.
+#[doc(hidden)]
+pub trait RequestInit: Default {
+    /// Creates a request with the routing and metadata fields set.
+    fn init_request(
+        service: String,
+        method: String,
+        timeout_nano: i64,
+        metadata: Vec<KeyValue>,
+    ) -> Self;
+    /// Replaces the request payload.
+    fn set_payload(&mut self, payload: Vec<u8>);
+}
+
+/// Backend-neutral [`Response`] builders used by the codegen macros.
+///
+/// This is an implementation detail of the generated-code pipeline and is
+/// not part of the stable public API.
+#[doc(hidden)]
+pub trait ResponseInit: Default {
+    /// Creates a response carrying the given status.
+    fn init_status(status: Status) -> Self;
+    /// Replaces the response payload.
+    fn set_payload(&mut self, payload: Vec<u8>);
+    /// Replaces the response status.
+    fn set_status(&mut self, status: Status);
+    /// Returns the response status when it is present and not `OK`.
+    fn non_ok(&self) -> Option<Status>;
+}
+
+#[cfg(feature = "rustprotobuf")]
+impl RequestInit for Request {
+    fn init_request(
+        service: String,
+        method: String,
+        timeout_nano: i64,
+        metadata: Vec<KeyValue>,
+    ) -> Self {
+        let mut req = Request::new();
+        req.set_service(service);
+        req.set_method(method);
+        req.set_timeout_nano(timeout_nano);
+        req.set_metadata(metadata);
+        req
+    }
+
+    fn set_payload(&mut self, payload: Vec<u8>) {
+        self.payload = payload;
+    }
+}
+
+#[cfg(feature = "rustprotobuf")]
+impl ResponseInit for Response {
+    fn init_status(status: Status) -> Self {
+        let mut res = Response::new();
+        res.set_status(status);
+        res
+    }
+
+    fn set_payload(&mut self, payload: Vec<u8>) {
+        self.payload = payload;
+    }
+
+    fn set_status(&mut self, status: Status) {
+        self.status = ::protobuf::MessageField::some(status);
+    }
+
+    fn non_ok(&self) -> Option<Status> {
+        let status = self.status();
+        if status.code() != Code::OK {
+            Some((*status).clone())
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(feature = "prost")]
+impl RequestInit for Request {
+    fn init_request(
+        service: String,
+        method: String,
+        timeout_nano: i64,
+        metadata: Vec<KeyValue>,
+    ) -> Self {
+        Request {
+            service,
+            method,
+            timeout_nano,
+            metadata,
+            ..Default::default()
+        }
+    }
+
+    fn set_payload(&mut self, payload: Vec<u8>) {
+        self.payload = payload;
+    }
+}
+
+#[cfg(feature = "prost")]
+impl ResponseInit for Response {
+    fn init_status(status: Status) -> Self {
+        Response {
+            status: Some(status),
+            ..Default::default()
+        }
+    }
+
+    fn set_payload(&mut self, payload: Vec<u8>) {
+        self.payload = payload;
+    }
+
+    fn set_status(&mut self, status: Status) {
+        self.status = Some(status);
+    }
+
+    fn non_ok(&self) -> Option<Status> {
+        self.status
+            .as_ref()
+            .filter(|s| s.code != Code::OK as i32)
+            .cloned()
+    }
+}
+
+#[cfg(feature = "rustprotobuf")]
 impl<M: protobuf::Message> Codec for M {
     type E = protobuf::Error;
 
@@ -287,6 +505,10 @@ impl<M: protobuf::Message> Codec for M {
     fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E> {
         let mut s = CodedInputStream::from_bytes(buf.as_ref());
         M::parse_from(&mut s)
+    }
+
+    fn merge(&mut self, buf: impl AsRef<[u8]>) -> Result<(), Self::E> {
+        protobuf::Message::merge_from_bytes(self, buf.as_ref())
     }
 }
 
@@ -308,12 +530,18 @@ impl<M: prost::Message + Default> Codec for M {
     {
         prost::Message::decode(buf.as_ref()).map_err(std::io::Error::from)
     }
+
+    fn merge(&mut self, buf: impl AsRef<[u8]>) -> Result<(), Self::E> {
+        prost::Message::merge(self, buf.as_ref()).map_err(std::io::Error::from)
+    }
 }
 
-/// Message of ttrpc.
+/// A ttrpc frame with a typed payload.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Message<C> {
+    /// Wire header describing the payload.
     pub header: MessageHeader,
+    /// Decoded frame payload.
     pub payload: C,
 }
 
@@ -344,6 +572,11 @@ where
 }
 
 impl<C: Codec> Message<C> {
+    /// Creates a request frame for `message` on `stream_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Others`] if the encoded payload exceeds [`MESSAGE_LENGTH_MAX`].
     pub fn new_request(stream_id: u32, message: C) -> TtResult<Self> {
         check_oversize(message.size() as usize, false)?;
 
@@ -360,7 +593,11 @@ where
     C: Codec,
     C::E: std::fmt::Display,
 {
-    /// Encodes a MessageHeader to writer.
+    /// Encodes and writes this typed frame to an asynchronous writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the payload cannot be encoded or the frame cannot be written.
     pub async fn write_to(
         &self,
         mut writer: impl tokio::io::AsyncWriteExt + Unpin,
@@ -380,7 +617,11 @@ where
         Ok(())
     }
 
-    /// Decodes a MessageHeader from reader.
+    /// Reads and decodes a typed frame from an asynchronous reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the frame cannot be read or its payload cannot be decoded.
     pub async fn read_from(mut reader: impl tokio::io::AsyncReadExt + Unpin) -> TtResult<Self> {
         let header = MessageHeader::read_from(&mut reader)
             .await
@@ -450,7 +691,7 @@ mod tests {
         117, 101, 49,
     ];
 
-    #[cfg(not(feature = "prost"))]
+    #[cfg(feature = "rustprotobuf")]
     fn new_protobuf_request() -> Request {
         let mut creq = Request::new();
         creq.set_service("grpc.TestServices".to_string());
@@ -517,7 +758,7 @@ mod tests {
     }
 
     #[cfg(feature = "async")]
-    #[cfg(not(feature = "prost"))]
+    #[cfg(feature = "rustprotobuf")]
     #[tokio::test]
     async fn async_gen_message() {
         // Test packet which exceeds maximum message size
@@ -558,7 +799,7 @@ mod tests {
     }
 
     #[cfg(feature = "async")]
-    #[cfg(not(feature = "prost"))]
+    #[cfg(feature = "rustprotobuf")]
     #[tokio::test]
     async fn async_message() {
         // Test packet which exceeds maximum message size

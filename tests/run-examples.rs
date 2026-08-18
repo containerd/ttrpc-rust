@@ -122,13 +122,16 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "prost")]
     {
         println!("Running examples with prost feature");
+        // The sync and async implementations take separate response and
+        // macro paths, so exercise both runtimes plus streaming.
+        run_example("server", "client", "example-prost", &[])?;
         #[cfg(unix)]
-        run_example("async-server", "async-client", "example2", &[])?;
+        run_example("async-server", "async-client", "example-prost", &[])?;
         #[cfg(unix)]
         run_example(
             "async-stream-server",
             "async-stream-client",
-            "example2",
+            "example-prost",
             &[],
         )?;
     }

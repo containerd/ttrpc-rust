@@ -1,34 +1,42 @@
-# Ttrpc-rust Codegen
+# Ttrpc-rust Codegen (Prost backend)
+
+Rust code generation for ttrpc services using the
+[Prost](https://crates.io/crates/prost) protobuf compiler.
 
 ## Getting started
 
-Please ensure that the protoc has been installed on your local environment. Then
-write the following code into "build.rs".
+`protoc` must be installed on the local environment. Then write the following
+code into `build.rs`:
 
 ```rust
-let mut protos = vec![
-    "protocols/protos/health.proto",
-    "protocols/protos/agent.proto",
-    "protocols/protos/oci.proto",
-];
+use ttrpc_codegen::{Codegen, Customize};
 
-let includes = vec!["protocols/protos"];
+fn main() {
+    let mut protos = vec![
+        "../example/protocols/protos/health.proto",
+        "../example/protocols/protos/agent.proto",
+        "../example/protocols/protos/oci.proto",
+    ];
 
-let codegen = CodegenBuilder::new()
-    .set_out_dir(&"protocols/sync")
-    .set_protos(&protos)
-    .set_includes(&includes)
-    .set_serde(true)
-    .set_async_mode(AsyncMode::None)
-    .set_generate_service(true)
-    .build()
-    .unwrap();
-codegen.generate().unwrap();
+    Codegen::new()
+        .out_dir("protocols/sync")
+        .inputs(&protos)
+        .include("../example/protocols/protos")
+        .prost()
+        .customize(Customize::default())
+        .run()
+        .unwrap();
+}
 ```
 
-Add ttrpc-codegen to "build-dependencies" section in "Cargo.toml".
+The fluent API matches the rust-protobuf based `ttrpc-codegen` crate; call
+`.prost()` to select this backend and `.customize(...)` to configure service
+generation:
 
-```toml
-[build-dependencies]
-ttrpc-codegen = "1.0"
-```
+- `async_all`: generate async code for both server and client
+- `async_server`: generate async code for server
+- `async_client`: generate async code for client
+- `gen_mod`: emit module declarations in `mod.rs` instead of `_include.rs`
+- `serde`: derive `serde::Serialize`/`serde::Deserialize` on messages
+
+See `example-prost` in the repository for a complete example.

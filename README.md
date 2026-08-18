@@ -1,160 +1,247 @@
+<div align="center">
+
 # ttrpc-rust
 
-_ttrpc-rust is a **non-core** subproject of containerd_
+**Lightweight RPC for Rust, built for memory-constrained systems.**
 
-`ttrpc-rust` is the Rust version of [ttrpc](https://github.com/containerd/ttrpc). [ttrpc](https://github.com/containerd/ttrpc) is GRPC for low-memory environments.
+[![Crates.io](https://img.shields.io/crates/v/ttrpc.svg)](https://crates.io/crates/ttrpc)
+[![Documentation](https://docs.rs/ttrpc/badge.svg)](https://docs.rs/ttrpc)
+[![BVT](https://github.com/containerd/ttrpc-rust/actions/workflows/bvt.yml/badge.svg)](https://github.com/containerd/ttrpc-rust/actions/workflows/bvt.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/containerd/ttrpc-rust/blob/master/LICENSE)
 
-The ttrpc compiler of `ttrpc-rust` `ttrpc_rust_plugin` is modified from gRPC compiler of [gRPC-rs](https://github.com/pingcap/grpc-rs) [grpcio-compiler](https://github.com/pingcap/grpc-rs/tree/master/compiler).
+[API documentation](https://docs.rs/ttrpc) · [Examples](https://github.com/containerd/ttrpc-rust/tree/master/example) · [ttrpc protocol](https://github.com/containerd/ttrpc/blob/main/PROTOCOL.md) · [Report an issue](https://github.com/containerd/ttrpc-rust/issues)
 
-## Usage
+</div>
 
-### 1. Generate with `protoc` command
-To generate the sources from proto files:
+_ttrpc-rust is a **non-core** subproject of containerd._
 
-1. Install protoc from github.com/protocolbuffers/protobuf
+It is the Rust implementation of [ttrpc](https://github.com/containerd/ttrpc): a simple RPC protocol designed for environments where memory usage and binary size matter. It uses Protocol Buffers service definitions while replacing the HTTP/2 stack with lightweight framing—making it a natural fit for container runtimes, sandboxed workloads, sidecars, and embedded system services.
 
-2. Install protobuf-codegen
+> [!IMPORTANT]
+> ttrpc reuses `.proto` service definitions, but it does **not** use the gRPC wire protocol. A ttrpc client must communicate with a ttrpc server.
+
+## Features
+
+| Capability | Support |
+| --- | --- |
+| Client and server APIs | Synchronous and Tokio-based asynchronous implementations |
+| RPC styles | Unary; client, server, and bidirectional streaming in async mode |
+| Code generation | Pure-Rust build-time generation or a `protoc` plugin |
+| Request context | Timeouts, metadata, and typed RPC status codes |
+| Transports | Unix sockets, TCP, Linux/Android vsock, and Windows named pipes |
+| Server lifecycle | Service registration, listener control, and graceful shutdown |
+| Platforms | Linux, macOS, Windows, and Android |
+
+The synchronous API is enabled by default. Enable the `async` Cargo feature for the Tokio implementation and streaming RPCs.
+
+## Quick start
+
+### Run the examples
+
+Clone the repository and start a synchronous server:
+
+```bash
+cargo run -p ttrpc-example --example server
 ```
-cargo install --force protobuf-codegen
+
+In another terminal, run the client:
+
+```bash
+cargo run -p ttrpc-example --example client
 ```
 
-3. Install ttrpc_rust_plugin from ttrpc-rust/compiler
+Async and streaming examples are available with the same workflow:
+
+```bash
+# Unary async RPC
+cargo run -p ttrpc-example --example async-server
+cargo run -p ttrpc-example --example async-client
+
+# Unary + client/server/bidirectional streaming
+cargo run -p ttrpc-example --example async-stream-server
+cargo run -p ttrpc-example --example async-stream-client
 ```
-cd ttrpc-rust/compiler
-cargo install --force --path .
+
+On Unix, append `-- --tcp` to any example command to use TCP instead of a Unix socket.
+
+### Add ttrpc to your project
+
+Add the runtime, Protocol Buffers support, and build-time generator:
+
+```toml
+[dependencies]
+protobuf = "3.7"
+ttrpc = "0.9"
+
+[build-dependencies]
+ttrpc-codegen = "0.6"
 ```
 
-4. Generate the sources:
+For async clients, servers, and streaming, use the following dependency set:
 
+```toml
+[dependencies]
+async-trait = "0.1"
+protobuf = "3.7"
+ttrpc = { version = "0.9", features = ["async"] }
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[build-dependencies]
+ttrpc-codegen = "0.6"
 ```
-$ protoc --rust_out=. --ttrpc_out=. --plugin=protoc-gen-ttrpc=`which ttrpc_rust_plugin` example.proto
-```
 
+Define a service in `proto/greeter.proto`:
 
-### 2. Generate programmatically
+```proto
+syntax = "proto3";
 
-API to generate .rs files to be used e. g. from build.rs.
+package example;
 
-Example code:
+message HelloRequest  { string name = 1; }
+message HelloResponse { string message = 1; }
 
-```
-fn main() {
-    protoc_rust_ttrpc::Codegen::new()
-        .out_dir("protocols")
-        .inputs(&[
-            "protocols/protos/agent.proto",
-        ])
-        .include("protocols/protos")
-        .rust_protobuf() // also generate protobuf messages, not just services
-        .run()
-        .expect("Codegen failed.");
+service Greeter {
+  rpc SayHello(HelloRequest) returns (HelloResponse);
 }
 ```
 
-# async/.await
-ttrpc-rust supports async/.await. By using async/.await you can reduce the overhead and resource consumption caused by threads.
+Generate the message types, client, and server trait from `build.rs`—no `protoc` installation is required:
 
-## Usage
-### 1. Generate codes in async version
-Currently we only support generating async codes by using ttrpc-codegen
+```rust
+use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
 
-```
-    ttrpc_codegen::Codegen::new()
-        .out_dir("protocols/asynchronous")
-        .inputs(&protos)
-        .include("protocols/protos")
+fn main() {
+    println!("cargo:rerun-if-changed=proto/greeter.proto");
+
+    Codegen::new()
+        .out_dir(std::env::var("OUT_DIR").unwrap())
+        .input("proto/greeter.proto")
+        .include("proto")
         .rust_protobuf()
         .customize(Customize {
-            gen_mod: true, // Gen mod will add mod.rs in out_dir.It's compatible with protobuf's gen_mod_rs
-            async_all: true, // It's the key option.
+            gen_mod: true,
             ..Default::default()
         })
+        .rust_protobuf_customize(ProtobufCustomize::default().gen_mod_rs(true))
         .run()
-        .expect("Gen async codes failed.");
+        .expect("failed to generate ttrpc bindings");
+}
 ```
 
-Provide customize option
-- `async_all`: generate async codes for both server and client
-- `async_server`: generate async codes for server
-- `async_client`: generate async codes for client
-- `gen_mod`: generate mod.rs in out_dir
+Include the generated modules in your crate:
 
-> See more in `example/build.rs`
-
-### 2. Write your implemention in async/.await's way
-Please follow the guidlines in `example/async-server.rs` and `example/async-client.rs`
-
-# Run Examples
-1. Go to the directory
-
-    ```
-    $ cd ttrpc-rust/example
-    ```
-
-2. Start the server
-
-    ```
-    $ cargo run --example server
-    ```
-    or
-
-    ```
-    $ cargo run --example async-server
-    ```
-
-3. Start a client
-
-    ```
-    $ cargo run --example client
-    ```
-    or
-    ```
-    $ cargo run --example async-client
-    ```
-
-
-# Notes: the version of protobuf
-protobuf-codegen, ttrpc_rust_plugin and your code should use the same version protobuf.
-You will get following fail if use the different version protobuf.
+```rust
+mod rpc {
+    include!(concat!(env!("OUT_DIR"), "/mod.rs"));
+}
 ```
-27 | const _PROTOBUF_VERSION_CHECK: () = ::protobuf::VERSION_2_8_0;
-   |                                                 ^^^^^^^^^^^^^ help: a constant with a similar name exists: `VERSION_2_10_1`
-```
-The reason is that [files generated by protobuf-codegen are compatible only with the same version of runtime](https://github.com/stepancheg/rust-protobuf/commit/2ab4d50c27c4dd7803b64ce1a43e2c134532c7a6)
 
-To fix this issue:
-1. Rebuild protobuf-codegen with new protobuf:
-```
-cd grpc-rs
-cargo clean
-cargo update
-cargo install --force protobuf-codegen
-```
-2. Rebuild ttrpc_rust_plugin with new protobuf:
-```
-cd ttrpc-rust/compiler
-cargo clean
-cargo update
-cargo install --force --path .
-```
-3. Build your project.
+The generator creates:
 
-# ttrpc-rust with the Prost
+- `greeter.rs` — Protocol Buffers messages
+- `greeter_ttrpc.rs` — the `Greeter` service trait, `GreeterClient`, and service registration helper
+- `mod.rs` — generated module declarations
 
-The new version of the ttrpc-rust is built with the Prost crate, a modern
-protobuf compiler written by Rust. There are certain different behaviors from
-the Rust-protobuf version:
+Implement the generated service trait, register it with `ttrpc::Server`, and connect with `ttrpc::Client`:
 
-1. The protoc should be installed.
-2. Enabling "prost" feature for the ttrpc-rust. The "prost" and "rustprotobuf"
-   backends are mutually exclusive, so `default-features` (which enables
-   "rustprotobuf") must be disabled, and the desired runtime feature must be
-   listed explicitly, e.g.
+```rust
+// Server
+let service = rpc::greeter_ttrpc::create_greeter(Arc::new(GreeterService));
+let mut server = ttrpc::Server::new()
+    .bind("unix:///tmp/greeter.sock")?
+    .register_service(service);
+server.start()?;
+
+// Client
+let channel = ttrpc::Client::connect("unix:///tmp/greeter.sock")?;
+let client = rpc::greeter_ttrpc::GreeterClient::new(channel);
+let response = client.say_hello(Default::default(), &request)?;
+```
+
+See the complete [synchronous](https://github.com/containerd/ttrpc-rust/blob/master/example/server.rs) and [asynchronous](https://github.com/containerd/ttrpc-rust/blob/master/example/async-server.rs) servers, plus the [streaming example](https://github.com/containerd/ttrpc-rust/blob/master/example/async-stream-server.rs), for production-shaped implementations.
+
+### Generate async bindings
+
+Set `async_all` during code generation:
+
+```rust
+.customize(Customize {
+    async_all: true,
+    gen_mod: true,
+    ..Default::default()
+})
+```
+
+You can generate only one side with `async_client` or `async_server`. Streaming services require async bindings.
+
+## Transport addresses
+
+| Address | Transport | Platforms |
+| --- | --- | --- |
+| `unix:///run/service.sock` | Unix domain socket | Unix |
+| `unix://@service` | Abstract Unix domain socket | Linux, Android |
+| `tcp://127.0.0.1:5000` | TCP | Unix |
+| `vsock://3:1024` | VM socket | Linux, Android |
+| `\\.\pipe\service` | Windows named pipe | Windows |
+
+ttrpc does not provide TLS. If you expose TCP beyond a trusted boundary, secure the transport at the deployment or network layer.
+
+## Workspace
+
+| Crate | Purpose |
+| --- | --- |
+| [`ttrpc`](https://crates.io/crates/ttrpc) | Sync and async client/server runtime |
+| [`ttrpc-codegen`](https://crates.io/crates/ttrpc-codegen) | Build-script API for parsing `.proto` files and generating Rust code |
+| [`ttrpc-compiler`](https://crates.io/crates/ttrpc-compiler) | Service code generator and `protoc` plugin |
+| [`example`](https://github.com/containerd/ttrpc-rust/tree/master/example) | End-to-end unary and streaming examples |
+
+## Compatibility
+
+- `ttrpc` runtime minimum supported Rust version: **1.70**
+- Repository development toolchain: see [`rust-toolchain.toml`](https://github.com/containerd/ttrpc-rust/blob/master/rust-toolchain.toml)
+- Default feature: `sync`
+- Optional feature: `async`
+- Keep `protobuf`, `protobuf-codegen`, and generated sources on matching versions. Regenerate bindings after changing the Protocol Buffers runtime version.
+
+## Development
+
+```bash
+# The "prost" and "rustprotobuf" features are mutually exclusive, so never
+# build the root crate with --all-features; `make test` covers both backends.
+make test
+
+# Run formatting and Clippy checks
+make check-all
+```
+
+## Project details
+
+`ttrpc-rust` is a **non-core** containerd subproject, licensed under the [Apache License 2.0](./LICENSE).
+
+As a containerd subproject, you will find the:
+
+- [Project governance](https://github.com/containerd/.project/blob/main/GOVERNANCE.md),
+- [Maintainers](./MAINTAINERS),
+- and [Contributing guidelines](https://github.com/containerd/.project/blob/main/CONTRIBUTING.md)
+
+information in the [`containerd/.project`](https://github.com/containerd/.project) repository.
+
+# ttrpc-rust with the Prost backend
+
+The `prost` feature builds the runtime and generates bindings with the
+[Prost](https://crates.io/crates/prost) protobuf compiler. There are certain
+different behaviors from the default rust-protobuf version:
+
+1. `protoc` must be installed (the codegen invokes it at build time).
+2. The "prost" and "rustprotobuf" backends are mutually exclusive, so
+   `default-features` (which enables "rustprotobuf") must be disabled and the
+   desired runtime feature must be listed explicitly, e.g.
    `ttrpc = { version = "1.0", default-features = false, features = ["sync", "prost"] }`.
-3. The Rust files are named based on their package name, rather than the proto
-   filename.
-4. Some variable names are different, e.g. for "cpu", "CPU" is generated by the
-   Rust-protobuf, and "Cpu" is generated by the Prost.
+3. The generated Rust files are named after their package name rather than the
+   proto filename.
+4. Some identifiers are cased differently, e.g. for "CPU", rust-protobuf
+   generates `CPU`-style acronyms while Prost generates `Cpu`.
 
-The "example" is an example with the Rust-protobuf version, and the "example2"
-is an example with the Prost version.
+The [example](./example) crate uses the rust-protobuf backend, and
+[example-prost](./example-prost) demonstrates the same workflows with the
+Prost backend.

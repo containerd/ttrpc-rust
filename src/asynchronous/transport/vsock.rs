@@ -7,13 +7,24 @@ use tokio_vsock::{VsockAddr, VsockListener, VsockStream, VMADDR_CID_ANY};
 use super::{Listener, Socket};
 
 impl Listener {
+    /// Binds a vsock address in `CID:PORT` form, without the `vsock://` scheme prefix.
+    ///
+    /// A CID of `-1` maps to `VMADDR_CID_ANY`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is invalid or the listener cannot be bound.
     pub fn bind_vsock(addr: impl AsRef<str>) -> IoResult<Self> {
         let addr = parse_vsock_addr(addr)?;
         Ok(Self::from(VsockListener::bind(addr)?))
     }
 
+    /// Creates a listener from an existing vsock descriptor.
+    ///
     /// # Safety
-    /// The file descriptor must represent a vsock listener.
+    ///
+    /// `fd` must be a valid, open vsock listener. The caller must transfer exclusive ownership and
+    /// must not close or use the descriptor afterward.
     pub unsafe fn from_raw_vsock_listener_fd(fd: RawFd) -> IoResult<Self> {
         let listener = unsafe { VsockListener::from_raw_fd(fd) };
         Ok(Self::from(listener))
@@ -21,6 +32,11 @@ impl Listener {
 }
 
 impl Socket {
+    /// Connects to a vsock address in `CID:PORT` form, without the `vsock://` scheme prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is invalid or the connection cannot be established.
     pub async fn connect_vsock(addr: impl AsRef<str>) -> IoResult<Self> {
         let addr = parse_vsock_addr(addr)?;
         Ok(Self::from(VsockStream::connect(addr).await?))
@@ -28,18 +44,26 @@ impl Socket {
 }
 
 impl From<VsockListener> for Listener {
+    /// Convert a `VsockListener` into a `Listener`.
+    ///
+    /// Uses `Box::pin(stream! {...})` directly (bypassing `Listener::new()`)
+    /// so each accepted connection goes through `Socket::from(socket)`,
+    /// which captures the raw fd when the `security_extension` feature is enabled.
     fn from(listener: VsockListener) -> Self {
-        Self::new(stream! {
+        Self(Box::pin(stream! {
             loop {
-                yield listener.accept().await.map(|(socket, _)| socket);
+                match listener.accept().await {
+                    Ok((socket, _)) => yield Ok(Socket::from(socket)),
+                    Err(e) => yield Err(e),
+                }
             }
-        })
+        }))
     }
 }
 
 impl From<VsockStream> for Socket {
     fn from(socket: VsockStream) -> Self {
-        Self::new(socket)
+        Socket::from_fd_aware(socket)
     }
 }
 

@@ -10,7 +10,7 @@ members = [
 # rustprotobuf-oriented workspace members above.
 exclude = [
     "./codegen",
-    "./example2",
+    "./example-prost",
 ]
 resolver = "2"
 
@@ -70,15 +70,19 @@ tokio-vsock = { version = "0.7.0", optional = true }
 [build-dependencies]
 # lock home to avoid conflict with latest version
 home = "=0.5.9"
-protobuf-codegen = { workspace = true }
+protobuf-codegen = { workspace = true, optional = true }
 prost-build = { version = "0.13", optional = true }
+
+[dev-dependencies]
+ttrpc-codegen = { workspace = true }
 
 [features]
 default = ["sync","rustprotobuf"]
 async = ["async-trait", "async-stream", "tokio", "futures", "tokio-vsock"]
 sync = []
+rustprotobuf = ["dep:protobuf", "dep:protobuf-codegen"]
 prost = ["dep:prost", "dep:prost-build"]
-rustprotobuf = ["dep:protobuf"]
+security_extension = []
 
 [package.metadata.docs.rs]
 # "prost" and "rustprotobuf" are mutually exclusive, so don't build with
