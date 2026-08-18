@@ -43,7 +43,10 @@ use std::{
 };
 
 use crate::{
-    util::proto_path_to_rust_mod, util::scope::RootScope, util::writer::CodeWriter, Customize,
+    util::proto_path_to_rust_mod,
+    util::scope::{RootScope, RustType},
+    util::writer::CodeWriter,
+    Customize,
 };
 use protobuf::{
     descriptor::*,
@@ -88,21 +91,28 @@ impl<'a> MethodGen<'a> {
     }
 
     fn input(&self) -> String {
-        format!(
-            "super::{}",
-            self.root_scope
-                .find_message(self.proto.input_type())
-                .rust_fq_name()
-        )
+        self.root_scope
+            .rust_type(self.proto.input_type())
+            .to_string()
     }
 
     fn output(&self) -> String {
-        format!(
-            "super::{}",
-            self.root_scope
-                .find_message(self.proto.output_type())
-                .rust_fq_name()
-        )
+        self.root_scope
+            .rust_type(self.proto.output_type())
+            .to_string()
+    }
+
+    fn request_handler_call(&self, macro_name: &str, request: &str) -> String {
+        match self.root_scope.rust_type(self.proto.input_type()) {
+            RustType::Generated { module, name } => format!(
+                "::ttrpc::{macro_name}!(self, ctx, {request}, {module}, {name}, {});",
+                self.name()
+            ),
+            rust_type @ RustType::ProtobufRuntime { .. } => format!(
+                "::ttrpc::{macro_name}!(self, ctx, {request}, {rust_type}, {});",
+                self.name()
+            ),
+        }
     }
 
     fn method_type(&self) -> (MethodType, String) {
@@ -164,10 +174,7 @@ impl<'a> MethodGen<'a> {
         |w| {
             w.block("fn handler(&self, ctx: ::ttrpc::TtrpcContext, req: ::ttrpc::Request) -> ::ttrpc::Result<()> {", "}",
             |w| {
-                w.write_line(format!("::ttrpc::request_handler!(self, ctx, req, {}, {}, {});",
-                                        proto_path_to_rust_mod(self.root_scope.find_message(self.proto.input_type()).fd.name()),
-                                        self.root_scope.find_message(self.proto.input_type()).rust_name(),
-                                        self.name()));
+                w.write_line(self.request_handler_call("request_handler", "req"));
                 w.write_line("Ok(())");
             });
         });
@@ -181,10 +188,7 @@ impl<'a> MethodGen<'a> {
                 |w| {
                     w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, req: ::ttrpc::Request) -> ::ttrpc::Result<::ttrpc::Response> {", "}",
                         |w| {
-                            w.write_line(format!("::ttrpc::async_request_handler!(self, ctx, req, {}, {}, {});",
-                                        proto_path_to_rust_mod(self.root_scope.find_message(self.proto.input_type()).fd.name()),
-                                        self.root_scope.find_message(self.proto.input_type()).rust_name(),
-                                        self.name()));
+                            w.write_line(self.request_handler_call("async_request_handler", "req"));
                     });
             });
             }
@@ -205,10 +209,7 @@ impl<'a> MethodGen<'a> {
                 |w| {
                     w.block("async fn handler(&self, ctx: ::ttrpc::r#async::TtrpcContext, mut inner: ::ttrpc::r#async::StreamInner) -> ::ttrpc::Result<Option<::ttrpc::Response>> {", "}",
                         |w| {
-                            w.write_line(format!("::ttrpc::async_server_streamimg_handler!(self, ctx, inner, {}, {}, {});",
-                                        proto_path_to_rust_mod(self.root_scope.find_message(self.proto.input_type()).fd.name()),
-                                        self.root_scope.find_message(self.proto.input_type()).rust_name(),
-                                        self.name()));
+                            w.write_line(self.request_handler_call("async_server_streamimg_handler", "inner"));
                     });
             });
             }
@@ -721,7 +722,7 @@ pub fn gen(
     let files_map: HashMap<&str, &FileDescriptorProto> =
         file_descriptors.iter().map(|f| (f.name(), f)).collect();
 
-    let root_scope = RootScope { file_descriptors };
+    let root_scope = RootScope::new(file_descriptors, files_to_generate);
 
     let mut results = CodeGeneratorResponse::new();
     results.set_supported_features(CodeGeneratorResponse_Feature::FEATURE_PROTO3_OPTIONAL as _);

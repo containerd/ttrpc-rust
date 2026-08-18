@@ -24,14 +24,24 @@ fn main() {
         .customize(Customize {
             ..Default::default()
         })
-        .rust_protobuf_customize(ProtobufCustomize {
-            ..Default::default()
-        }
+        .rust_protobuf_customize(ProtobufCustomize::default())
         .run()
         .expect("Gen code failed.");
 }
 
 ```
+
+## Well-known types
+
+Canonical Google well-known type imports such as `google/protobuf/timestamp.proto` and
+`google/protobuf/empty.proto` are resolved automatically. They do not need to be copied into the
+source tree or added through an extra include directory.
+
+When an imported well-known type is used as an RPC input or output, generated services reference
+the type provided by the `protobuf` runtime. A well-known proto explicitly listed as an input keeps
+using its locally generated module for compatibility. Proto definitions outside the standard
+well-known type set, including Google API definitions, must still be available through an include
+directory.
 
 Cargo.toml:
 

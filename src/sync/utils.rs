@@ -105,9 +105,9 @@ pub fn response_error_to_channel(
 /// Handle request in sync mode.
 #[macro_export]
 macro_rules! request_handler {
-    ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
+    ($class: ident, $ctx: ident, $req: ident, $req_type: path, $req_fn: ident) => {
         let mut s = CodedInputStream::from_bytes(&$req.payload);
-        let mut req = super::$server::$req_type::new();
+        let mut req = <$req_type>::new();
         req.merge_from(&mut s)
             .map_err(::ttrpc::err_to_others!(e, ""))?;
 
@@ -134,6 +134,15 @@ macro_rules! request_handler {
             },
         }
         $ctx.respond($ctx.mh.stream_id, res)?
+    };
+    ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
+        $crate::request_handler!(
+            $class,
+            $ctx,
+            $req,
+            super::$server::$req_type,
+            $req_fn
+        )
     };
 }
 
