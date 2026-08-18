@@ -31,7 +31,10 @@ use crate::r#async::stream::{
 use super::stream::SendingMessage;
 use super::transport::Socket;
 
-/// A ttrpc Client (async).
+/// A cloneable asynchronous ttrpc connection.
+///
+/// Generated service clients wrap this type. Clones share one connection and can issue concurrent
+/// unary and streaming requests.
 #[derive(Clone)]
 pub struct Client {
     req_tx: MessageSender,
@@ -41,6 +44,14 @@ pub struct Client {
 }
 
 impl Client {
+    /// Connects to a ttrpc server at `sockaddr`.
+    ///
+    /// See the [crate-level transport table](crate#transport-addresses) for supported address
+    /// formats.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is unsupported or the transport cannot connect.
     pub async fn connect(sockaddr: &str) -> Result<Client> {
         let socket = Socket::connect(sockaddr)
             .await
@@ -49,14 +60,28 @@ impl Client {
     }
 
     #[cfg(unix)]
+    /// Creates a client from a connected Unix socket descriptor.
+    ///
     /// # Safety
-    /// The file descriptor must represent a unix socket.
+    ///
+    /// `fd` must be a valid, open, connected Unix socket. The caller must transfer exclusive
+    /// ownership to the returned client and must not close or use the descriptor afterward.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the descriptor cannot be configured for asynchronous I/O or if called outside a
+    /// Tokio runtime.
     pub unsafe fn from_raw_unix_socket_fd(fd: RawFd) -> Client {
         let stream = unsafe { Socket::from_raw_unix_socket_fd(fd) }.unwrap();
         Self::new(stream)
     }
 
-    /// Initialize a new [`Client`].
+    /// Creates a client over a custom asynchronous [`Socket`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if called outside a Tokio runtime because the client starts a background connection
+    /// task.
     pub fn new(stream: Socket) -> Client {
         Self::new_inner(stream, None)
             .expect("new_inner without hook cannot fail")
@@ -152,7 +177,16 @@ impl Client {
         })
     }
 
-    /// Requests a unary request and returns with response.
+    /// Sends a unary request and waits for its response.
+    ///
+    /// A nonzero [`Request::timeout_nano`] limits how long this method waits. Generated clients
+    /// construct the request and decode its payload, so most applications do not call this method
+    /// directly.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the request is oversized, serialization or transport fails, the
+    /// timeout expires, the response is malformed, or the server returns a non-OK status.
     pub async fn request(&self, req: Request) -> Result<Response> {
         let timeout_nano = req.timeout_nano;
         let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
@@ -198,7 +232,15 @@ impl Client {
         Ok(res)
     }
 
-    /// Creates a StreamInner instance.
+    /// Opens a low-level streaming RPC.
+    ///
+    /// Generated streaming client methods select the appropriate `streaming_client` and
+    /// `streaming_server` values and wrap the returned [`StreamInner`] in a typed stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request is oversized, the stream registry is unavailable, the
+    /// connection is closed, or a client-streaming request also contains an initial payload.
     pub async fn new_stream(
         &self,
         req: Request,

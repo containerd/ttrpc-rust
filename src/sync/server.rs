@@ -70,7 +70,25 @@ type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
 type WorkloadSender = crossbeam::channel::Sender<(MessageHeader, Result<Vec<u8>>)>;
 type WorkloadReceiver = crossbeam::channel::Receiver<(MessageHeader, Result<Vec<u8>>)>;
 
-/// A ttrpc Server (sync).
+/// A configurable, thread-based ttrpc server.
+///
+/// Build a server by binding one listener and registering one or more generated services, then
+/// call [`Server::start`]. The listener and active connections remain running in background
+/// threads until [`Server::shutdown`] is called.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ttrpc::Server;
+///
+/// # fn main() -> ttrpc::Result<()> {
+/// let mut server = Server::new().bind("unix:///tmp/example.sock")?;
+/// // Register generated services with `server.register_service(...)`.
+/// server.start()?;
+/// server.shutdown();
+/// # Ok(())
+/// # }
+/// ```
 pub struct Server {
     listeners: Vec<Arc<PipeListener>>,
     listener_quit_flag: Arc<AtomicBool>,
@@ -298,10 +316,20 @@ impl Default for Server {
 }
 
 impl Server {
+    /// Creates a server with the default worker-pool configuration.
     pub fn new() -> Server {
         Server::default()
     }
 
+    /// Binds the server to `sockaddr`.
+    ///
+    /// A synchronous server supports one listener. See the
+    /// [crate-level transport table](crate#transport-addresses) for supported addresses.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a listener is already configured, the address is unsupported, or the
+    /// transport cannot be bound.
     pub fn bind(mut self, sockaddr: &str) -> Result<Server> {
         if !self.listeners.is_empty() {
             return Err(Error::Others(
@@ -316,6 +344,15 @@ impl Server {
     }
 
     #[cfg(unix)]
+    /// Adds a previously created listener file descriptor.
+    ///
+    /// The descriptor must refer to a listener compatible with the ttrpc transport. A synchronous
+    /// server supports one listener.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a listener is already configured or internal listener state cannot be
+    /// initialized.
     pub fn add_listener(mut self, fd: RawFd) -> Result<Server> {
         if !self.listeners.is_empty() {
             return Err(Error::Others(
@@ -330,6 +367,15 @@ impl Server {
         Ok(self)
     }
 
+    /// Registers methods produced by a generated `create_*` service helper.
+    ///
+    /// Calling this method repeatedly combines the methods from each service. Later registrations
+    /// replace methods with the same path.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called after the server has started and its service map is already shared with a
+    /// background task.
     pub fn register_service(
         mut self,
         methods: HashMap<String, Box<dyn MethodHandler + Send + Sync>>,
@@ -339,27 +385,33 @@ impl Server {
         self
     }
 
+    /// Sets the target number of idle worker threads.
+    ///
+    /// The value must be greater than the minimum and less than the maximum when the server starts.
     pub fn set_thread_count_default(mut self, count: usize) -> Server {
         self.thread_count_default = count;
         self
     }
 
+    /// Sets the idle-worker threshold below which the pool is replenished.
     pub fn set_thread_count_min(mut self, count: usize) -> Server {
         self.thread_count_min = count;
         self
     }
 
+    /// Sets the idle-worker threshold above which excess workers exit.
     pub fn set_thread_count_max(mut self, count: usize) -> Server {
         self.thread_count_max = count;
         self
     }
 
+    /// Sets the delay before retrying an accept that failed because of resource exhaustion.
     pub fn set_accept_retry_interval(mut self, interval: Duration) -> Server {
         self.accept_retry_interval = interval;
         self
     }
 
-    /// Set a hook invoked on each accepted connection (Unix only).
+    /// Sets a hook invoked on each accepted connection (Unix only).
     ///
     /// The hook receives the connection's raw file descriptor and can perform
     /// authentication, peer identity inspection, or handshake negotiation.
@@ -376,6 +428,14 @@ impl Server {
         self
     }
 
+    /// Starts the listener thread without validating worker-pool thresholds.
+    ///
+    /// Most callers should use [`Server::start`], which validates configuration first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no listener has been configured or a background thread cannot be
+    /// created.
     pub fn start_listen(&mut self) -> Result<()> {
         let connections = self.connections.clone();
 
@@ -660,6 +720,12 @@ impl Server {
         Ok(())
     }
 
+    /// Validates the configuration and starts accepting connections.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `minimum < default < maximum` does not hold, no listener is configured,
+    /// or a background thread cannot be created.
     pub fn start(&mut self) -> Result<()> {
         if self.thread_count_default >= self.thread_count_max {
             return Err(Error::Others(
@@ -676,6 +742,13 @@ impl Server {
         Ok(())
     }
 
+    /// Stops accepting new connections while leaving existing connections open.
+    ///
+    /// The returned server can be passed to [`Server::disconnect`] to close active connections.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no listener is configured.
     pub fn stop_listen(mut self) -> Self {
         self.listener_quit_flag.store(true, Ordering::SeqCst);
 
@@ -691,6 +764,10 @@ impl Server {
         self
     }
 
+    /// Closes active connections and waits for connection cleanup to finish.
+    ///
+    /// This method does not stop the listener; call [`Server::stop_listen`] first or use
+    /// [`Server::shutdown`].
     pub fn disconnect(mut self) {
         info!("begin to shutdown connection");
         let connections = self.connections.lock().unwrap();
@@ -710,6 +787,11 @@ impl Server {
         info!("reaper thread stopped");
     }
 
+    /// Stops accepting connections and closes all active connections.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no listener is configured.
     pub fn shutdown(self) {
         self.stop_listen().disconnect();
     }

@@ -11,14 +11,28 @@ use tokio::net::{TcpListener, TcpStream};
 use super::{Listener, Socket};
 
 impl Listener {
+    /// Binds a TCP socket address without the `tcp://` scheme prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is invalid, already in use, or cannot be configured for
+    /// asynchronous I/O.
     pub fn bind_tcp(addr: impl AsRef<str>) -> IoResult<Self> {
         let addr = parse_tcp_addr(addr)?;
         let listener = StdTcpListener::bind(addr)?;
         Self::try_from(listener)
     }
 
+    /// Creates a listener from an existing TCP socket descriptor.
+    ///
     /// # Safety
-    /// The file descriptor must represent a tcp listener.
+    ///
+    /// `fd` must be a valid, open TCP listener. The caller must transfer exclusive ownership and
+    /// must not close or use the descriptor afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the descriptor cannot be configured for asynchronous I/O.
     pub unsafe fn from_raw_tcp_listener_fd(fd: std::os::fd::RawFd) -> IoResult<Self> {
         let listener = unsafe { StdTcpListener::from_raw_fd(fd) };
         Self::try_from(listener)
@@ -26,14 +40,27 @@ impl Listener {
 }
 
 impl Socket {
+    /// Connects to a TCP socket address without the `tcp://` scheme prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is invalid or the connection cannot be established.
     pub async fn connect_tcp(addr: impl AsRef<str>) -> IoResult<Self> {
         let addr = parse_tcp_addr(addr)?;
         let socket = StdTcpStream::connect(addr)?;
         Self::try_from(socket)
     }
 
+    /// Creates a connected socket from an existing TCP socket descriptor.
+    ///
     /// # Safety
-    /// The file descriptor must represent a tcp socket.
+    ///
+    /// `fd` must be a valid, open, connected TCP socket. The caller must transfer exclusive
+    /// ownership and must not close or use the descriptor afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the descriptor cannot be configured for asynchronous I/O.
     pub unsafe fn from_raw_tcp_socket_fd(fd: RawFd) -> IoResult<Self> {
         let socket = unsafe { StdTcpStream::from_raw_fd(fd) };
         Self::try_from(socket)

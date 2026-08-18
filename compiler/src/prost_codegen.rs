@@ -11,6 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Legacy Prost-based service generation helpers.
+//!
+//! This module invokes `protoc` and generates Rust messages and service definitions through
+//! `prost-build`. New ttrpc projects generally use the pure-Rust [`ttrpc-codegen`] pipeline.
+//!
+//! [`ttrpc-codegen`]: https://docs.rs/ttrpc-codegen
+
 use super::util::{fq_grpc, to_snake_case, MethodType};
 use derive_new::new;
 use prost::Message;
@@ -20,7 +27,12 @@ use std::io::{Error, Read};
 use std::path::Path;
 use std::{fs, io, process::Command};
 
-/// Returns the names of all packages compiled.
+/// Compiles Protocol Buffers files and returns the unique package names generated.
+///
+/// # Errors
+///
+/// Returns an error if `protoc` cannot be executed, exits unsuccessfully, produces an invalid
+/// descriptor set, or generated files cannot be written to `out_dir`.
 pub fn compile_protos<P>(protos: &[P], includes: &[P], out_dir: &str) -> io::Result<Vec<String>>
 where
     P: AsRef<Path>,

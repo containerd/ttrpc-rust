@@ -94,8 +94,8 @@
 //!
 //! # Socket raw_fd
 //!
-//! [`Socket`](crate::asynchronous::transport::Socket) stores the underlying
-//! file descriptor so [`AcceptHook`] can access it for:
+//! With the `async` and `security_extension` features, `Socket` stores the underlying
+//! file descriptor so `AcceptHook` can access it for:
 //!   - `getpeername()` to inspect peer identity (e.g., vsock CID)
 //!   - Bidirectional handshake I/O (e.g., ECDH key exchange)
 //!
@@ -114,6 +114,9 @@ use std::sync::Arc;
 /// The trait is always available; the concrete `ConnectionData` type and its
 /// `ConnectionDataExt` impl live in the feature-gated sub-modules below.
 pub trait ConnectionDataExt {
+    /// Returns the value stored at `key` when it exists and has type `T`.
+    ///
+    /// Returns `None` when the key is absent or the stored value has a different type.
     fn get_typed<T: 'static>(&self, key: &str) -> Option<&T>;
 }
 
@@ -348,6 +351,13 @@ mod hooks {
     /// (`SO_RCVTIMEO` / `SO_SNDTIMEO`) for finer-grained control; the
     /// framework-level timeout is a last-resort safety net.
     pub trait AcceptHook: Send + Sync + std::fmt::Debug {
+        /// Inspects or negotiates an accepted connection before ttrpc reads from it.
+        ///
+        /// The hook may use `fd` during this call but does not take ownership of it.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`HookError`] to reject the connection or report a handshake failure.
         fn on_accept(&self, fd: RawFd) -> std::result::Result<HookOutput, HookError>;
     }
 
@@ -372,6 +382,13 @@ mod hooks {
     ///
     /// **WARNING**: The hook **must** set I/O timeouts before any read/write on the fd.
     pub trait ConnectHook: Send + Sync + std::fmt::Debug {
+        /// Inspects or negotiates a client connection before ttrpc writes to it.
+        ///
+        /// The hook may use `fd` during this call but does not take ownership of it.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`HookError`] to reject the connection or report a handshake failure.
         fn on_connect(&self, fd: RawFd) -> std::result::Result<HookOutput, HookError>;
     }
 

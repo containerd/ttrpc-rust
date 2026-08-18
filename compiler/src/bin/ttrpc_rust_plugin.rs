@@ -32,6 +32,8 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+//! `protoc` plugin entry point for generating ttrpc Rust service bindings.
+
 extern crate ttrpc_compiler;
 
 use ttrpc_compiler::codegen;
