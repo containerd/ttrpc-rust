@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::ConnectionContext;
 
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 
 use super::Client;
 use crate::error::{Error, Result};
@@ -32,6 +33,34 @@ pub type ResultReceiver = mpsc::Receiver<Result<GenMessage>>;
 pub struct SendingMessage {
     pub msg: GenMessage,
     pub result_chan: Option<tokio::sync::oneshot::Sender<Result<()>>>,
+    pub(crate) control: Option<MessageControl>,
+}
+
+#[derive(Debug)]
+pub(crate) struct MessageControl {
+    deadline: Option<Instant>,
+    response_tx: ResultSender,
+}
+
+impl MessageControl {
+    pub(crate) fn new(deadline: Option<Instant>, response_tx: ResultSender) -> Self {
+        Self {
+            deadline,
+            response_tx,
+        }
+    }
+
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.response_tx.is_closed()
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        self.response_tx.closed().await;
+    }
 }
 
 impl SendingMessage {
@@ -39,8 +68,18 @@ impl SendingMessage {
         Self {
             msg,
             result_chan: None,
+            control: None,
         }
     }
+
+    pub(crate) fn new_with_control(msg: GenMessage, control: MessageControl) -> Self {
+        Self {
+            msg,
+            result_chan: None,
+            control: Some(control),
+        }
+    }
+
     pub fn new_with_result(
         msg: GenMessage,
         result_chan: tokio::sync::oneshot::Sender<Result<()>>,
@@ -48,6 +87,7 @@ impl SendingMessage {
         Self {
             msg,
             result_chan: Some(result_chan),
+            control: None,
         }
     }
 

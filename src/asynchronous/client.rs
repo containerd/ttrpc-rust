@@ -12,7 +12,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use tokio::{self, sync::mpsc, task};
+use tokio::{
+    self,
+    sync::mpsc,
+    time::{timeout_at, Instant},
+};
 
 use crate::error::{get_rpc_status, Error, Result};
 use crate::ConnectionContext;
@@ -23,13 +27,40 @@ use crate::proto::{
     FLAG_REMOTE_CLOSED, FLAG_REMOTE_OPEN, MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
 };
 use crate::r#async::connection::*;
-use crate::r#async::shutdown;
 use crate::r#async::stream::{
     Kind, MessageReceiver, MessageSender, ResultReceiver, ResultSender, StreamInner,
 };
 
-use super::stream::SendingMessage;
+use super::stream::{MessageControl, SendingMessage};
 use super::transport::Socket;
+
+struct StreamRegistrationGuard<'a> {
+    stream_id: u32,
+    streams: &'a Mutex<HashMap<u32, ResultSender>>,
+    active: bool,
+}
+
+impl StreamRegistrationGuard<'_> {
+    fn disarm(mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for StreamRegistrationGuard<'_> {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        match self.streams.lock() {
+            Ok(mut streams) => {
+                streams.remove(&self.stream_id);
+            }
+            Err(e) => {
+                error!("Failed to clean up stream {}: {}", self.stream_id, e);
+            }
+        }
+    }
+}
 
 /// A cloneable asynchronous ttrpc connection.
 ///
@@ -189,6 +220,11 @@ impl Client {
     /// timeout expires, the response is malformed, or the server returns a non-OK status.
     pub async fn request(&self, req: Request) -> Result<Response> {
         let timeout_nano = req.timeout_nano;
+        let deadline = if timeout_nano == 0 {
+            None
+        } else {
+            Some(Instant::now() + std::time::Duration::from_nanos(timeout_nano as u64))
+        };
         let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
 
         let mut msg: GenMessage = Message::new_request(stream_id, req)?
@@ -196,28 +232,31 @@ impl Client {
             .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
 
         let (tx, mut rx): (ResultSender, ResultReceiver) = mpsc::channel(100);
+        let control = MessageControl::new(deadline, tx.clone());
         self.streams
             .lock()
             .map_err(|_| Error::Others("Failed to acquire lock on streams".to_string()))?
             .insert(stream_id, tx);
+        let registration = StreamRegistrationGuard {
+            stream_id,
+            streams: self.streams.as_ref(),
+            active: true,
+        };
 
         // ── Injection Point 6/10: unary REQUEST transform_outbound ──
-        if let Err(e) = self.conn_ctx.transform_send(&mut msg, &self.req_tx, false, false).await {
-            self.streams.lock().unwrap().remove(&stream_id);
-            return Err(e);
-        }
+        self.conn_ctx
+            .transform_send_with_control(&mut msg, &self.req_tx, false, false, control)
+            .await?;
 
-        let result = if timeout_nano == 0 {
-            rx.recv().await.ok_or(Error::RemoteClosed)?
-        } else {
-            tokio::time::timeout(
-                std::time::Duration::from_nanos(timeout_nano as u64),
-                rx.recv(),
-            )
+        let result = if let Some(deadline) = deadline {
+            timeout_at(deadline, rx.recv())
             .await
-            .map_err(|e| Error::Others(format!("Receive packet timeout {e:?}")))?
+            .map_err(|_| request_timeout_error())?
             .ok_or(Error::RemoteClosed)?
+        } else {
+            rx.recv().await.ok_or(Error::RemoteClosed)?
         };
+        registration.disarm();
 
         let msg = result?;
 
@@ -271,14 +310,18 @@ impl Client {
             .lock()
             .map_err(|_| Error::Others("Failed to acquire lock on streams".to_string()))?
             .insert(stream_id, tx);
+        let registration = StreamRegistrationGuard {
+            stream_id,
+            streams: self.streams.as_ref(),
+            active: true,
+        };
 
         // ── Injection Point 8/10: stream-init REQUEST transform_outbound ──
-        if let Err(e) = self.conn_ctx.transform_send(&mut msg, &self.req_tx, false, false).await {
-            self.streams.lock().unwrap().remove(&stream_id);
-            return Err(e);
-        }
+        self.conn_ctx
+            .transform_send(&mut msg, &self.req_tx, false, false)
+            .await?;
 
-        Ok(StreamInner::new(
+        let inner = StreamInner::new(
             stream_id,
             self.req_tx.clone(),
             rx,
@@ -287,7 +330,9 @@ impl Client {
             Kind::Client,
             self.streams.clone(),
             self.conn_ctx.clone(),
-        ))
+        );
+        registration.disarm();
+        Ok(inner)
     }
 }
 
@@ -303,16 +348,13 @@ impl Builder for ClientBuilder {
     type Writer = ClientWriter;
 
     fn build(&mut self) -> (Self::Reader, Self::Writer) {
-        let (notifier, waiter) = shutdown::new();
         (
             ClientReader {
-                shutdown_waiter: waiter,
                 streams: self.streams.clone(),
                 conn_ctx: self.conn_ctx.clone(),
             },
             ClientWriter {
                 rx: self.rx.take().unwrap(),
-                shutdown_notifier: notifier,
                 streams: self.streams.clone(),
             },
         )
@@ -321,8 +363,6 @@ impl Builder for ClientBuilder {
 
 struct ClientWriter {
     rx: MessageReceiver,
-    shutdown_notifier: shutdown::Notifier,
-
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
 }
 
@@ -350,9 +390,7 @@ impl WriterDelegate for ClientWriter {
         }
     }
 
-    async fn exit(&self) {
-        self.shutdown_notifier.shutdown();
-    }
+    async fn exit(&self) {}
 }
 
 async fn get_resp_tx(
@@ -409,22 +447,16 @@ async fn get_resp_tx(
 
 struct ClientReader {
     streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
-    shutdown_waiter: shutdown::Waiter,
     conn_ctx: Arc<ConnectionContext>,
 }
 
 #[async_trait]
 impl ReaderDelegate for ClientReader {
     async fn wait_shutdown(&self) {
-        self.shutdown_waiter.wait_shutdown().await
+        std::future::pending().await
     }
 
-    async fn disconnect(&self, e: Error, sender: &mut task::JoinHandle<()>) {
-        // Abort the request sender task to prevent incoming RPC requests
-        // from being processed.
-        sender.abort();
-        let _ = sender.await;
-
+    async fn disconnect(&self, e: Error) {
         // Take all items out of `req_map`.
         let mut map = std::mem::take(&mut *self.streams.lock().unwrap());
         // Terminate undone RPC requests with the error.
@@ -472,7 +504,7 @@ impl ReaderDelegate for ClientReader {
 }
 
 #[cfg(all(test, feature = "security_extension"))]
-mod tests {
+mod security_tests {
     use super::*;
     use crate::security_extension::{ConnectHook, ConnectionData, HookError, HookOutput};
 
@@ -510,3 +542,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;

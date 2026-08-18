@@ -1072,7 +1072,7 @@ async fn test_server_initiated_stream_close_client_gets_final_response() {
 // Test 6: Unary request timeout (server-side DEADLINE_EXCEEDED + client-side timeout)
 //
 // Covers the timeout code path in server.rs handle_method() (tokio::time::timeout
-// around the handler) and client.rs request() (tokio::time::timeout on the response).
+// around the handler) and client.rs request() (one deadline for send and response).
 #[tokio::test]
 async fn test_unary_request_timeout() {
     let sock_path = temp_unix_socket_path();
@@ -1104,6 +1104,7 @@ async fn test_unary_request_timeout() {
     assert!(
         err_str.contains("timeout")
             || err_str.contains("Timeout")
+            || err_str.contains("deadline elapsed")
             || err_str.contains("DEADLINE_EXCEEDED"),
         "Expected timeout-related error, got: {}",
         err_str
