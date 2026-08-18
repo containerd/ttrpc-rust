@@ -36,16 +36,22 @@ endif
 .PHONY: test
 test:
 	cargo test $(FEATURES) --verbose
+# The prost backend only exists in the root ttrpc crate; sub-crates
+# (compiler, ttrpc-codegen) include this Makefile and skip this leg.
+ifeq ($(SUBCRATE),)
 ifneq ($(OS),Windows_NT)
 	cargo test --no-default-features --features sync,async,prost --verbose
+endif
 endif
 
 .PHONY: check
 check:
 	cargo fmt --all -- --check
 	cargo clippy --all-targets $(FEATURES) -- -D warnings
+ifeq ($(SUBCRATE),)
 ifneq ($(OS),Windows_NT)
 	cargo clippy --all-targets --no-default-features --features sync,async,prost -- -D warnings
+endif
 endif
 
 .PHONY: check-all
