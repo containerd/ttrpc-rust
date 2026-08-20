@@ -19,8 +19,9 @@ use crate::ConnectionContext;
 #[cfg(feature = "security_extension")]
 use crate::security_extension::ConnectHook;
 use crate::proto::{
-    Code, Codec, GenMessage, Message, MessageHeader, Request, Response, FLAG_NO_DATA,
-    FLAG_REMOTE_CLOSED, FLAG_REMOTE_OPEN, MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
+    check_oversize, Codec, Code, GenMessage, Message, MessageHeader, Request, Response,
+    ResponseInit, FLAG_NO_DATA, FLAG_REMOTE_CLOSED, FLAG_REMOTE_OPEN, MESSAGE_TYPE_DATA,
+    MESSAGE_TYPE_RESPONSE,
 };
 use crate::r#async::connection::*;
 use crate::r#async::shutdown;
@@ -193,7 +194,11 @@ impl Client {
 
         let mut msg: GenMessage = Message::new_request(stream_id, req)?
             .try_into()
-            .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
+            .map_err(|e: <Request as Codec>::E| Error::Others(e.to_string()))?;
+        // Validate the complete encoded request (envelope + protobuf length
+        // prefixes) instead of only the payload length, consistent with the
+        // sync client.
+        check_oversize(msg.payload.len(), false)?;
 
         let (tx, mut rx): (ResultSender, ResultReceiver) = mpsc::channel(100);
         self.streams
@@ -224,9 +229,8 @@ impl Client {
         let res = Response::decode(msg.payload)
             .map_err(err_to_others_err!(e, "Unpack response error "))?;
 
-        let status = res.status();
-        if status.code() != Code::OK {
-            return Err(Error::RpcStatus((*status).clone()));
+        if let Some(status) = <Response as ResponseInit>::non_ok(&res) {
+            return Err(Error::RpcStatus(status));
         }
 
         Ok(res)
@@ -252,7 +256,10 @@ impl Client {
 
         let mut msg: GenMessage = Message::new_request(stream_id, req)?
             .try_into()
-            .map_err(|e: protobuf::Error| Error::Others(e.to_string()))?;
+            .map_err(|e: <Request as Codec>::E| Error::Others(e.to_string()))?;
+        // Validate the complete encoded request, consistent with the unary
+        // path and the sync client.
+        check_oversize(msg.payload.len(), false)?;
 
         if streaming_client {
             if !is_req_payload_empty {

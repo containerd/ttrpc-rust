@@ -206,8 +206,9 @@ ttrpc does not provide TLS. If you expose TCP beyond a trusted boundary, secure 
 ## Development
 
 ```bash
-# Build and test every crate with all features
-cargo test --workspace --all-features
+# The "prost" and "rustprotobuf" features are mutually exclusive, so never
+# build the root crate with --all-features; `make test` covers both backends.
+make test
 
 # Run formatting and Clippy checks
 make check-all
@@ -224,3 +225,23 @@ As a containerd subproject, you will find the:
 - and [Contributing guidelines](https://github.com/containerd/.project/blob/main/CONTRIBUTING.md)
 
 information in the [`containerd/.project`](https://github.com/containerd/.project) repository.
+
+# ttrpc-rust with the Prost backend
+
+The `prost` feature builds the runtime and generates bindings with the
+[Prost](https://crates.io/crates/prost) protobuf compiler. There are certain
+different behaviors from the default rust-protobuf version:
+
+1. `protoc` must be installed (the codegen invokes it at build time).
+2. The "prost" and "rustprotobuf" backends are mutually exclusive, so
+   `default-features` (which enables "rustprotobuf") must be disabled and the
+   desired runtime feature must be listed explicitly, e.g.
+   `ttrpc = { version = "1.0", default-features = false, features = ["sync", "prost"] }`.
+3. The generated Rust files are named after their package name rather than the
+   proto filename.
+4. Some identifiers are cased differently, e.g. for "CPU", rust-protobuf
+   generates `CPU`-style acronyms while Prost generates `Cpu`.
+
+The [example](./example) crate uses the rust-protobuf backend, and
+[example-prost](./example-prost) demonstrates the same workflows with the
+Prost backend.

@@ -63,10 +63,19 @@ impl From<Error> for Response {
         } else {
             get_status(Code::UNKNOWN, e)
         };
-
-        let mut res = Response::new();
-        res.set_status(status);
-        res
+        #[cfg(feature = "rustprotobuf")]
+        {
+            let mut res = Response::new();
+            res.set_status(status);
+            res
+        }
+        #[cfg(feature = "prost")]
+        {
+            Response {
+                status: Some(status),
+                ..Default::default()
+            }
+        }
     }
 }
 
@@ -74,12 +83,23 @@ impl From<Error> for Response {
 pub type Result<T> = result::Result<T, Error>;
 
 /// Creates a ttrpc [`Status`] from a status [`Code`] and message.
+#[cfg(feature = "rustprotobuf")]
 pub fn get_status(c: Code, msg: impl ToString) -> Status {
     let mut status = Status::new();
     status.set_code(c);
     status.set_message(msg.to_string());
 
     status
+}
+
+/// Creates a ttrpc [`Status`] from a status [`Code`] and message.
+#[cfg(feature = "prost")]
+pub fn get_status(c: Code, msg: impl ToString) -> Status {
+    Status {
+        code: c as i32,
+        message: msg.to_string(),
+        ..Default::default()
+    }
 }
 
 /// Creates an [`Error::RpcStatus`] from a status code and message.

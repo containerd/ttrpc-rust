@@ -10,44 +10,51 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::error::Result;
-use crate::security_extension::ConnectionData;
 use crate::proto::{MessageHeader, Request, Response};
+use crate::security_extension::ConnectionData;
 
 /// Handle request in async mode.
+///
+/// Both the historical six-argument rust-protobuf form
+/// (`super::$server::$req_type`) and the five-argument Prost form
+/// (path-aware `$req_type`) are supported and share one backend-neutral
+/// implementation built on [`Codec`](crate::proto::Codec).
 #[macro_export]
 macro_rules! async_request_handler {
-    ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
-        let mut req = super::$server::$req_type::new();
-        {
-            let mut s = CodedInputStream::from_bytes(&$req.payload);
-            req.merge_from(&mut s)
-                .map_err(::ttrpc::err_to_others!(e, ""))?;
-        }
+    // Prost-style path-aware form, e.g.
+    // `async_request_handler!(self, ctx, req, super::types::Foo, check)`.
+    ($class: ident, $ctx: ident, $req: ident, $req_type: path, $req_fn: ident) => {
+        let req = <$req_type as $crate::proto::Codec>::decode(&$req.payload)
+            .map_err($crate::err_to_others!(e, "Unpack request error "))?;
 
-        let mut res = ::ttrpc::Response::new();
-        match $class.service.$req_fn(&$ctx, req).await {
+        let res = match $class.service.$req_fn(&$ctx, req).await {
             Ok(rep) => {
-                res.set_status(::ttrpc::get_status(::ttrpc::Code::OK, "".to_string()));
-                res.payload.reserve(rep.compute_size() as usize);
-                let mut s = protobuf::CodedOutputStream::vec(&mut res.payload);
-                rep.write_to(&mut s)
-                    .map_err(::ttrpc::err_to_others!(e, ""))?;
-                s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
+                let payload = $crate::proto::Codec::encode(&rep)
+                    .map_err($crate::err_to_others!(e, "Encoding response "))?;
+                let mut res =
+                    $crate::proto::ResponseInit::init_status($crate::get_status(
+                        $crate::Code::OK,
+                        "".to_string(),
+                    ));
+                $crate::proto::ResponseInit::set_payload(&mut res, payload);
+                res
             }
             Err(x) => match x {
-                ::ttrpc::Error::RpcStatus(s) => {
-                    res.set_status(s);
+                $crate::Error::RpcStatus(s) => {
+                    $crate::proto::ResponseInit::init_status(s)
                 }
-                _ => {
-                    res.set_status(::ttrpc::get_status(
-                        ::ttrpc::Code::UNKNOWN,
-                        format!("{:?}", x),
-                    ));
-                }
+                _ => $crate::proto::ResponseInit::init_status($crate::get_status(
+                    $crate::Code::UNKNOWN,
+                    format!("{:?}", x),
+                )),
             },
-        }
+        };
 
         return Ok(res);
+    };
+    // rust-protobuf six-argument form: `super::$server::$req_type`.
+    ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
+        $crate::async_request_handler!($class, $ctx, $req, super::$server::$req_type, $req_fn);
     };
 }
 
@@ -56,60 +63,71 @@ macro_rules! async_request_handler {
 macro_rules! async_client_streamimg_handler {
     ($class: ident, $ctx: ident, $inner: ident, $req_fn: ident) => {
         let stream = ::ttrpc::r#async::ServerStreamReceiver::new($inner);
-        let mut res = ::ttrpc::Response::new();
-        match $class.service.$req_fn(&$ctx, stream).await {
+        let res = match $class.service.$req_fn(&$ctx, stream).await {
             Ok(rep) => {
-                res.set_status(::ttrpc::get_status(::ttrpc::Code::OK, "".to_string()));
-                res.payload.reserve(rep.compute_size() as usize);
-                let mut s = protobuf::CodedOutputStream::vec(&mut res.payload);
-                rep.write_to(&mut s)
-                    .map_err(::ttrpc::err_to_others!(e, ""))?;
-                s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
+                let payload = $crate::proto::Codec::encode(&rep)
+                    .map_err($crate::err_to_others!(e, "Encoding response "))?;
+                let mut res =
+                    $crate::proto::ResponseInit::init_status($crate::get_status(
+                        $crate::Code::OK,
+                        "".to_string(),
+                    ));
+                $crate::proto::ResponseInit::set_payload(&mut res, payload);
+                res
             }
             Err(x) => match x {
-                ::ttrpc::Error::RpcStatus(s) => {
-                    res.set_status(s);
+                $crate::Error::RpcStatus(s) => {
+                    $crate::proto::ResponseInit::init_status(s)
                 }
-                _ => {
-                    res.set_status(::ttrpc::get_status(
-                        ::ttrpc::Code::UNKNOWN,
-                        format!("{:?}", x),
-                    ));
-                }
+                _ => $crate::proto::ResponseInit::init_status($crate::get_status(
+                    $crate::Code::UNKNOWN,
+                    format!("{:?}", x),
+                )),
             },
-        }
+        };
         return Ok(Some(res));
     };
 }
 
 /// Handle server streaming in async mode.
+///
+/// Both the historical six-argument rust-protobuf form and the five-argument
+/// Prost form (path-aware `$req_type`) are supported.
 #[macro_export]
 macro_rules! async_server_streamimg_handler {
-    ($class: ident, $ctx: ident, $inner: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
+    // Prost-style path-aware form.
+    ($class: ident, $ctx: ident, $inner: ident, $req_type: path, $req_fn: ident) => {
         let req_buf = $inner.recv().await?;
-        let req = <super::$server::$req_type as ::ttrpc::proto::Codec>::decode(&req_buf)
-            .map_err(|e| ::ttrpc::Error::Others(e.to_string()))?;
+        let req = <$req_type as $crate::proto::Codec>::decode(&req_buf)
+            .map_err(|e| $crate::Error::Others(e.to_string()))?;
         let stream = ::ttrpc::r#async::ServerStreamSender::new($inner);
         match $class.service.$req_fn(&$ctx, req, stream).await {
             Ok(_) => {
                 return Ok(None);
             }
             Err(x) => {
-                let mut res = ::ttrpc::Response::new();
-                match x {
-                    ::ttrpc::Error::RpcStatus(s) => {
-                        res.set_status(s);
+                let res = match x {
+                    $crate::Error::RpcStatus(s) => {
+                        $crate::proto::ResponseInit::init_status(s)
                     }
-                    _ => {
-                        res.set_status(::ttrpc::get_status(
-                            ::ttrpc::Code::UNKNOWN,
-                            format!("{:?}", x),
-                        ));
-                    }
-                }
+                    _ => $crate::proto::ResponseInit::init_status($crate::get_status(
+                        $crate::Code::UNKNOWN,
+                        format!("{:?}", x),
+                    )),
+                };
                 return Ok(Some(res));
             }
         }
+    };
+    // rust-protobuf six-argument form: `super::$server::$req_type`.
+    ($class: ident, $ctx: ident, $inner: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
+        $crate::async_server_streamimg_handler!(
+            $class,
+            $ctx,
+            $inner,
+            super::$server::$req_type,
+            $req_fn
+        );
     };
 }
 
@@ -123,18 +141,15 @@ macro_rules! async_duplex_streamimg_handler {
                 return Ok(None);
             }
             Err(x) => {
-                let mut res = ::ttrpc::Response::new();
-                match x {
-                    ::ttrpc::Error::RpcStatus(s) => {
-                        res.set_status(s);
+                let res = match x {
+                    $crate::Error::RpcStatus(s) => {
+                        $crate::proto::ResponseInit::init_status(s)
                     }
-                    _ => {
-                        res.set_status(::ttrpc::get_status(
-                            ::ttrpc::Code::UNKNOWN,
-                            format!("{:?}", x),
-                        ));
-                    }
-                }
+                    _ => $crate::proto::ResponseInit::init_status($crate::get_status(
+                        $crate::Code::UNKNOWN,
+                        format!("{:?}", x),
+                    )),
+                };
                 return Ok(Some(res));
             }
         }
@@ -145,27 +160,19 @@ macro_rules! async_duplex_streamimg_handler {
 #[macro_export]
 macro_rules! async_client_request {
     ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr, $cres: ident) => {
-        let mut creq = ttrpc::Request {
-            service: $server.to_string(),
-            method: $method.to_string(),
-            timeout_nano: $ctx.timeout_nano,
-            metadata: ttrpc::context::to_pb($ctx.metadata),
-            payload: Vec::with_capacity($req.compute_size() as usize),
-            ..Default::default()
-        };
-
-        {
-            let mut s = CodedOutputStream::vec(&mut creq.payload);
-            $req.write_to(&mut s)
-                .map_err(::ttrpc::err_to_others!(e, ""))?;
-            s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
-        }
+        let payload = $crate::proto::Codec::encode($req)
+            .map_err($crate::err_to_others!(e, "Encoding request "))?;
+        let mut creq = $crate::proto::RequestInit::init_request(
+            $server.to_string(),
+            $method.to_string(),
+            $ctx.timeout_nano,
+            $crate::context::to_pb($ctx.metadata),
+        );
+        $crate::proto::RequestInit::set_payload(&mut creq, payload);
 
         let res = $self.client.request(creq).await?;
-        let mut s = CodedInputStream::from_bytes(&res.payload);
-        $cres
-            .merge_from(&mut s)
-            .map_err(::ttrpc::err_to_others!(e, "Unpack get error "))?;
+        $crate::proto::Codec::merge(&mut $cres, &res.payload)
+            .map_err($crate::err_to_others!(e, "Unpack get error "))?;
 
         return Ok($cres);
     };
@@ -175,12 +182,12 @@ macro_rules! async_client_request {
 #[macro_export]
 macro_rules! async_client_stream {
     ($self: ident, $ctx: ident, $server: expr, $method: expr) => {
-        let mut creq = ::ttrpc::Request::new();
-        creq.set_service($server.to_string());
-        creq.set_method($method.to_string());
-        creq.set_timeout_nano($ctx.timeout_nano);
-        let md = ::ttrpc::context::to_pb($ctx.metadata);
-        creq.set_metadata(md);
+        let creq = $crate::proto::RequestInit::init_request(
+            $server.to_string(),
+            $method.to_string(),
+            $ctx.timeout_nano,
+            $crate::context::to_pb($ctx.metadata),
+        );
 
         let inner = $self.client.new_stream(creq, true, true).await?;
         let stream = ::ttrpc::r#async::ClientStream::new(inner);
@@ -193,12 +200,12 @@ macro_rules! async_client_stream {
 #[macro_export]
 macro_rules! async_client_stream_send {
     ($self: ident, $ctx: ident, $server: expr, $method: expr) => {
-        let mut creq = ::ttrpc::Request::new();
-        creq.set_service($server.to_string());
-        creq.set_method($method.to_string());
-        creq.set_timeout_nano($ctx.timeout_nano);
-        let md = ::ttrpc::context::to_pb($ctx.metadata);
-        creq.set_metadata(md);
+        let creq = $crate::proto::RequestInit::init_request(
+            $server.to_string(),
+            $method.to_string(),
+            $ctx.timeout_nano,
+            $crate::context::to_pb($ctx.metadata),
+        );
 
         let inner = $self.client.new_stream(creq, true, false).await?;
         let stream = ::ttrpc::r#async::ClientStreamSender::new(inner);
@@ -211,19 +218,15 @@ macro_rules! async_client_stream_send {
 #[macro_export]
 macro_rules! async_client_stream_receive {
     ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr) => {
-        let mut creq = ::ttrpc::Request::new();
-        creq.set_service($server.to_string());
-        creq.set_method($method.to_string());
-        creq.set_timeout_nano($ctx.timeout_nano);
-        let md = ::ttrpc::context::to_pb($ctx.metadata);
-        creq.set_metadata(md);
-        creq.payload.reserve($req.compute_size() as usize);
-        {
-            let mut s = CodedOutputStream::vec(&mut creq.payload);
-            $req.write_to(&mut s)
-                .map_err(::ttrpc::err_to_others!(e, ""))?;
-            s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
-        }
+        let payload = $crate::proto::Codec::encode($req)
+            .map_err($crate::err_to_others!(e, "Encoding request "))?;
+        let mut creq = $crate::proto::RequestInit::init_request(
+            $server.to_string(),
+            $method.to_string(),
+            $ctx.timeout_nano,
+            $crate::context::to_pb($ctx.metadata),
+        );
+        $crate::proto::RequestInit::set_payload(&mut creq, payload);
 
         let inner = $self.client.new_stream(creq, false, true).await?;
         let stream = ::ttrpc::r#async::ClientStreamReceiver::new(inner, $self.client.clone());

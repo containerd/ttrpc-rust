@@ -5,6 +5,13 @@ members = [
     "./example",
     "./"
 ]
+# The prost-based codegen crate and its example live outside this workspace:
+# they are standalone crates and intentionally kept decoupled from the
+# rustprotobuf-oriented workspace members above.
+exclude = [
+    "./codegen",
+    "./example-prost",
+]
 resolver = "2"
 
 [workspace.package]
@@ -41,7 +48,8 @@ description = "A Rust version of ttrpc."
 rust-version = "1.70"
 
 [dependencies]
-protobuf = { workspace = true }
+prost = { version = "0.13", optional = true }
+protobuf = { workspace = true, optional = true }
 libc = { version = "0.2.59", features = [ "extra_traits" ] }
 nix = "0.26.2"
 log = "0.4"
@@ -60,17 +68,24 @@ windows-sys = {version = "0.48", features = [ "Win32_Foundation", "Win32_Storage
 tokio-vsock = { version = "0.7.0", optional = true }
 
 [build-dependencies]
-protobuf-codegen = { workspace = true }
+# lock home to avoid conflict with latest version
+home = "=0.5.9"
+protobuf-codegen = { workspace = true, optional = true }
+prost-build = { version = "0.13", optional = true }
 
 [dev-dependencies]
 ttrpc-codegen = { workspace = true }
 
 [features]
-default = ["sync"]
+default = ["sync","rustprotobuf"]
 async = ["async-trait", "async-stream", "tokio", "futures", "tokio-vsock"]
 sync = []
+rustprotobuf = ["dep:protobuf", "dep:protobuf-codegen"]
+prost = ["dep:prost", "dep:prost-build"]
 security_extension = []
 
 [package.metadata.docs.rs]
-all-features = true
+# "prost" and "rustprotobuf" are mutually exclusive, so don't build with
+# all-features; pick one backend together with the runtime features.
+features = ["sync", "async", "rustprotobuf"]
 rustdoc-args = ["--cfg", "docsrs"]

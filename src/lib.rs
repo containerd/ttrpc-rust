@@ -222,3 +222,21 @@ cfg_async! {
     #[doc(hidden)]
     pub use asynchronous as r#async;
 }
+
+macro_rules! assert_unique_feature {
+    () => {};
+    ($first:tt $(,$rest:tt)*) => {
+        $(
+            #[cfg(all(feature = $first, feature = $rest))]
+            compile_error!(concat!("features \"", $first, "\" and \"", $rest, "\" cannot be used together"));
+        )*
+        assert_unique_feature!($($rest),*);
+    }
+}
+
+// Enabling feature the rustprotobuf and the prost together is prohibited.
+assert_unique_feature!("rustprotobuf", "prost");
+
+// At least one protobuf backend must be selected.
+#[cfg(not(any(feature = "rustprotobuf", feature = "prost")))]
+compile_error!("no protobuf backend selected: enable the \"rustprotobuf\" feature (default) or the \"prost\" feature");

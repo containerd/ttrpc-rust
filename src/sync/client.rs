@@ -14,16 +14,15 @@
 
 //! Synchronous ttrpc client.
 
-use protobuf::Message;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-
 use crate::error::{Error, Result};
 use crate::proto::{
-    check_oversize, Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
+    check_oversize, Codec, MessageHeader, Request, Response, ResponseInit,
+    MESSAGE_TYPE_RESPONSE,
 };
 use crate::security_extension::serialize_aad;
 use crate::sync::channel::{read_message, write_message};
@@ -270,9 +269,12 @@ impl Client {
     /// Returns an error when the request is oversized, serialization or transport fails, the
     /// timeout expires, the response is malformed, or the server returns a non-OK status.
     pub fn request(&self, req: Request) -> Result<Response> {
-        check_oversize(req.compute_size() as usize, false)?;
-
-        let buf = req.encode().map_err(err_to_others_err!(e, ""))?;
+        let buf = req
+            .encode()
+            .map_err(err_to_others_err!(e, "Encode request error "))?;
+        // Validate the complete encoded request (envelope + protobuf length
+        // prefixes) instead of only the payload length.
+        check_oversize(buf.len(), false)?;
         // Notice: pure client problem can't be rpc error
 
         let (tx, rx) = mpsc::sync_channel(0);
@@ -296,10 +298,8 @@ impl Client {
 
         let buf = result?;
         let res = Response::decode(buf).map_err(err_to_others_err!(e, "Unpack response error "))?;
-
-        let status = res.status();
-        if status.code() != Code::OK {
-            return Err(Error::RpcStatus((*status).clone()));
+        if let Some(status) = <Response as ResponseInit>::non_ok(&res) {
+            return Err(Error::RpcStatus(status));
         }
 
         Ok(res)

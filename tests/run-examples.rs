@@ -11,13 +11,14 @@ use std::{
 fn run_example(
     server: &str,
     client: &str,
+    example_dir: &str,
     args: &[&str],
 ) -> Result<(), Box<dyn std::error::Error>> {
     // start the server and give it a moment to start.
-    let mut server = do_run_example(server, args).spawn().unwrap();
+    let mut server = do_run_example(server, example_dir, args).spawn().unwrap();
     std::thread::sleep(Duration::from_secs(2));
 
-    let mut client = do_run_example(client, args).spawn().unwrap();
+    let mut client = do_run_example(client, example_dir, args).spawn().unwrap();
     let mut client_succeeded = false;
     let start = std::time::Instant::now();
     let timeout = Duration::from_secs(600);
@@ -63,7 +64,7 @@ fn run_example(
     Ok(())
 }
 
-fn do_run_example(example: &str, args: &[&str]) -> Command {
+fn do_run_example(example: &str, example_dir: &str, args: &[&str]) -> Command {
     let mut cmd = Command::new("cargo");
     cmd.arg("run").arg("--example").arg(example);
 
@@ -73,7 +74,7 @@ fn do_run_example(example: &str, args: &[&str]) -> Command {
 
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .current_dir("example");
+        .current_dir(example_dir);
     cmd
 }
 
@@ -94,17 +95,45 @@ fn wait_with_output(name: &str, cmd: Child) {
 
 #[test]
 fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
-    // Local
-    run_example("server", "client", &[])?;
-    run_example("async-server", "async-client", &[])?;
-    run_example("async-stream-server", "async-stream-client", &[])?;
-
-    // TCP
-    #[cfg(not(windows))]
+    #[cfg(feature = "rustprotobuf")]
     {
-        run_example("server", "client", &["--tcp"])?;
-        run_example("async-server", "async-client", &["--tcp"])?;
-        run_example("async-stream-server", "async-stream-client", &["--tcp"])?;
+        println!("Running examples with rustprotobuf feature");
+        // Local
+        run_example("server", "client", "example", &[])?;
+        #[cfg(unix)]
+        run_example("async-server", "async-client", "example", &[])?;
+        #[cfg(unix)]
+        run_example("async-stream-server", "async-stream-client", "example", &[])?;
+
+        // TCP
+        #[cfg(not(windows))]
+        {
+            run_example("server", "client", "example", &["--tcp"])?;
+            run_example("async-server", "async-client", "example", &["--tcp"])?;
+            run_example(
+                "async-stream-server",
+                "async-stream-client",
+                "example",
+                &["--tcp"],
+            )?;
+        }
+    }
+
+    #[cfg(feature = "prost")]
+    {
+        println!("Running examples with prost feature");
+        // The sync and async implementations take separate response and
+        // macro paths, so exercise both runtimes plus streaming.
+        run_example("server", "client", "example-prost", &[])?;
+        #[cfg(unix)]
+        run_example("async-server", "async-client", "example-prost", &[])?;
+        #[cfg(unix)]
+        run_example(
+            "async-stream-server",
+            "async-stream-client",
+            "example-prost",
+            &[],
+        )?;
     }
 
     Ok(())

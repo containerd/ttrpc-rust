@@ -7,8 +7,8 @@ use crate::error::{get_status, Error, Result};
 use crate::proto::{
     Codec, Code, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE,
 };
-use crate::ConnectionContext;
 use crate::security_extension::serialize_aad;
+use crate::ConnectionContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -79,6 +79,7 @@ pub fn send_response(
     since = "0.9.0",
     note = "Bypasses payload transform. Use TtrpcContext::respond() or send_response() instead."
 )]
+#[doc(hidden)]
 pub fn response_to_channel(
     stream_id: u32,
     res: Response,
@@ -103,37 +104,46 @@ pub fn response_error_to_channel(
 }
 
 /// Handle request in sync mode.
+///
+/// Both the historical six-argument rust-protobuf form
+/// (`super::$server::$req_type`) and the five-argument Prost form
+/// (path-aware `$req_type`) are supported and share one backend-neutral
+/// implementation built on [`Codec`].
 #[macro_export]
 macro_rules! request_handler {
-    ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
-        let mut s = CodedInputStream::from_bytes(&$req.payload);
-        let mut req = super::$server::$req_type::new();
-        req.merge_from(&mut s)
-            .map_err(::ttrpc::err_to_others!(e, ""))?;
+    // Prost-style path-aware form, e.g.
+    // `request_handler!(self, ctx, req, super::types::Foo, check)`.
+    ($class: ident, $ctx: ident, $req: ident, $req_type: path, $req_fn: ident) => {
+        let req = <$req_type as $crate::proto::Codec>::decode(&$req.payload)
+            .map_err($crate::err_to_others!(e, "Unpack request error "))?;
 
-        let mut res = ::ttrpc::Response::new();
-        match $class.service.$req_fn(&$ctx, req) {
+        let res = match $class.service.$req_fn(&$ctx, req) {
             Ok(rep) => {
-                res.set_status(::ttrpc::get_status(::ttrpc::Code::OK, "".to_string()));
-                res.payload.reserve(rep.compute_size() as usize);
-                let mut s = protobuf::CodedOutputStream::vec(&mut res.payload);
-                rep.write_to(&mut s)
-                    .map_err(::ttrpc::err_to_others!(e, ""))?;
-                s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
+                let payload = $crate::proto::Codec::encode(&rep)
+                    .map_err($crate::err_to_others!(e, "Encoding response "))?;
+                let mut res =
+                    $crate::proto::ResponseInit::init_status($crate::get_status(
+                        $crate::Code::OK,
+                        "".to_string(),
+                    ));
+                $crate::proto::ResponseInit::set_payload(&mut res, payload);
+                res
             }
             Err(x) => match x {
-                ::ttrpc::Error::RpcStatus(s) => {
-                    res.set_status(s);
+                $crate::Error::RpcStatus(s) => {
+                    $crate::proto::ResponseInit::init_status(s)
                 }
-                _ => {
-                    res.set_status(::ttrpc::get_status(
-                        ::ttrpc::Code::UNKNOWN,
-                        format!("{:?}", x),
-                    ));
-                }
+                _ => $crate::proto::ResponseInit::init_status($crate::get_status(
+                    $crate::Code::UNKNOWN,
+                    format!("{:?}", x),
+                )),
             },
-        }
+        };
         $ctx.respond($ctx.mh.stream_id, res)?
+    };
+    // rust-protobuf six-argument form: `super::$server::$req_type`.
+    ($class: ident, $ctx: ident, $req: ident, $server: ident, $req_type: ident, $req_fn: ident) => {
+        $crate::request_handler!($class, $ctx, $req, super::$server::$req_type, $req_fn);
     };
 }
 
@@ -141,25 +151,19 @@ macro_rules! request_handler {
 #[macro_export]
 macro_rules! client_request {
     ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr, $cres: ident) => {
-        let mut creq = ::ttrpc::Request::new();
-        creq.set_service($server.to_string());
-        creq.set_method($method.to_string());
-        creq.set_timeout_nano($ctx.timeout_nano);
-        let md = ::ttrpc::context::to_pb($ctx.metadata);
-        creq.set_metadata(md);
-        creq.payload.reserve($req.compute_size() as usize);
-        let mut s = CodedOutputStream::vec(&mut creq.payload);
-        $req.write_to(&mut s)
-            .map_err(::ttrpc::err_to_others!(e, ""))?;
-        s.flush().map_err(::ttrpc::err_to_others!(e, ""))?;
-
-        drop(s);
+        let payload = $crate::proto::Codec::encode($req)
+            .map_err($crate::err_to_others!(e, "Encoding request "))?;
+        let mut creq = $crate::proto::RequestInit::init_request(
+            $server.to_string(),
+            $method.to_string(),
+            $ctx.timeout_nano,
+            $crate::context::to_pb($ctx.metadata),
+        );
+        $crate::proto::RequestInit::set_payload(&mut creq, payload);
 
         let res = $self.client.request(creq)?;
-        let mut s = CodedInputStream::from_bytes(&res.payload);
-        $cres
-            .merge_from(&mut s)
-            .map_err(::ttrpc::err_to_others!(e, "Unpack get error "))?;
+        $crate::proto::Codec::merge(&mut $cres, &res.payload)
+            .map_err($crate::err_to_others!(e, "Unpack get error "))?;
     };
 }
 

@@ -19,7 +19,7 @@
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::time::Duration;
 
-use protobuf::{CodedInputStream, Message};
+use crate::proto::{Codec, ResponseInit};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
@@ -30,7 +30,7 @@ use std::thread::JoinHandle;
 use super::utils::{response_error_to_channel, send_response};
 use crate::context;
 use crate::error::{get_status, Error, Result};
-use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
+use crate::proto::{Code, MessageHeader, Request, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
 use crate::sync::sys::{PipeConnection, PipeListener};
 use crate::{MethodHandler, TtrpcContext};
@@ -211,24 +211,24 @@ fn start_method_handler_thread(
             if mh.type_ != MESSAGE_TYPE_REQUEST {
                 continue;
             }
-            let mut s = CodedInputStream::from_bytes(&buf);
-            let mut req = Request::new();
-            if let Err(x) = req.merge_from(&mut s) {
-                let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
-                let mut res = Response::new();
-                res.set_status(status);
-                if let Err(x) = send_response(
-                    mh.stream_id,
-                    res,
-                    res_tx.clone(),
-                    conn_ctx.as_ref(),
-                ) {
-                    debug!("response_to_channel get error {:?}", x);
-                    quit_connection(quit, control_tx);
-                    break;
+            let req = match <Request as Codec>::decode(&buf) {
+                Ok(req) => req,
+                Err(x) => {
+                    let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
+                    let res = ResponseInit::init_status(status);
+                    if let Err(x) = send_response(
+                        mh.stream_id,
+                        res,
+                        res_tx.clone(),
+                        conn_ctx.as_ref(),
+                    ) {
+                        debug!("response_to_channel get error {:?}", x);
+                        quit_connection(quit, control_tx);
+                        break;
+                    }
+                    continue;
                 }
-                continue;
-            }
+            };
             trace!("Got Message request {:?}", req);
 
             let path = format!("/{}/{}", req.service, req.method);
@@ -236,8 +236,7 @@ fn start_method_handler_thread(
                 x
             } else {
                 let status = get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
-                let mut res = Response::new();
-                res.set_status(status);
+                let res = ResponseInit::init_status(status);
                 if let Err(x) = send_response(
                     mh.stream_id,
                     res,

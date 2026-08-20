@@ -13,9 +13,16 @@
 mod compiled {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 }
+// The schema keeps `package grpc`; the generated module differs by backend
+// (protobuf-codegen names output after the input file, prost-build after
+// the package), so re-export the backend-specific module uniformly.
+#[cfg(feature = "prost")]
+pub use compiled::grpc::*;
+#[cfg(feature = "rustprotobuf")]
 pub use compiled::ttrpc::*;
 
 use byteorder::{BigEndian, ByteOrder};
+#[cfg(feature = "rustprotobuf")]
 use protobuf::{CodedInputStream, CodedOutputStream};
 
 use crate::error::{get_rpc_status, Error, Result as TtResult};
@@ -347,8 +354,138 @@ pub trait Codec {
     fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E>
     where
         Self: Sized;
+    /// Merges encoded bytes into an existing value.
+    fn merge(&mut self, buf: impl AsRef<[u8]>) -> Result<(), Self::E>;
 }
 
+/// Backend-neutral [`Request`] builders used by the codegen macros.
+///
+/// This is an implementation detail of the generated-code pipeline and is
+/// not part of the stable public API.
+#[doc(hidden)]
+pub trait RequestInit: Default {
+    /// Creates a request with the routing and metadata fields set.
+    fn init_request(
+        service: String,
+        method: String,
+        timeout_nano: i64,
+        metadata: Vec<KeyValue>,
+    ) -> Self;
+    /// Replaces the request payload.
+    fn set_payload(&mut self, payload: Vec<u8>);
+}
+
+/// Backend-neutral [`Response`] builders used by the codegen macros.
+///
+/// This is an implementation detail of the generated-code pipeline and is
+/// not part of the stable public API.
+#[doc(hidden)]
+pub trait ResponseInit: Default {
+    /// Creates a response carrying the given status.
+    fn init_status(status: Status) -> Self;
+    /// Replaces the response payload.
+    fn set_payload(&mut self, payload: Vec<u8>);
+    /// Replaces the response status.
+    fn set_status(&mut self, status: Status);
+    /// Returns the response status when it is present and not `OK`.
+    fn non_ok(&self) -> Option<Status>;
+}
+
+#[cfg(feature = "rustprotobuf")]
+impl RequestInit for Request {
+    fn init_request(
+        service: String,
+        method: String,
+        timeout_nano: i64,
+        metadata: Vec<KeyValue>,
+    ) -> Self {
+        let mut req = Request::new();
+        req.set_service(service);
+        req.set_method(method);
+        req.set_timeout_nano(timeout_nano);
+        req.set_metadata(metadata);
+        req
+    }
+
+    fn set_payload(&mut self, payload: Vec<u8>) {
+        self.payload = payload;
+    }
+}
+
+#[cfg(feature = "rustprotobuf")]
+impl ResponseInit for Response {
+    fn init_status(status: Status) -> Self {
+        let mut res = Response::new();
+        res.set_status(status);
+        res
+    }
+
+    fn set_payload(&mut self, payload: Vec<u8>) {
+        self.payload = payload;
+    }
+
+    fn set_status(&mut self, status: Status) {
+        self.status = ::protobuf::MessageField::some(status);
+    }
+
+    fn non_ok(&self) -> Option<Status> {
+        let status = self.status();
+        if status.code() != Code::OK {
+            Some((*status).clone())
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(feature = "prost")]
+impl RequestInit for Request {
+    fn init_request(
+        service: String,
+        method: String,
+        timeout_nano: i64,
+        metadata: Vec<KeyValue>,
+    ) -> Self {
+        Request {
+            service,
+            method,
+            timeout_nano,
+            metadata,
+            ..Default::default()
+        }
+    }
+
+    fn set_payload(&mut self, payload: Vec<u8>) {
+        self.payload = payload;
+    }
+}
+
+#[cfg(feature = "prost")]
+impl ResponseInit for Response {
+    fn init_status(status: Status) -> Self {
+        Response {
+            status: Some(status),
+            ..Default::default()
+        }
+    }
+
+    fn set_payload(&mut self, payload: Vec<u8>) {
+        self.payload = payload;
+    }
+
+    fn set_status(&mut self, status: Status) {
+        self.status = Some(status);
+    }
+
+    fn non_ok(&self) -> Option<Status> {
+        self.status
+            .as_ref()
+            .filter(|s| s.code != Code::OK as i32)
+            .cloned()
+    }
+}
+
+#[cfg(feature = "rustprotobuf")]
 impl<M: protobuf::Message> Codec for M {
     type E = protobuf::Error;
 
@@ -368,6 +505,34 @@ impl<M: protobuf::Message> Codec for M {
     fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E> {
         let mut s = CodedInputStream::from_bytes(buf.as_ref());
         M::parse_from(&mut s)
+    }
+
+    fn merge(&mut self, buf: impl AsRef<[u8]>) -> Result<(), Self::E> {
+        protobuf::Message::merge_from_bytes(self, buf.as_ref())
+    }
+}
+
+#[cfg(feature = "prost")]
+impl<M: prost::Message + Default> Codec for M {
+    type E = std::io::Error;
+
+    fn size(&self) -> u32 {
+        self.encoded_len() as u32
+    }
+
+    fn encode(&self) -> Result<Vec<u8>, Self::E> {
+        Ok(self.encode_to_vec())
+    }
+
+    fn decode(buf: impl AsRef<[u8]>) -> Result<Self, Self::E>
+    where
+        Self: Sized,
+    {
+        prost::Message::decode(buf.as_ref()).map_err(std::io::Error::from)
+    }
+
+    fn merge(&mut self, buf: impl AsRef<[u8]>) -> Result<(), Self::E> {
+        prost::Message::merge(self, buf.as_ref()).map_err(std::io::Error::from)
     }
 }
 
@@ -526,6 +691,7 @@ mod tests {
         117, 101, 49,
     ];
 
+    #[cfg(feature = "rustprotobuf")]
     fn new_protobuf_request() -> Request {
         let mut creq = Request::new();
         creq.set_service("grpc.TestServices".to_string());
@@ -539,6 +705,21 @@ mod tests {
         creq.set_metadata(meta);
         creq.payload = vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9];
         creq
+    }
+
+    #[cfg(feature = "prost")]
+    fn new_protobuf_request() -> Request {
+        let meta = vec![KeyValue {
+            key: "test_key1".to_string(),
+            value: "test_value1".to_string(),
+        }];
+        Request {
+            service: "grpc.TestServices".to_owned(),
+            method: "Test".to_owned(),
+            timeout_nano: 20 * 1000 * 1000,
+            metadata: meta,
+            payload: vec![0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9],
+        }
     }
 
     #[test]
@@ -577,6 +758,7 @@ mod tests {
     }
 
     #[cfg(feature = "async")]
+    #[cfg(feature = "rustprotobuf")]
     #[tokio::test]
     async fn async_gen_message() {
         // Test packet which exceeds maximum message size
@@ -617,6 +799,7 @@ mod tests {
     }
 
     #[cfg(feature = "async")]
+    #[cfg(feature = "rustprotobuf")]
     #[tokio::test]
     async fn async_message() {
         // Test packet which exceeds maximum message size

@@ -14,7 +14,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt as _;
-use protobuf::Message as PbMessage;
 use tokio::{
     self, select, spawn,
     sync::mpsc::{channel, Sender},
@@ -30,8 +29,8 @@ use crate::ConnectionContext;
 #[cfg(feature = "security_extension")]
 use crate::security_extension::{AcceptHook, ServerExtensionConfig};
 use crate::proto::{
-    check_oversize, Code, Codec, GenMessage, Message, MessageHeader, Request, Response, Status,
-    FLAG_NO_DATA, MESSAGE_TYPE_DATA, MESSAGE_TYPE_REQUEST,
+    check_oversize, Code, Codec, GenMessage, Message, MessageHeader, Request, Response,
+    ResponseInit, Status, FLAG_NO_DATA, MESSAGE_TYPE_DATA, MESSAGE_TYPE_REQUEST,
 };
 use crate::r#async::connection::*;
 use crate::r#async::shutdown;
@@ -542,7 +541,7 @@ impl HandlerContext {
             MESSAGE_TYPE_REQUEST => match self.handle_request(msg, wait_tx).await {
                 Ok(opt_msg) => match opt_msg {
                     Some(mut resp) => {
-                        if let Err(e) = check_oversize(resp.compute_size() as usize, true) {
+                        if let Err(e) = check_oversize(resp.size() as usize, true) {
                             resp = e.into();
                         }
                         if let Err(e) = self.respond(stream_id, resp).await {
@@ -775,8 +774,7 @@ impl HandlerContext {
     }
 
     async fn respond_with_status(&self, stream_id: u32, status: Status) {
-        let mut resp = Response::new();
-        resp.set_status(status);
+        let resp = ResponseInit::init_status(status);
         self.respond(stream_id, resp)
             .await
             .map_err(|e| {
