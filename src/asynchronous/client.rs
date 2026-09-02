@@ -320,7 +320,6 @@ impl Builder for ClientBuilder {
             ClientWriter {
                 rx: self.rx.take().unwrap(),
                 shutdown_notifier: notifier,
-                streams: self.streams.clone(),
             },
         )
     }
@@ -329,32 +328,12 @@ impl Builder for ClientBuilder {
 struct ClientWriter {
     rx: MessageReceiver,
     shutdown_notifier: shutdown::Notifier,
-
-    streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
 }
 
 #[async_trait]
 impl WriterDelegate for ClientWriter {
     async fn recv(&mut self) -> Option<SendingMessage> {
         self.rx.recv().await
-    }
-
-    async fn disconnect(&self, msg: &GenMessage, e: Error) {
-        // TODO:
-        // At this point, a new request may have been received.
-        let resp_tx = {
-            let mut map = self.streams.lock().unwrap();
-            map.remove(&msg.header.stream_id)
-        };
-
-        // TODO: if None
-        if let Some(resp_tx) = resp_tx {
-            let e = Error::Socket(format!("{e:?}"));
-            resp_tx
-                .send(Err(e))
-                .await
-                .unwrap_or_else(|_e| error!("The request has returned"));
-        }
     }
 
     async fn exit(&self) {
@@ -434,10 +413,14 @@ impl ReaderDelegate for ClientReader {
 
         // Take all items out of `req_map`.
         let mut map = std::mem::take(&mut *self.streams.lock().unwrap());
-        // Terminate undone RPC requests with the error.
+        // Terminate every pending RPC with the error. Use try_send so that one
+        // stream whose channel is full (a slow or stalled receiver) cannot block
+        // teardown of the others. If the channel is full the receiver already has
+        // messages queued and will observe RemoteClosed once we drop this sender
+        // here, so dropping the error is acceptable.
         for (_stream_id, resp_tx) in map.drain() {
-            if let Err(_e) = resp_tx.send(Err(e.clone())).await {
-                warn!("Failed to terminate pending RPC: the request has returned");
+            if resp_tx.try_send(Err(e.clone())).is_err() {
+                warn!("Failed to terminate pending RPC: stream channel full or closed");
             }
         }
     }
@@ -514,6 +497,120 @@ mod tests {
             err_str.contains("socket has no raw fd"),
             "error should tell caller to use Socket::connect / Socket::from: {}",
             err_str
+        );
+    }
+}
+
+#[cfg(test)]
+mod teardown_tests {
+    use super::*;
+    use std::io;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use std::time::Duration;
+    use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+    // A transport whose writes always fail, whose shutdown never completes, and
+    // whose reads never return. This is the worst case for teardown: the read
+    // side can never drive cleanup and writer.shutdown() would block forever, so
+    // a pending request can only complete if the writer reports the failure to
+    // Connection::run and run() tears the whole connection down.
+    struct FailWriteHangShutdown;
+
+    impl AsyncRead for FailWriteHangShutdown {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            Poll::Pending
+        }
+    }
+
+    impl AsyncWrite for FailWriteHangShutdown {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::Other,
+                "simulated write failure",
+            )))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            // Never completes: teardown must not wait on this.
+            Poll::Pending
+        }
+    }
+
+    // A write failure must tear the connection down and fail a pending
+    // `timeout_nano == 0` request promptly, even though shutdown() never
+    // completes and the read half never observes EOF.
+    #[tokio::test]
+    async fn write_failure_tears_down_despite_hanging_shutdown() {
+        let client = Client::new(Socket::new(FailWriteHangShutdown));
+
+        // `timeout_nano == 0` exercises the indefinite-wait path.
+        let req = Request {
+            timeout_nano: 0,
+            ..Default::default()
+        };
+
+        let res = tokio::time::timeout(Duration::from_secs(5), client.request(req)).await;
+        let rpc_result = res.expect("request must not hang: teardown should fail it promptly");
+        assert!(
+            rpc_result.is_err(),
+            "request should fail because the connection write failed"
+        );
+    }
+
+    // ClientReader::disconnect must fail every registered stream without blocking
+    // on a stream whose channel is full (a slow or stalled receiver).
+    #[tokio::test]
+    async fn disconnect_does_not_block_on_full_stream_channel() {
+        let streams: Arc<Mutex<HashMap<u32, ResultSender>>> = Arc::new(Mutex::new(HashMap::new()));
+
+        // Stream 1: channel filled to capacity, its receiver kept but never read.
+        let (full_tx, _full_rx): (ResultSender, ResultReceiver) = mpsc::channel(1);
+        full_tx
+            .try_send(Err(Error::Others("prefill".to_string())))
+            .expect("prefill should occupy the single slot");
+        streams.lock().unwrap().insert(1, full_tx);
+
+        // Stream 2: normal channel with spare capacity.
+        let (tx2, mut rx2): (ResultSender, ResultReceiver) = mpsc::channel(1);
+        streams.lock().unwrap().insert(2, tx2);
+
+        let (_notifier, waiter) = shutdown::new();
+        let reader = ClientReader {
+            streams: streams.clone(),
+            shutdown_waiter: waiter,
+            conn_ctx: Arc::new(ConnectionContext::default()),
+        };
+
+        let mut dummy_task = tokio::spawn(async {});
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            reader.disconnect(Error::Socket("boom".to_string()), &mut dummy_task),
+        )
+        .await
+        .expect("disconnect must not block on a full stream channel");
+
+        // The non-full stream received the terminal error.
+        let got = rx2.recv().await.expect("stream 2 should receive a message");
+        assert!(got.is_err(), "stream 2 should be terminated with an error");
+
+        // Every stream was drained from the map.
+        assert!(
+            streams.lock().unwrap().is_empty(),
+            "all streams should be drained from the map"
         );
     }
 }

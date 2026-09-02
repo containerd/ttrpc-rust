@@ -7,6 +7,7 @@
 use async_trait::async_trait;
 use log::{error, trace};
 use tokio::io::split;
+use tokio::sync::oneshot;
 use tokio::{io::ReadHalf, select, task};
 
 use crate::error::Error;
@@ -24,7 +25,6 @@ pub trait Builder {
 #[async_trait]
 pub trait WriterDelegate {
     async fn recv(&mut self) -> Option<SendingMessage>;
-    async fn disconnect(&self, msg: &GenMessage, e: Error);
     async fn exit(&self);
 }
 
@@ -41,6 +41,11 @@ pub struct Connection<B: Builder> {
     reader: ReadHalf<Socket>,
     writer_task: task::JoinHandle<()>,
     reader_delegate: B::Reader,
+    // Delivers a fatal write error from the writer task. Receiving a value
+    // means the writer hit an unrecoverable transport error and the whole
+    // connection must be torn down; the channel closing without a value means
+    // the writer stopped normally.
+    writer_error: oneshot::Receiver<Error>,
 }
 
 impl<B> Connection<B>
@@ -53,6 +58,7 @@ where
         let (reader, mut writer) = split(conn);
 
         let (reader_delegate, mut writer_delegate) = builder.build();
+        let (err_tx, err_rx) = oneshot::channel();
 
         // Long-running sender task
         let writer_task = tokio::spawn(async move {
@@ -60,11 +66,25 @@ where
                 trace!("write message: {:?}", sending_msg.msg);
                 if let Err(e) = sending_msg.msg.write_to(&mut writer).await {
                     error!("write_message got error: {:?}", e);
+                    // Report the failure to the caller awaiting this send.
                     sending_msg.send_result(Err(e.clone()));
-                    writer_delegate.disconnect(&sending_msg.msg, e).await;
+                    // write_to uses write_all internally, so a failed write may
+                    // have left a partial frame on the wire, desynchronizing the
+                    // frame boundaries of every stream multiplexed on this
+                    // connection; it is no longer usable. (This can happen on an
+                    // otherwise healthy socket, e.g. ENOMEM when the kernel
+                    // cannot satisfy a high-order allocation under memory
+                    // fragmentation.) Report the error to Connection::run at once
+                    // and exit. Deliberately do NOT wait on writer.shutdown(): it
+                    // can block (some transports never complete poll_shutdown)
+                    // and would delay or prevent cleanup. run() closes the whole
+                    // connection; dropping this task drops the write half.
+                    let _ = err_tx.send(e);
+                    return;
                 }
                 sending_msg.send_result(Ok(()));
             }
+            // The outbound channel closed: this is a normal shutdown.
             writer_delegate.exit().await;
             trace!("Writer task exit.");
         });
@@ -73,6 +93,7 @@ where
             reader,
             writer_task,
             reader_delegate,
+            writer_error: err_rx,
         }
     }
 
@@ -81,9 +102,31 @@ where
             mut reader,
             mut writer_task,
             reader_delegate,
+            mut writer_error,
         } = self;
         loop {
             select! {
+                // Fixed poll order: a write error wins over the shutdown
+                // notification the writer raises as it unwinds, and a pending
+                // shutdown wins over further reads. Both are idle during normal
+                // operation, so read_from is still reached every iteration.
+                biased;
+
+                werr = &mut writer_error => {
+                    // Ok(e): the writer hit a fatal transport error. Drive a
+                    // connection-wide teardown — fail every registered client
+                    // stream / stop the server handlers, and drop the read half
+                    // on exit. Err(_): the writer stopped without an error.
+                    if let Ok(e) = werr {
+                        trace!("Writer failed, tearing down connection: {:?}", e);
+                        reader_delegate.disconnect(e, &mut writer_task).await;
+                    }
+                    break;
+                }
+                _v = reader_delegate.wait_shutdown() => {
+                    trace!("Receive shutdown.");
+                    break;
+                }
                 res = GenMessage::read_from(&mut reader) => {
                     match res {
                         Ok(msg) => {
@@ -101,10 +144,6 @@ where
                             break;
                         }
                     }
-                }
-                _v = reader_delegate.wait_shutdown() => {
-                    trace!("Receive shutdown.");
-                    break;
                 }
             }
         }
