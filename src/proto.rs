@@ -288,14 +288,7 @@ impl GenMessage {
         &self,
         mut writer: impl tokio::io::AsyncWriteExt + Unpin,
     ) -> TtResult<()> {
-        self.header
-            .write_to(&mut writer)
-            .await
-            .map_err(|e| Error::Socket(e.to_string()))?;
-        writer
-            .write_all(&self.payload)
-            .await
-            .map_err(|e| Error::Socket(e.to_string()))?;
+        write_message(&mut writer, self.header, &self.payload).await?;
         Ok(())
     }
 
@@ -602,18 +595,11 @@ where
         &self,
         mut writer: impl tokio::io::AsyncWriteExt + Unpin,
     ) -> TtResult<()> {
-        self.header
-            .write_to(&mut writer)
-            .await
-            .map_err(|e| Error::Socket(e.to_string()))?;
         let content = self
             .payload
             .encode()
             .map_err(err_to_others_err!(e, "Encode payload failed."))?;
-        writer
-            .write_all(&content)
-            .await
-            .map_err(|e| Error::Socket(e.to_string()))?;
+        write_message(&mut writer, self.header, &content).await?;
         Ok(())
     }
 
@@ -646,11 +632,89 @@ where
     }
 }
 
+#[cfg(feature = "async")]
+async fn write_message(
+    mut writer: impl tokio::io::AsyncWriteExt + Unpin,
+    header: MessageHeader,
+    payload: &[u8],
+) -> TtResult<()> {
+    // Keep the frame header and the start of its payload in the first write.
+    // This avoids transport delays between small writes without copying a
+    // complete large payload.
+    let prefix_len = payload.len().min(DEFAULT_PAGE_SIZE - MESSAGE_HEADER_LENGTH);
+    let mut prefix = vec![0; MESSAGE_HEADER_LENGTH + prefix_len];
+    header.into_buf(&mut prefix);
+    prefix[MESSAGE_HEADER_LENGTH..].copy_from_slice(&payload[..prefix_len]);
+
+    writer
+        .write_all(&prefix)
+        .await
+        .map_err(|e| Error::Socket(e.to_string()))?;
+    writer
+        .write_all(&payload[prefix_len..])
+        .await
+        .map_err(|e| Error::Socket(e.to_string()))?;
+    writer
+        .flush()
+        .await
+        .map_err(|e| Error::Socket(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use std::convert::{TryFrom, TryInto};
 
     use super::*;
+
+    #[cfg(feature = "async")]
+    #[derive(Default)]
+    struct RecordingWriter {
+        writes: Vec<Vec<u8>>,
+        max_write: Option<usize>,
+        fail_write_at: Option<usize>,
+        fail_flush: bool,
+        flushes: usize,
+    }
+
+    #[cfg(feature = "async")]
+    impl tokio::io::AsyncWrite for RecordingWriter {
+        fn poll_write(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            if self.fail_write_at == Some(self.writes.len()) {
+                return std::task::Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "injected write failure",
+                )));
+            }
+            let len = self.max_write.unwrap_or(buf.len()).min(buf.len());
+            self.writes.push(buf[..len].to_vec());
+            std::task::Poll::Ready(Ok(len))
+        }
+
+        fn poll_flush(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            self.flushes += 1;
+            if self.fail_flush {
+                return std::task::Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "injected flush failure",
+                )));
+            }
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
 
     static MESSAGE_HEADER: [u8; MESSAGE_HEADER_LENGTH] = [
         0x10, 0x0, 0x0, 0x0, // length
@@ -755,6 +819,98 @@ mod tests {
 
         let dmh = MessageHeader::read_from(&buf[..]).await.unwrap();
         assert_eq!(mh, dmh);
+    }
+
+    #[cfg(feature = "async")]
+    #[tokio::test]
+    async fn async_message_write_coalesces_a_bounded_prefix() {
+        let boundary = DEFAULT_PAGE_SIZE - MESSAGE_HEADER_LENGTH;
+        for size in [
+            0,
+            2,
+            boundary - 1,
+            boundary,
+            boundary + 1,
+            DEFAULT_PAGE_SIZE * 2,
+        ] {
+            let msg = GenMessage {
+                header: MessageHeader::new_response(7, size as u32),
+                payload: (0..size).map(|i| i as u8).collect(),
+            };
+            for max_write in [None, Some(3)] {
+                let mut writer = RecordingWriter {
+                    max_write,
+                    ..Default::default()
+                };
+                msg.write_to(&mut writer).await.unwrap();
+                assert_eq!(writer.flushes, 1);
+                if max_write.is_none() {
+                    assert_eq!(writer.writes.len(), if size > boundary { 2 } else { 1 });
+                    assert_eq!(
+                        writer.writes[0].len(),
+                        DEFAULT_PAGE_SIZE.min(size + MESSAGE_HEADER_LENGTH)
+                    );
+                }
+                let bytes = writer.writes.concat();
+                let decoded = GenMessage::read_from(&bytes[..]).await.unwrap();
+                assert_eq!(decoded, msg);
+                assert_eq!(bytes.len(), MESSAGE_HEADER_LENGTH + size);
+            }
+        }
+    }
+
+    #[cfg(feature = "async")]
+    #[tokio::test]
+    async fn async_message_write_errors() {
+        let msg = GenMessage {
+            header: MessageHeader::new_response(7, DEFAULT_PAGE_SIZE as u32),
+            payload: vec![1; DEFAULT_PAGE_SIZE],
+        };
+        for mut writer in [
+            RecordingWriter {
+                max_write: Some(0),
+                ..Default::default()
+            },
+            RecordingWriter {
+                fail_write_at: Some(0),
+                ..Default::default()
+            },
+            RecordingWriter {
+                fail_write_at: Some(1),
+                ..Default::default()
+            },
+            RecordingWriter {
+                fail_flush: true,
+                ..Default::default()
+            },
+        ] {
+            assert!(matches!(
+                msg.write_to(&mut writer).await,
+                Err(Error::Socket(_))
+            ));
+            assert_eq!(writer.flushes, usize::from(writer.fail_flush));
+        }
+    }
+
+    #[cfg(feature = "async")]
+    #[tokio::test]
+    async fn async_message_write_with_backpressure() {
+        let msg = GenMessage {
+            header: MessageHeader::new_response(7, DEFAULT_PAGE_SIZE as u32),
+            payload: vec![1; DEFAULT_PAGE_SIZE],
+        };
+        let (mut writer, mut reader) = tokio::io::duplex(16);
+        let transfer = async {
+            let (sent, received) = tokio::join!(
+                msg.write_to(&mut writer),
+                GenMessage::read_from(&mut reader)
+            );
+            sent.unwrap();
+            assert_eq!(received.unwrap(), msg);
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(5), transfer)
+            .await
+            .unwrap();
     }
 
     #[cfg(feature = "async")]
