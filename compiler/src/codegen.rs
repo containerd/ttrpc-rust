@@ -763,23 +763,33 @@ pub fn gen_and_write(
     if customize.gen_mod {
         let file_path = out_dir.join("mod.rs");
         let mut set = HashSet::new();
-        //if mod file exists
+        let mut lines = Vec::new();
+        // Preserve existing order so comments and attributes stay with their modules.
         if let Ok(file) = File::open(&file_path) {
             let reader = io::BufReader::new(file);
-            reader.lines().for_each(|line| {
-                let _ = line.map(|r| set.insert(r));
-            });
+            for line in reader.lines() {
+                let line = line?;
+                set.insert(line.clone());
+                lines.push(line);
+            }
+        }
+        let mut modules: Vec<_> = results
+            .file
+            .iter()
+            .map(|r| format!("pub mod {};", r.name().split('.').next().unwrap()))
+            .collect();
+        modules.sort();
+        for module in modules {
+            if set.insert(module.clone()) {
+                lines.push(module);
+            }
         }
         let mut file_write = fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
             .open(&file_path)?;
-        for r in &results.file {
-            let prefix_name: Vec<&str> = r.name().split('.').collect();
-            set.insert(format!("pub mod {};", prefix_name[0]));
-        }
-        for item in &set {
+        for item in &lines {
             writeln!(file_write, "{}", item)?;
         }
         file_write.flush()?;
@@ -825,4 +835,52 @@ where
     let req = CodeGeneratorRequest::parse_from_reader(&mut stdin()).unwrap();
     let result = gen(&req);
     result.write_to_writer(&mut stdout()).unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_mod_rs_is_stable_and_preserves_existing_lines() {
+        let descriptors: Vec<_> = ["zeta.proto", "alpha.proto"]
+            .iter()
+            .map(|&name| FileDescriptorProto {
+                name: Some(name.to_owned()),
+                service: vec![ServiceDescriptorProto {
+                    name: Some("Example".to_owned()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .collect();
+        let customize = Customize {
+            gen_mod: true,
+            ..Default::default()
+        };
+        let existing = "// @generated\n\n// Keep this module gated.\n#[cfg(unix)]\npub mod custom;\n\n#[cfg(unix)]\npub mod another;\npub mod alpha_ttrpc;\n";
+
+        for initial in [None, Some(existing)] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("mod.rs");
+            if let Some(contents) = initial {
+                fs::write(&path, contents).unwrap();
+            }
+            let mut inputs = vec![
+                "zeta.proto".to_owned(),
+                "zeta.proto".to_owned(),
+                "alpha.proto".to_owned(),
+            ];
+            gen_and_write(&descriptors, &inputs, dir.path(), &customize).unwrap();
+            let expected = match initial {
+                Some(contents) => format!("{contents}pub mod zeta_ttrpc;\n"),
+                None => "pub mod alpha_ttrpc;\npub mod zeta_ttrpc;\n".to_owned(),
+            };
+            assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+
+            inputs.reverse();
+            gen_and_write(&descriptors, &inputs, dir.path(), &customize).unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+        }
+    }
 }
