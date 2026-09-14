@@ -2,6 +2,7 @@
 name = "ttrpc-codegen"
 version = "0.6.0"
 edition = { workspace = true }
+rust-version = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 keywords = ["codegen", "ttrpc", "protobuf"]

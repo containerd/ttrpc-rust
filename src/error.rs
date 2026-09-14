@@ -121,7 +121,7 @@ pub fn sock_error_msg(size: usize, msg: String) -> Error {
 }
 
 macro_rules! err_to_others_err {
-    ($e: ident, $s: expr) => {
+    ($e: ident, $s: expr_2021) => {
         |$e| Error::Others($s.to_string() + &$e.to_string())
     };
 }
@@ -129,7 +129,7 @@ macro_rules! err_to_others_err {
 /// Convert to ttrpc::Error::Others.
 #[macro_export]
 macro_rules! err_to_others {
-    ($e: ident, $s: expr) => {
+    ($e: ident, $s: expr_2021) => {
         |$e| ::ttrpc::Error::Others($s.to_string() + &$e.to_string())
     };
 }

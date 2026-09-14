@@ -199,9 +199,9 @@ impl Client {
         let receiver_ctx = conn_ctx.clone();
         thread::spawn(move || {
             loop {
-                //The count of ClientConnection's Arc will be add one , and back to original value when this code ends. 
-                if let Some(receiver_client) = receiver_client.upgrade(){
-                    match receiver_client.ready() {
+                // Keep the upgraded Arc alive until the readiness check ends.
+                match receiver_client.upgrade() {
+                    Some(receiver_client) => match receiver_client.ready() {
                         Ok(None) => {
                             continue;
                         }
@@ -210,9 +210,8 @@ impl Client {
                             error!("pipeConnection ready error {:?}", e);
                             break;
                         }
-                    }
-                } else {
-                    break;
+                    },
+                    None => break,
                 }
 
                 match read_message(&receiver_connection) {

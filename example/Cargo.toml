@@ -2,7 +2,8 @@
 name = "ttrpc-example"
 version = "0.2.0"
 authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
-edition = "2018"
+edition = { workspace = true }
+rust-version = { workspace = true }
 license = "Apache-2.0"
 keywords = ["ttrpc", "protobuf", "rpc"]
 readme = "README.md"

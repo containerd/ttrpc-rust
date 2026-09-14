@@ -159,7 +159,7 @@ macro_rules! async_duplex_streamimg_handler {
 /// Send request through async client.
 #[macro_export]
 macro_rules! async_client_request {
-    ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr, $cres: ident) => {
+    ($self: ident, $ctx: ident, $req: ident, $server: expr_2021, $method: expr_2021, $cres: ident) => {
         let payload = $crate::proto::Codec::encode($req)
             .map_err($crate::err_to_others!(e, "Encoding request "))?;
         let mut creq = $crate::proto::RequestInit::init_request(
@@ -181,7 +181,7 @@ macro_rules! async_client_request {
 /// Duplex streaming through async client.
 #[macro_export]
 macro_rules! async_client_stream {
-    ($self: ident, $ctx: ident, $server: expr, $method: expr) => {
+    ($self: ident, $ctx: ident, $server: expr_2021, $method: expr_2021) => {
         let creq = $crate::proto::RequestInit::init_request(
             $server.to_string(),
             $method.to_string(),
@@ -199,7 +199,7 @@ macro_rules! async_client_stream {
 /// Only send streaming through async client.
 #[macro_export]
 macro_rules! async_client_stream_send {
-    ($self: ident, $ctx: ident, $server: expr, $method: expr) => {
+    ($self: ident, $ctx: ident, $server: expr_2021, $method: expr_2021) => {
         let creq = $crate::proto::RequestInit::init_request(
             $server.to_string(),
             $method.to_string(),
@@ -217,7 +217,7 @@ macro_rules! async_client_stream_send {
 /// Only receive streaming through async client.
 #[macro_export]
 macro_rules! async_client_stream_receive {
-    ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr) => {
+    ($self: ident, $ctx: ident, $req: ident, $server: expr_2021, $method: expr_2021) => {
         let payload = $crate::proto::Codec::encode($req)
             .map_err($crate::err_to_others!(e, "Encoding request "))?;
         let mut creq = $crate::proto::RequestInit::init_request(

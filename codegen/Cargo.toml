@@ -1,7 +1,8 @@
 [package]
 name = "ttrpc-codegen"
 version = "1.0.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.90"
 authors = ["The Ant Group Kata Team <kata@list.alibaba-inc.com>"]
 license = "Apache-2.0"
 keywords = ["codegen", "ttrpc", "protobuf"]
@@ -16,6 +17,7 @@ readme = "README.md"
 # This crate is intentionally a standalone workspace root (decoupled from the
 # rustprotobuf-oriented root workspace).
 [workspace]
+resolver = "3"
 
 [dependencies]
 prost = "0.13"

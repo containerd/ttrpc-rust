@@ -550,10 +550,10 @@ where
     C: Codec,
 {
     type Error = C::E;
-    fn try_from(gen: GenMessage) -> Result<Self, Self::Error> {
+    fn try_from(r#gen: GenMessage) -> Result<Self, Self::Error> {
         Ok(Self {
-            header: gen.header,
-            payload: C::decode(&gen.payload)?,
+            header: r#gen.header,
+            payload: C::decode(&r#gen.payload)?,
         })
     }
 }
@@ -738,8 +738,8 @@ mod tests {
         let req = new_protobuf_request();
         let msg = Message::new_request(3, req).unwrap();
         let msg_clone = msg.clone();
-        let gen: GenMessage = msg.try_into().unwrap();
-        let dmsg = Message::<Request>::try_from(gen).unwrap();
+        let r#gen: GenMessage = msg.try_into().unwrap();
+        let dmsg = Message::<Request>::try_from(r#gen).unwrap();
         assert_eq!(msg_clone, dmsg);
     }
 
@@ -780,13 +780,13 @@ mod tests {
         let mut buf = Vec::from(PROTOBUF_MESSAGE_HEADER);
         buf.extend_from_slice(&PROTOBUF_REQUEST);
         buf.extend_from_slice(&[0x0, 0x0]);
-        let gen = GenMessage::read_from(&*buf).await.unwrap();
-        assert_eq!(gen.header.length as usize, TEST_PAYLOAD_LEN);
-        assert_eq!(gen.header.length, gen.payload.len() as u32);
-        assert_eq!(gen.header.stream_id, 0x123456);
-        assert_eq!(gen.header.type_, MESSAGE_TYPE_REQUEST);
-        assert_eq!(gen.header.flags, 0xef);
-        assert_eq!(&gen.payload, &PROTOBUF_REQUEST);
+        let r#gen = GenMessage::read_from(&*buf).await.unwrap();
+        assert_eq!(r#gen.header.length as usize, TEST_PAYLOAD_LEN);
+        assert_eq!(r#gen.header.length, r#gen.payload.len() as u32);
+        assert_eq!(r#gen.header.stream_id, 0x123456);
+        assert_eq!(r#gen.header.type_, MESSAGE_TYPE_REQUEST);
+        assert_eq!(r#gen.header.flags, 0xef);
+        assert_eq!(&r#gen.payload, &PROTOBUF_REQUEST);
         assert_eq!(
             &buf[MESSAGE_HEADER_LENGTH + TEST_PAYLOAD_LEN..],
             &[0x0, 0x0]
@@ -794,7 +794,7 @@ mod tests {
 
         let mut dbuf = vec![];
         let mut io = std::io::Cursor::new(&mut dbuf);
-        gen.write_to(&mut io).await.unwrap();
+        r#gen.write_to(&mut io).await.unwrap();
         assert_eq!(&*dbuf, &buf[..MESSAGE_HEADER_LENGTH + TEST_PAYLOAD_LEN]);
     }
 
@@ -807,12 +807,12 @@ mod tests {
         let header = MessageHeader::read_from(&*buf).await.expect("read header");
         buf.append(&mut vec![0x0; header.length as usize]);
 
-        let gen = Message::<Request>::read_from(&*buf)
+        let r#gen = Message::<Request>::read_from(&*buf)
             .await
             .expect("read message");
 
-        assert_eq!(gen.header, header);
-        assert_eq!(protobuf::Message::compute_size(&gen.payload), 0);
+        assert_eq!(r#gen.header, header);
+        assert_eq!(protobuf::Message::compute_size(&r#gen.payload), 0);
 
         let mut buf = Vec::from(PROTOBUF_MESSAGE_HEADER);
         buf.extend_from_slice(&PROTOBUF_REQUEST);

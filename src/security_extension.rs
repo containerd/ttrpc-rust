@@ -1171,7 +1171,7 @@ mod tests {
             let payload_len = data.len();
             // Pad to even length for u16 XOR
             let mut padded = data;
-            if padded.len() % 2 != 0 {
+            if !padded.len().is_multiple_of(2) {
                 padded.push(0x00);
             }
             // XOR encrypt in u16 big-endian chunks
@@ -1203,7 +1203,7 @@ mod tests {
             }
             let payload_len = u32::from_be_bytes([data[2], data[3], data[4], data[5]]) as usize;
             let encrypted = &data[XOR_HEADER_LEN..];
-            if encrypted.len() % 2 != 0 {
+            if !encrypted.len().is_multiple_of(2) {
                 return Err("xor: encrypted data has odd length".into());
             }
             // Decrypt: XOR with same key (symmetric)

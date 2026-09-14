@@ -239,4 +239,6 @@ assert_unique_feature!("rustprotobuf", "prost");
 
 // At least one protobuf backend must be selected.
 #[cfg(not(any(feature = "rustprotobuf", feature = "prost")))]
-compile_error!("no protobuf backend selected: enable the \"rustprotobuf\" feature (default) or the \"prost\" feature");
+compile_error!(
+    "no protobuf backend selected: enable the \"rustprotobuf\" feature (default) or the \"prost\" feature"
+);

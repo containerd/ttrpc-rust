@@ -575,7 +575,7 @@ mod tests {
     /// be emitted exactly once (otherwise E0252 on multi-service packages).
     #[test]
     fn overlapping_method_names_do_not_collide() {
-        let mut gen = TtrpcServiceGenerator::new(AsyncMode::None);
+        let mut r#gen = TtrpcServiceGenerator::new(AsyncMode::None);
         // Use a qualified input type path to also exercise the path-aware
         // conversion (format_ident! would panic on such a path).
         let foo = make_service("test.pkg", "Foo", "Get", "super::google::protobuf::Empty");
@@ -585,11 +585,11 @@ mod tests {
         // then finalize both packages; every wrapper must stay balanced.
         let other = make_service("other.pkg", "Zoo", "Get", "Request");
         let mut buf = String::new();
-        gen.generate(foo, &mut buf);
-        gen.generate(other, &mut buf);
-        gen.generate(bar, &mut buf);
-        gen.finalize_package("test.pkg", &mut buf);
-        gen.finalize_package("other.pkg", &mut buf);
+        r#gen.generate(foo, &mut buf);
+        r#gen.generate(other, &mut buf);
+        r#gen.generate(bar, &mut buf);
+        r#gen.finalize_package("test.pkg", &mut buf);
+        r#gen.finalize_package("other.pkg", &mut buf);
         buf.parse::<proc_macro2::TokenStream>()
             .expect("generated buffer must lex");
 
@@ -621,12 +621,12 @@ mod tests {
     /// wire names: the separator is only added when a package is present.
     #[test]
     fn packageless_schema_generates() {
-        let mut gen = TtrpcServiceGenerator::new(AsyncMode::None);
+        let mut r#gen = TtrpcServiceGenerator::new(AsyncMode::None);
         let svc = make_service("", "Bare", "Do", "Request");
 
         let mut buf = String::new();
-        gen.generate(svc, &mut buf);
-        gen.finalize_package("", &mut buf);
+        r#gen.generate(svc, &mut buf);
+        r#gen.finalize_package("", &mut buf);
 
         assert!(
             buf.contains("BareDoMethod"),
@@ -651,12 +651,12 @@ mod tests {
     /// Wire names for a packaged service keep the `package.Service` prefix.
     #[test]
     fn packaged_service_wire_names() {
-        let mut gen = TtrpcServiceGenerator::new(AsyncMode::None);
+        let mut r#gen = TtrpcServiceGenerator::new(AsyncMode::None);
         let svc = make_service("grpc", "Health", "Check", "CheckRequest");
 
         let mut buf = String::new();
-        gen.generate(svc, &mut buf);
-        gen.finalize_package("grpc", &mut buf);
+        r#gen.generate(svc, &mut buf);
+        r#gen.finalize_package("grpc", &mut buf);
 
         assert!(
             buf.contains("\"/grpc.Health/Check\""),

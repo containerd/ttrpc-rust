@@ -714,7 +714,7 @@ fn gen_file(
 ///
 /// Panics if a name in `files_to_generate` is absent from `file_descriptors` or if a referenced
 /// message type cannot be resolved.
-pub fn gen(
+pub fn r#gen(
     file_descriptors: &[FileDescriptorProto],
     files_to_generate: &[String],
     customize: &Customize,
@@ -758,7 +758,7 @@ pub fn gen_and_write(
     out_dir: &Path,
     customize: &Customize,
 ) -> io::Result<()> {
-    let results = gen(file_descriptors, files_to_generate, customize);
+    let results = r#gen(file_descriptors, files_to_generate, customize);
 
     if customize.gen_mod {
         let file_path = out_dir.join("mod.rs");
@@ -801,7 +801,7 @@ pub fn gen_and_write(
 /// This is the entry point used by the `ttrpc_rust_plugin` binary.
 pub fn protoc_gen_grpc_rust_main() {
     plugin_main(|file_descriptors, files_to_generate| {
-        gen(
+        r#gen(
             file_descriptors,
             files_to_generate,
             &Customize {
@@ -811,18 +811,18 @@ pub fn protoc_gen_grpc_rust_main() {
     });
 }
 
-fn plugin_main<F>(gen: F)
+fn plugin_main<F>(r#gen: F)
 where
     F: Fn(&[FileDescriptorProto], &[String]) -> CodeGeneratorResponse,
 {
-    plugin_main_2(|r| gen(&r.proto_file, &r.file_to_generate))
+    plugin_main_2(|r| r#gen(&r.proto_file, &r.file_to_generate))
 }
 
-fn plugin_main_2<F>(gen: F)
+fn plugin_main_2<F>(r#gen: F)
 where
     F: Fn(&CodeGeneratorRequest) -> CodeGeneratorResponse,
 {
     let req = CodeGeneratorRequest::parse_from_reader(&mut stdin()).unwrap();
-    let result = gen(&req);
+    let result = r#gen(&req);
     result.write_to_writer(&mut stdout()).unwrap();
 }

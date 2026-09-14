@@ -148,7 +148,8 @@ impl Server {
     ///
     /// Returns an error if the descriptor cannot be configured for asynchronous I/O.
     pub unsafe fn add_unix_listener(self, fd: RawFd) -> Result<Server> {
-        let listener = Listener::from_raw_unix_listener_fd(fd)
+        // SAFETY: the caller transfers ownership of a valid listener descriptor.
+        let listener = unsafe { Listener::from_raw_unix_listener_fd(fd) }
             .map_err(err_to_others_err!(e, "from_raw_unix_listener_fd error"))?;
         Ok(self.add_listener(listener))
     }
@@ -165,7 +166,8 @@ impl Server {
     ///
     /// Returns an error if the descriptor cannot be configured for asynchronous I/O.
     pub unsafe fn add_tcp_listener(self, fd: RawFd) -> Result<Server> {
-        let listener = Listener::from_raw_tcp_listener_fd(fd)
+        // SAFETY: the caller transfers ownership of a valid listener descriptor.
+        let listener = unsafe { Listener::from_raw_tcp_listener_fd(fd) }
             .map_err(err_to_others_err!(e, "from_raw_tcp_listener_fd error"))?;
         Ok(self.add_listener(listener))
     }
@@ -182,7 +184,8 @@ impl Server {
     ///
     /// Returns an error if the descriptor cannot be configured for asynchronous I/O.
     pub unsafe fn add_vsock_listener(self, fd: RawFd) -> Result<Self> {
-        let listener = Listener::from_raw_vsock_listener_fd(fd)
+        // SAFETY: the caller transfers ownership of a valid listener descriptor.
+        let listener = unsafe { Listener::from_raw_vsock_listener_fd(fd) }
             .map_err(err_to_others_err!(e, "from_raw_unix_listener_fd error"))?;
         Ok(self.add_listener(listener))
     }

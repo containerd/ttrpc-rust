@@ -12,10 +12,11 @@ exclude = [
     "./codegen",
     "./example-prost",
 ]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
-edition = "2018"
+edition = "2024"
+rust-version = "1.90"
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/containerd/ttrpc-rust"
@@ -45,7 +46,7 @@ homepage = { workspace = true }
 keywords = ["ttrpc", "protobuf", "rpc"]
 readme = "README.md"
 description = "A Rust version of ttrpc."
-rust-version = "1.70"
+rust-version = { workspace = true }
 
 [dependencies]
 prost = { version = "0.13", optional = true }

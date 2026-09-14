@@ -150,7 +150,7 @@ macro_rules! request_handler {
 /// Send request through sync client.
 #[macro_export]
 macro_rules! client_request {
-    ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr, $cres: ident) => {
+    ($self: ident, $ctx: ident, $req: ident, $server: expr_2021, $method: expr_2021, $cres: ident) => {
         let payload = $crate::proto::Codec::encode($req)
             .map_err($crate::err_to_others!(e, "Encoding request "))?;
         let mut creq = $crate::proto::RequestInit::init_request(

@@ -80,10 +80,9 @@ impl PipeListener {
         let np = match PipeConnection::new(instance) {
             Ok(np) => np,
             Err(e) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("failed to create new pipe instance: {:?}", e),
-                ));
+                return Err(io::Error::other(format!(
+                    "failed to create new pipe instance: {:?}", e
+                )));
             }
         };
         
@@ -121,10 +120,7 @@ impl PipeListener {
                 Ok(Some(np))
             }
             e => {
-                Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("failed to connect pipe: {:?}", e),
-                ))
+                Err(io::Error::other(format!("failed to connect pipe: {:?}", e)))
             }
         }
     }
@@ -132,10 +128,7 @@ impl PipeListener {
     fn handle_shutdown(&self, np: &PipeConnection) -> Option<io::Error> {
         if self.shutting_down.load(Ordering::SeqCst) {
             np.close().unwrap_or_else(|err| trace!("Failed to close the pipe {:?}", err));
-            return Some(io::Error::new(
-                io::ErrorKind::Other,
-                "closing pipe",
-            ));
+            return Some(io::Error::other("closing pipe"));
         }
         None
     }

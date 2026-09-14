@@ -51,7 +51,7 @@ impl PayloadTransform for XorPayloadTransform {
         let key = effective_key(aad);
         let payload_len = data.len();
         let mut padded = data;
-        if padded.len() % 2 != 0 {
+        if !padded.len().is_multiple_of(2) {
             padded.push(0x00);
         }
         let mut encrypted = Vec::with_capacity(XOR_HEADER_LEN + padded.len());
@@ -89,7 +89,7 @@ impl PayloadTransform for XorPayloadTransform {
         }
         let payload_len = u32::from_be_bytes([data[4], data[5], data[6], data[7]]) as usize;
         let encrypted = &data[XOR_HEADER_LEN..];
-        if encrypted.len() % 2 != 0 {
+        if !encrypted.len().is_multiple_of(2) {
             return Err("xor: encrypted data has odd length".into());
         }
         let key = effective_key(aad);
