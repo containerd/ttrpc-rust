@@ -43,26 +43,26 @@ use std::{
 };
 
 use crate::{
+    Customize,
     util::proto_path_to_rust_mod,
     util::scope::{RootScope, RustType},
     util::writer::CodeWriter,
-    Customize,
 };
 use protobuf::{
+    Message,
     descriptor::*,
     plugin::{
+        CodeGeneratorRequest, CodeGeneratorResponse,
         code_generator_response::Feature as CodeGeneratorResponse_Feature,
-        code_generator_response::File as CodeGeneratorResponse_File, CodeGeneratorRequest,
-        CodeGeneratorResponse,
+        code_generator_response::File as CodeGeneratorResponse_File,
     },
-    Message,
 };
 use std::fs::File;
-use std::io::{self, stdin, stdout, Write};
+use std::io::{self, Write, stdin, stdout};
 use std::path::Path;
 
 use super::util::{
-    self, async_on, def_async_fn, fq_grpc, pub_async_fn, to_camel_case, to_snake_case, MethodType,
+    self, MethodType, async_on, def_async_fn, fq_grpc, pub_async_fn, to_camel_case, to_snake_case,
 };
 
 struct MethodGen<'a> {

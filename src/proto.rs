@@ -25,7 +25,7 @@ use byteorder::{BigEndian, ByteOrder};
 #[cfg(feature = "rustprotobuf")]
 use protobuf::{CodedInputStream, CodedOutputStream};
 
-use crate::error::{get_rpc_status, Error, Result as TtResult};
+use crate::error::{Error, Result as TtResult, get_rpc_status};
 
 /// Encoded length of a ttrpc message header, in bytes.
 pub const MESSAGE_HEADER_LENGTH: usize = 10;

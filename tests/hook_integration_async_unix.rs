@@ -10,8 +10,8 @@ mod common;
 
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -24,7 +24,7 @@ use ttrpc::security_extension::{
     PayloadTransform,
 };
 
-use common::{cleanup_socket_file, temp_unix_socket_path, XorPayloadTransform};
+use common::{XorPayloadTransform, cleanup_socket_file, temp_unix_socket_path};
 
 // ── Test constants ──────────────────────────────────────────────────────────
 
@@ -493,8 +493,8 @@ async fn test_no_hook_plaintext_passthrough() {
 
 // ── Streaming tests ─────────────────────────────────────────────────────────
 
-use ttrpc::asynchronous::StreamHandler;
 use ttrpc::r#async::StreamInner;
+use ttrpc::asynchronous::StreamHandler;
 
 const TEST_STREAM_METHOD: &str = "DuplexEcho";
 

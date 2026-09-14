@@ -6,8 +6,8 @@
 mod protocols;
 mod utils;
 use protocols::asynchronous::{empty, streaming, streaming_ttrpc};
-use ttrpc::context::{self, Context};
 use ttrpc::r#async::Client;
+use ttrpc::context::{self, Context};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {

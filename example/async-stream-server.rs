@@ -8,10 +8,10 @@ mod utils;
 
 use std::sync::Arc;
 
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 
 use protocols::asynchronous::{empty, streaming, streaming_ttrpc};
-use ttrpc::{asynchronous::Server, Error};
+use ttrpc::{Error, asynchronous::Server};
 
 use async_trait::async_trait;
 use tokio::time::sleep;

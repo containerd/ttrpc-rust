@@ -189,7 +189,7 @@ pub mod proto;
 pub use self::proto::{Code, MessageHeader, Request, Response, Status};
 
 #[doc(inline)]
-pub use crate::error::{get_status, Error, Result};
+pub use crate::error::{Error, Result, get_status};
 
 // Core extension types are always available.
 #[doc(inline)]

@@ -18,10 +18,10 @@
 //!
 //! [`ttrpc-codegen`]: https://docs.rs/ttrpc-codegen
 
-use super::util::{fq_grpc, to_snake_case, MethodType};
+use super::util::{MethodType, fq_grpc, to_snake_case};
 use derive_new::new;
 use prost::Message;
-use prost_build::{protoc, protoc_include, Config, Method, Service, ServiceGenerator};
+use prost_build::{Config, Method, Service, ServiceGenerator, protoc, protoc_include};
 use prost_types::FileDescriptorSet;
 use std::io::{Error, Read};
 use std::path::Path;

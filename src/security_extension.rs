@@ -104,7 +104,7 @@
 
 // ── Always-compiled imports ──
 use crate::error::Error;
-use crate::proto::{check_oversize, MessageHeader};
+use crate::proto::{MessageHeader, check_oversize};
 use std::sync::Arc;
 
 // ── Always-compiled core types ──────────────────────────────────────────────
@@ -143,7 +143,7 @@ pub trait PayloadTransform: Send + Sync + std::fmt::Debug {
     /// Encrypt / encode a payload. `aad` has the same semantics as
     /// [`transform_inbound`](Self::transform_inbound).
     fn transform_outbound(&self, data: Vec<u8>, aad: &[u8])
-        -> std::result::Result<Vec<u8>, String>;
+    -> std::result::Result<Vec<u8>, String>;
 
     /// Maximum number of bytes that `transform_outbound` may add to a payload.
     ///

@@ -9,8 +9,8 @@ mod common;
 
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -19,9 +19,9 @@ use ttrpc::security_extension::{
     AcceptHook, ConnectHook, ConnectionData, ConnectionDataExt, HookError, HookOutput,
 };
 use ttrpc::sync::{Client, MethodHandler, Server, TtrpcContext};
-use ttrpc::{get_status, Code};
+use ttrpc::{Code, get_status};
 
-use common::{cleanup_socket_file, temp_unix_socket_path, XorPayloadTransform};
+use common::{XorPayloadTransform, cleanup_socket_file, temp_unix_socket_path};
 
 // ── Test constants ──────────────────────────────────────────────────────────
 

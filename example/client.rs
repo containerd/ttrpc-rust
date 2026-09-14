@@ -19,8 +19,8 @@ use log::LevelFilter;
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
 use std::time::Duration;
-use ttrpc::context::{self, Context};
 use ttrpc::Client;
+use ttrpc::context::{self, Context};
 
 #[cfg(not(target_os = "linux"))]
 fn get_fd_count() -> usize {

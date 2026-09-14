@@ -8,13 +8,13 @@ mod utils;
 
 use std::sync::Arc;
 
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 
 use protocols::r#async::{google::protobuf::Empty, streaming};
 use ttrpc::asynchronous::Server;
 
 use async_trait::async_trait;
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::time::sleep;
 
 struct StreamingService;

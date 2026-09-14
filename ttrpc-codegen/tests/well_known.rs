@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
-use ttrpc_codegen::{parse_and_typecheck, Codegen, Customize};
+use ttrpc_codegen::{Codegen, Customize, parse_and_typecheck};
 
 fn proto_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/protos")

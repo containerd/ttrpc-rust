@@ -29,9 +29,7 @@ pub mod resp {
     }
 
     pub fn online_cpu_mem_not_impl() -> ttrpc::Error {
-        ttrpc::Error::RpcStatus(not_implemented_status(
-            "/grpc.AgentService/OnlineCPUMem",
-        ))
+        ttrpc::Error::RpcStatus(not_implemented_status("/grpc.AgentService/OnlineCPUMem"))
     }
 
     pub fn sync_agent_list_interfaces() -> ttrpc::Result<p::sync::agent::Interfaces> {

@@ -23,8 +23,8 @@ use std::sync::Arc;
 use std::thread;
 
 use protocols::sync::{agent, health, types};
-use ttrpc::error::{Error, Result};
 use ttrpc::Server;
+use ttrpc::error::{Error, Result};
 
 struct HealthService;
 

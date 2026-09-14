@@ -6,7 +6,7 @@
 
 //! Common functions.
 
-use nix::fcntl::{fcntl, FcntlArg, OFlag};
+use nix::fcntl::{FcntlArg, OFlag, fcntl};
 use nix::sys::socket::*;
 use std::str::FromStr;
 use std::{env, os::unix::io::RawFd};

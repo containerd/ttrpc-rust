@@ -9,8 +9,8 @@ mod utils;
 use log::LevelFilter;
 use protocols::sync::{agent, health};
 use std::thread;
-use ttrpc::context::{self, Context};
 use ttrpc::Client;
+use ttrpc::context::{self, Context};
 
 fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);

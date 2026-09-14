@@ -18,7 +18,7 @@ use ttrpc::asynchronous::Server;
 use ttrpc::error::Result;
 
 use async_trait::async_trait;
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::time::sleep;
 
 struct HealthService;
