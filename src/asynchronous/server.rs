@@ -417,7 +417,6 @@ impl WriterDelegate for ServerWriter {
     async fn recv(&mut self) -> Option<SendingMessage> {
         self.rx.recv().await
     }
-    async fn disconnect(&self, _msg: &GenMessage, _: Error) {}
     async fn exit(&self) {}
 }
 
