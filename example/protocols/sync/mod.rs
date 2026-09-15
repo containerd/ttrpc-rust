@@ -1,12 +1,12 @@
-pub mod agent_ttrpc;
-pub mod gogo;
-pub mod types;
-pub mod health_ttrpc;
-pub mod empty;
-
-pub mod oci;
 // @generated
+
 pub mod agent;
+pub mod empty;
+pub mod gogo;
 pub mod health;
+pub mod oci;
+pub mod types;
 pub mod well_known;
+pub mod agent_ttrpc;
+pub mod health_ttrpc;
 pub mod well_known_ttrpc;
