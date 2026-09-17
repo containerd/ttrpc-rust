@@ -25,9 +25,6 @@ use crate::asynchronous::stream::SendingMessage;
 use crate::asynchronous::transport::{Listener, Socket};
 use crate::context;
 use crate::error::{get_status, Error, Result};
-use crate::ConnectionContext;
-#[cfg(feature = "security_extension")]
-use crate::security_extension::{AcceptHook, ServerExtensionConfig};
 use crate::proto::{
     check_oversize, Code, Codec, GenMessage, Message, MessageHeader, Request, Response,
     ResponseInit, Status, FLAG_NO_DATA, MESSAGE_TYPE_DATA, MESSAGE_TYPE_REQUEST,
@@ -35,10 +32,13 @@ use crate::proto::{
 use crate::r#async::connection::*;
 use crate::r#async::shutdown;
 use crate::r#async::stream::{
-    Kind, MessageReceiver, MessageSender, ResultReceiver, ResultSender, StreamInner,
+    MessageReceiver, MessageSender, ServerStreams, StreamInner,
 };
 use crate::r#async::utils;
 use crate::r#async::{MethodHandler, StreamHandler, TtrpcContext};
+#[cfg(feature = "security_extension")]
+use crate::security_extension::{AcceptHook, ServerExtensionConfig};
+use crate::ConnectionContext;
 
 const DEFAULT_CONN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -376,7 +376,7 @@ async fn spawn_connection_handler(
 
 struct ServerBuilder {
     services: Arc<HashMap<String, Service>>,
-    streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
+    streams: ServerStreams,
     shutdown_waiter: shutdown::Waiter,
     conn_ctx: Arc<ConnectionContext>,
 }
@@ -423,7 +423,7 @@ impl WriterDelegate for ServerWriter {
 struct ServerReader {
     tx: MessageSender,
     services: Arc<HashMap<String, Service>>,
-    streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
+    streams: ServerStreams,
     server_shutdown: shutdown::Waiter,
     handler_shutdown: shutdown::Notifier,
     conn_ctx: Arc<ConnectionContext>,
@@ -509,7 +509,7 @@ impl ServerReader {
 struct HandlerContext {
     tx: MessageSender,
     services: Arc<HashMap<String, Service>>,
-    streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
+    streams: ServerStreams,
     // Used for waiting handler exit.
     _handler_shutdown_waiter: shutdown::Waiter,
     conn_ctx: Arc<ConnectionContext>,
@@ -554,7 +554,11 @@ impl HandlerContext {
                     }
                     None => {
                         let mut msg = GenMessage::new_close(stream_id);
-                        if let Err(e) = self.conn_ctx.transform_send(&mut msg, &self.tx, false, false).await {
+                        if let Err(e) = self
+                            .conn_ctx
+                            .transform_send(&mut msg, &self.tx, false, false)
+                            .await
+                        {
                             error!("transform close message failed: {}", e);
                         }
                     }
@@ -689,7 +693,7 @@ impl HandlerContext {
         let req = req_msg.payload;
         let path = utils::get_path(&req.service, &req.method);
 
-        let (tx, rx): (ResultSender, ResultReceiver) = channel(100);
+        let (tx, rx) = channel(100);
         let stream_tx = tx.clone();
         self.streams.lock().unwrap().insert(stream_id, tx);
 
@@ -697,13 +701,12 @@ impl HandlerContext {
 
         drop(wait_tx);
 
-        let si = StreamInner::new(
+        let si = StreamInner::new_server(
             stream_id,
             self.tx.clone(),
             rx,
             true, // TODO
             true,
-            Kind::Server,
             self.streams.clone(),
             self.conn_ctx.clone(),
         );
@@ -769,7 +772,9 @@ impl HandlerContext {
         };
 
         let mut msg = GenMessage::new_response(stream_id, payload);
-        self.conn_ctx.transform_send(&mut msg, &self.tx, true, false).await
+        self.conn_ctx
+            .transform_send(&mut msg, &self.tx, true, false)
+            .await
     }
 
     async fn respond_with_status(&self, stream_id: u32, status: Status) {

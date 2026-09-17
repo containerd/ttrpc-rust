@@ -16,17 +16,56 @@ use tokio::sync::mpsc;
 use super::Client;
 use crate::error::{Error, Result};
 use crate::proto::{
-    check_oversize, Code, Codec, GenMessage, Response, FLAG_NO_DATA,
-    FLAG_REMOTE_CLOSED, MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
+    check_oversize, Code, Codec, GenMessage, Response, FLAG_NO_DATA, FLAG_REMOTE_CLOSED,
+    MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
 };
 
 pub type MessageSender = mpsc::Sender<SendingMessage>;
 pub type MessageReceiver = mpsc::Receiver<SendingMessage>;
 
-/// Internal message type for stream channels.
-///
-pub type ResultSender = mpsc::Sender<Result<GenMessage>>;
-pub type ResultReceiver = mpsc::Receiver<Result<GenMessage>>;
+// Client results are routed directly from the shared connection reader, so sending must never
+// wait for one stream's consumer. Server stream data is dispatched by per-frame handler tasks and
+// retains its existing bounded channel.
+pub(crate) type ClientResultSender = mpsc::UnboundedSender<Result<GenMessage>>;
+pub(crate) type ClientResultReceiver = mpsc::UnboundedReceiver<Result<GenMessage>>;
+pub(crate) type ServerResultSender = mpsc::Sender<Result<GenMessage>>;
+pub(crate) type ServerResultReceiver = mpsc::Receiver<Result<GenMessage>>;
+pub(crate) type ClientStreams = Arc<Mutex<HashMap<u32, ClientResultSender>>>;
+pub(crate) type ServerStreams = Arc<Mutex<HashMap<u32, ServerResultSender>>>;
+
+#[derive(Debug)]
+enum ResultReceiver {
+    Client(ClientResultReceiver),
+    Server(ServerResultReceiver),
+}
+
+impl ResultReceiver {
+    async fn recv(&mut self) -> Option<Result<GenMessage>> {
+        match self {
+            Self::Client(rx) => rx.recv().await,
+            Self::Server(rx) => rx.recv().await,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum StreamRegistry {
+    Client(ClientStreams),
+    Server(ServerStreams),
+}
+
+impl StreamRegistry {
+    fn remove(&self, stream_id: u32) {
+        match self {
+            Self::Client(streams) => {
+                streams.lock().unwrap().remove(&stream_id);
+            }
+            Self::Server(streams) => {
+                streams.lock().unwrap().remove(&stream_id);
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct SendingMessage {
@@ -484,20 +523,57 @@ pub struct StreamInner {
 }
 
 impl StreamInner {
-    /// Creates low-level state for a registered stream.
-    ///
-    /// `sendable` and `recveivable` describe the permitted directions, while `kind` controls the
-    /// client- or server-side close semantics. This constructor is used by the ttrpc runtime.
+    pub(crate) fn new_client(
+        stream_id: u32,
+        tx: MessageSender,
+        rx: ClientResultReceiver,
+        sendable: bool,
+        recveivable: bool,
+        streams: ClientStreams,
+        conn_ctx: Arc<ConnectionContext>,
+    ) -> Self {
+        Self::new(
+            stream_id,
+            tx,
+            ResultReceiver::Client(rx),
+            sendable,
+            recveivable,
+            Kind::Client,
+            StreamRegistry::Client(streams),
+            conn_ctx,
+        )
+    }
+
+    pub(crate) fn new_server(
+        stream_id: u32,
+        tx: MessageSender,
+        rx: ServerResultReceiver,
+        sendable: bool,
+        recveivable: bool,
+        streams: ServerStreams,
+        conn_ctx: Arc<ConnectionContext>,
+    ) -> Self {
+        Self::new(
+            stream_id,
+            tx,
+            ResultReceiver::Server(rx),
+            sendable,
+            recveivable,
+            Kind::Server,
+            StreamRegistry::Server(streams),
+            conn_ctx,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    fn new(
         stream_id: u32,
         tx: MessageSender,
         rx: ResultReceiver,
-        //waiter: shutdown::Waiter,
         sendable: bool,
         recveivable: bool,
         kind: Kind,
-        streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
+        streams: StreamRegistry,
         conn_ctx: Arc<ConnectionContext>,
     ) -> Self {
         Self {
@@ -572,12 +648,12 @@ pub struct StreamReceiver {
     recveivable: bool,
     remote_closed: bool,
     kind: Kind,
-    streams: Arc<Mutex<HashMap<u32, ResultSender>>>,
+    streams: StreamRegistry,
 }
 
 impl Drop for StreamReceiver {
     fn drop(&mut self) {
-        self.streams.lock().unwrap().remove(&self.stream_id);
+        self.streams.remove(self.stream_id);
     }
 }
 
@@ -600,7 +676,9 @@ impl StreamSender {
 
         let mut msg = GenMessage::new_data(self.stream_id, buf);
         // ── Injection Point 9/10: streaming DATA transform_outbound ──
-        self.conn_ctx.transform_send(&mut msg, &self.tx, false, true).await?;
+        self.conn_ctx
+            .transform_send(&mut msg, &self.tx, false, true)
+            .await?;
 
         Ok(())
     }
@@ -618,7 +696,9 @@ impl StreamSender {
             return Err(Error::LocalClosed);
         }
         let mut msg = GenMessage::new_close(self.stream_id);
-        self.conn_ctx.transform_send(&mut msg, &self.tx, false, true).await?;
+        self.conn_ctx
+            .transform_send(&mut msg, &self.tx, false, true)
+            .await?;
         self.local_closed.store(true, Ordering::Relaxed);
         Ok(())
     }
