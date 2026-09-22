@@ -29,10 +29,11 @@ pub(crate) fn request_timeout_error() -> Error {
 async fn write_message(
     writer: &mut (impl AsyncWrite + Unpin),
     sending_msg: &SendingMessage,
+    prefix: &mut Vec<u8>,
 ) -> WriteOutcome {
     let Some(control) = sending_msg.control.as_ref() else {
         trace!("write message: {:?}", sending_msg.msg);
-        return WriteOutcome::Complete(sending_msg.msg.write_to(writer).await);
+        return WriteOutcome::Complete(sending_msg.msg.write_to_buffered(writer, prefix).await);
     };
     let deadline = control.deadline();
 
@@ -48,14 +49,14 @@ async fn write_message(
     if let Some(deadline) = deadline {
         select! {
             biased;
-            result = sending_msg.msg.write_to(writer) => WriteOutcome::Complete(result),
+            result = sending_msg.msg.write_to_buffered(writer, prefix) => WriteOutcome::Complete(result),
             _ = control.cancelled() => WriteOutcome::Cancelled,
             _ = sleep_until(deadline) => WriteOutcome::DeadlineElapsed,
         }
     } else {
         select! {
             biased;
-            result = sending_msg.msg.write_to(writer) => WriteOutcome::Complete(result),
+            result = sending_msg.msg.write_to_buffered(writer, prefix) => WriteOutcome::Complete(result),
             _ = control.cancelled() => WriteOutcome::Cancelled,
         }
     }
@@ -65,12 +66,14 @@ async fn run_writer(
     mut writer: impl AsyncWrite + Unpin,
     mut writer_delegate: impl WriterDelegate,
 ) -> Result<()> {
+    // One bounded prefix buffer per connection, reused across frames.
+    let mut prefix = Vec::new();
     let result = loop {
         let Some(mut sending_msg) = writer_delegate.recv().await else {
             break Ok(());
         };
 
-        let failure = match write_message(&mut writer, &sending_msg).await {
+        let failure = match write_message(&mut writer, &sending_msg, &mut prefix).await {
             WriteOutcome::Complete(Ok(())) => {
                 sending_msg.send_result(Ok(()));
                 continue;

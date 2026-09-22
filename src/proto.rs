@@ -292,6 +292,14 @@ impl GenMessage {
         Ok(())
     }
 
+    pub(crate) async fn write_to_buffered(
+        &self,
+        writer: impl tokio::io::AsyncWriteExt + Unpin,
+        prefix: &mut Vec<u8>,
+    ) -> TtResult<()> {
+        write_message_buffered(writer, self.header, &self.payload, prefix).await
+    }
+
     /// Reads a frame header and payload from an asynchronous reader.
     ///
     /// # Errors
@@ -635,20 +643,35 @@ where
 
 #[cfg(feature = "async")]
 async fn write_message(
+    writer: impl tokio::io::AsyncWriteExt + Unpin,
+    header: MessageHeader,
+    payload: &[u8],
+) -> TtResult<()> {
+    write_message_buffered(writer, header, payload, &mut Vec::new()).await
+}
+
+#[cfg(feature = "async")]
+async fn write_message_buffered(
     mut writer: impl tokio::io::AsyncWriteExt + Unpin,
     header: MessageHeader,
     payload: &[u8],
+    prefix: &mut Vec<u8>,
 ) -> TtResult<()> {
     // Keep the frame header and the start of its payload in the first write.
     // This avoids transport delays between small writes without copying a
     // complete large payload.
     let prefix_len = payload.len().min(DEFAULT_PAGE_SIZE - MESSAGE_HEADER_LENGTH);
-    let mut prefix = vec![0; MESSAGE_HEADER_LENGTH + prefix_len];
-    header.into_buf(&mut prefix);
+    let len = MESSAGE_HEADER_LENGTH + prefix_len;
+    if prefix.capacity() < len {
+        // Avoid geometric growth past the bounded prefix size.
+        prefix.reserve_exact(len - prefix.len());
+    }
+    prefix.resize(len, 0);
+    header.into_buf(&mut *prefix);
     prefix[MESSAGE_HEADER_LENGTH..].copy_from_slice(&payload[..prefix_len]);
 
     writer
-        .write_all(&prefix)
+        .write_all(prefix)
         .await
         .map_err(|e| Error::Socket(e.to_string()))?;
     writer
@@ -858,6 +881,41 @@ mod tests {
                 assert_eq!(bytes.len(), MESSAGE_HEADER_LENGTH + size);
             }
         }
+    }
+
+    #[cfg(feature = "async")]
+    #[tokio::test]
+    async fn async_buffered_writer_preserves_frame_boundaries_when_reused() {
+        let mut prefix = Vec::with_capacity(DEFAULT_PAGE_SIZE);
+        let original_buffer = prefix.as_ptr();
+        let mut writer = RecordingWriter {
+            max_write: Some(3),
+            ..Default::default()
+        };
+        let mut expected = Vec::new();
+        // Large-to-small transitions must not send stale bytes from an earlier frame.
+        for (id, size) in [DEFAULT_PAGE_SIZE * 2, 0, 64, DEFAULT_PAGE_SIZE, 1]
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            let msg = GenMessage {
+                header: MessageHeader::new_response(id as u32, size as u32),
+                payload: vec![id as u8; size],
+            };
+            msg.write_to_buffered(&mut writer, &mut prefix)
+                .await
+                .unwrap();
+            assert_eq!(prefix.as_ptr(), original_buffer);
+            expected.push(msg);
+        }
+        assert_eq!(writer.flushes, expected.len());
+        let bytes = writer.writes.concat();
+        let mut remaining = bytes.as_slice();
+        for msg in expected {
+            assert_eq!(GenMessage::read_from(&mut remaining).await.unwrap(), msg);
+        }
+        assert!(remaining.is_empty());
     }
 
     #[cfg(feature = "async")]
