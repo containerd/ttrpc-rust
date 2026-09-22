@@ -21,7 +21,7 @@ fn read_count(conn: &PipeConnection, count: usize) -> Result<Vec<u8>> {
     let mut len = 0;
 
     if count == 0 {
-        return Ok(v.to_vec());
+        return Ok(v);
     }
 
     loop {
@@ -39,7 +39,8 @@ fn read_count(conn: &PipeConnection, count: usize) -> Result<Vec<u8>> {
         }
     }
 
-    Ok(v[0..len].to_vec())
+    v.truncate(len);
+    Ok(v)
 }
 
 fn write_count(conn: &PipeConnection, buf: &[u8], count: usize) -> Result<usize> {
