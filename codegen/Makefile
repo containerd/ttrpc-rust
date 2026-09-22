@@ -27,6 +27,7 @@ test:
 check:
 	cargo fmt --all -- --check
 	cargo clippy --all-targets --all-features -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
 .PHONY: deps
 deps:
