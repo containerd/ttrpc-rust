@@ -14,6 +14,9 @@ build-examples: build
 	cargo build --example async-client
 	cargo build --example async-stream-server
 	cargo build --example async-stream-client
+	cargo build --example async-stream-close-order
+	cargo build --example async-data-order
+	cargo build --example async-slow-consumer
 
 .PHONY: deps
 deps:

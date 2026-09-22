@@ -117,6 +117,13 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
                 &["--tcp"],
             )?;
         }
+
+        #[cfg(unix)]
+        {
+            run_self_contained_example("async-stream-close-order", "data frames dropped");
+            run_self_contained_example("async-data-order", "data frames reordered");
+            run_self_contained_example("async-slow-consumer", "connection reader blocked");
+        }
     }
 
     #[cfg(feature = "prost")]
@@ -137,4 +144,30 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Runs an example that hosts both the server and the client in one process,
+/// and fails if it exits non-zero or does not finish in time.
+#[cfg(all(unix, feature = "rustprotobuf"))]
+fn run_self_contained_example(name: &str, failure_hint: &str) {
+    let mut child = do_run_example(name, "example", &[]).spawn().unwrap();
+
+    let timeout = Duration::from_secs(120);
+    let start = std::time::Instant::now();
+    loop {
+        if start.elapsed() > timeout {
+            child.kill().unwrap_or(());
+            wait_with_output(name, child);
+            panic!("{} timed out", name);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                wait_with_output(name, child);
+                assert!(status.success(), "{} failed ({})", name, failure_hint);
+                break;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => panic!("Error waiting for {}: {:?}", name, e),
+        }
+    }
 }
