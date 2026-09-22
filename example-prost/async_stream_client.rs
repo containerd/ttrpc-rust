@@ -52,7 +52,6 @@ async fn echo_request(cli: streaming::StreamingClient) {
     let echo1 = streaming::EchoPayload {
         seq: 1,
         msg: "Echo Me".to_string(),
-        ..Default::default()
     };
     let resp = cli.echo(default_ctx(), &echo1).await.unwrap();
     assert_eq!(resp.msg, echo1.msg);
@@ -67,7 +66,6 @@ async fn echo_stream(cli: streaming::StreamingClient) {
         let echo = streaming::EchoPayload {
             seq: i as u32,
             msg: format!("{}: Echo in a stream", i),
-            ..Default::default()
         };
         stream.send(&echo).await.unwrap();
         let resp = stream.recv().await.unwrap();
@@ -90,10 +88,7 @@ async fn sum_stream(cli: streaming::StreamingClient) {
     sum.num += 1;
     let mut i = -99i32;
     while i <= 100 {
-        let addi = streaming::Part {
-            add: i,
-            ..Default::default()
-        };
+        let addi = streaming::Part { add: i };
         stream.send(&addi).await.unwrap();
         sum.sum += i;
         sum.num += 1;
@@ -109,11 +104,7 @@ async fn sum_stream(cli: streaming::StreamingClient) {
 }
 
 async fn divide_stream(cli: streaming::StreamingClient) {
-    let expected = streaming::Sum {
-        sum: 392,
-        num: 4,
-        ..Default::default()
-    };
+    let expected = streaming::Sum { sum: 392, num: 4 };
     let mut stream = cli.divide_stream(default_ctx(), &expected).await.unwrap();
 
     let mut actual = streaming::Sum::default();
@@ -134,7 +125,6 @@ async fn echo_null(cli: streaming::StreamingClient) {
         let echo = streaming::EchoPayload {
             seq: i as u32,
             msg: "non-empty empty".to_string(),
-            ..Default::default()
         };
         stream.send(&echo).await.unwrap();
     }
@@ -160,7 +150,6 @@ async fn echo_null_stream(cli: streaming::StreamingClient) {
         let echo = streaming::EchoPayload {
             seq: i as u32,
             msg: "non-empty empty".to_string(),
-            ..Default::default()
         };
         tx.send(&echo).await.unwrap();
     }

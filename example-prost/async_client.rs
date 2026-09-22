@@ -24,8 +24,7 @@ async fn main() {
     let t1 = tokio::spawn(async move {
         let req = health::CheckRequest::default();
         println!(
-            "Green Thread 1 - {} started: {:?}",
-            "health.check()",
+            "Green Thread 1 - health.check() started: {:?}",
             now.elapsed(),
         );
         let resp = thc
@@ -48,8 +47,7 @@ async fn main() {
             resp
         );
         println!(
-            "Green Thread 1 - {} -> {:?} ended: {:?}",
-            "health.check()",
+            "Green Thread 1 - health.check() -> {:?} ended: {:?}",
             resp,
             now.elapsed(),
         );
@@ -57,8 +55,7 @@ async fn main() {
 
     let t2 = tokio::spawn(async move {
         println!(
-            "Green Thread 2 - {} started: {:?}",
-            "agent.list_interfaces()",
+            "Green Thread 2 - agent.list_interfaces() started: {:?}",
             now.elapsed(),
         );
 
@@ -69,8 +66,7 @@ async fn main() {
         assert_eq!(resp, expected_resp);
 
         println!(
-            "Green Thread 2 - {} -> {:?} ended: {:?}",
-            "agent.list_interfaces()",
+            "Green Thread 2 - agent.list_interfaces() -> {:?} ended: {:?}",
             resp,
             now.elapsed(),
         );
@@ -78,8 +74,7 @@ async fn main() {
 
     let t3 = tokio::spawn(async move {
         println!(
-            "Green Thread 3 - {} started: {:?}",
-            "agent.online_cpu_mem()",
+            "Green Thread 3 - agent.online_cpu_mem() started: {:?}",
             now.elapsed()
         );
 
@@ -90,15 +85,13 @@ async fn main() {
         let expected_resp = utils::resp::online_cpu_mem_not_impl();
         assert_eq!(resp, expected_resp);
         println!(
-            "Green Thread 3 - {} -> {:?} ended: {:?}",
-            "agent.online_cpu_mem()",
+            "Green Thread 3 - agent.online_cpu_mem() -> {:?} ended: {:?}",
             resp,
             now.elapsed()
         );
 
         println!(
-            "Green Thread 3 - {} started: {:?}",
-            "health.version()",
+            "Green Thread 3 - health.version() started: {:?}",
             now.elapsed()
         );
         let resp = hc
@@ -107,8 +100,7 @@ async fn main() {
         let expected_resp = utils::resp::async_health_version();
         assert_eq!(resp, expected_resp);
         println!(
-            "Green Thread 3 - {} -> {:?} ended: {:?}",
-            "health.version()",
+            "Green Thread 3 - health.version() -> {:?} ended: {:?}",
             resp,
             now.elapsed()
         );

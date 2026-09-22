@@ -5,7 +5,13 @@
 
 #![allow(dead_code, unused_imports, unused_qualifications)]
 
-include!("_include.rs");
+// Prost preserves names and documentation from the upstream protobuf schemas.
+// Limit these allowances to the generated bindings.
+#[allow(clippy::enum_variant_names, clippy::doc_overindented_list_items)]
+mod generated {
+    include!("_include.rs");
+}
+pub use generated::*;
 
 // Module glue: the shared schemas declare `package grpc` for the health,
 // agent, and oci definitions, so prost emits them into a single `grpc`
