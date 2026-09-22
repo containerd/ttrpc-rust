@@ -121,14 +121,12 @@ pub fn to_pb(kvs: HashMap<String, Vec<String>>) -> Vec<KeyValue> {
             } else {
                 std::mem::take(&mut k)
             };
-            #[cfg(not(feature = "prost"))]
             let entry = KeyValue {
                 key,
                 value,
-                ..Default::default()
+                #[cfg(feature = "rustprotobuf")]
+                special_fields: Default::default(),
             };
-            #[cfg(feature = "prost")]
-            let entry = KeyValue { key, value };
             meta.push(entry);
         }
     }
@@ -150,16 +148,11 @@ mod tests {
             ("key1", "value1-2"),
             ("key2", "value2"),
         ] {
-            #[cfg(not(feature = "prost"))]
             let key = KeyValue {
                 key: i.0.to_string(),
                 value: i.1.to_string(),
-                ..Default::default()
-            };
-            #[cfg(feature = "prost")]
-            let key = KeyValue {
-                key: i.0.to_string(),
-                value: i.1.to_string(),
+                #[cfg(feature = "rustprotobuf")]
+                special_fields: Default::default(),
             };
             src.push(key);
         }
