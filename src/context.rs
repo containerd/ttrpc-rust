@@ -113,20 +113,23 @@ pub fn from_pb(kvs: &Vec<KeyValue>) -> HashMap<String, Vec<String>> {
 pub fn to_pb(kvs: HashMap<String, Vec<String>>) -> Vec<KeyValue> {
     let mut meta = Vec::with_capacity(kvs.len());
 
-    for (k, vl) in kvs {
-        for v in vl {
+    for (mut k, vl) in kvs {
+        let mut values = vl.into_iter().peekable();
+        while let Some(value) = values.next() {
+            let key = if values.peek().is_some() {
+                k.clone()
+            } else {
+                std::mem::take(&mut k)
+            };
             #[cfg(not(feature = "prost"))]
-            let key = KeyValue {
-                key: k.clone(),
-                value: v.clone(),
+            let entry = KeyValue {
+                key,
+                value,
                 ..Default::default()
             };
             #[cfg(feature = "prost")]
-            let key = KeyValue {
-                key: k.clone(),
-                value: v.clone(),
-            };
-            meta.push(key);
+            let entry = KeyValue { key, value };
+            meta.push(entry);
         }
     }
 
