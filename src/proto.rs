@@ -571,10 +571,11 @@ impl<C: Codec> Message<C> {
     ///
     /// Returns [`Error::Others`] if the encoded payload exceeds [`MESSAGE_LENGTH_MAX`].
     pub fn new_request(stream_id: u32, message: C) -> TtResult<Self> {
-        check_oversize(message.size() as usize, false)?;
+        let size = message.size();
+        check_oversize(size as usize, false)?;
 
         Ok(Self {
-            header: MessageHeader::new_request(stream_id, message.size()),
+            header: MessageHeader::new_request(stream_id, size),
             payload: message,
         })
     }
