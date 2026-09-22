@@ -26,13 +26,13 @@ It is the Rust implementation of [ttrpc](https://github.com/containerd/ttrpc): a
 | --- | --- |
 | Client and server APIs | Synchronous and Tokio-based asynchronous implementations |
 | RPC styles | Unary; client, server, and bidirectional streaming in async mode |
-| Code generation | Pure-Rust build-time generation or a `protoc` plugin |
+| Code generation | Pure-Rust rust-protobuf generation, a `protoc` plugin, or Prost generation using `protoc` |
 | Request context | Timeouts, metadata, and typed RPC status codes |
 | Transports | Unix sockets, TCP, Linux/Android vsock, and Windows named pipes |
 | Server lifecycle | Service registration, listener control, and graceful shutdown |
 | Platforms | Linux, macOS, Windows, and Android |
 
-The synchronous API is enabled by default. Enable the `async` Cargo feature for the Tokio implementation and streaming RPCs.
+The synchronous API and `rustprotobuf` backend are enabled by default. Enable the `async` Cargo feature for the Tokio implementation and streaming RPCs. See [Using Prost](#using-prost) for the alternative protobuf backend.
 
 ## Quick start
 
@@ -177,6 +177,62 @@ Set `async_all` during code generation:
 
 You can generate only one side with `async_client` or `async_server`. Streaming services require async bindings.
 
+## Using Prost
+
+Prost support in this checkout uses `prost` 0.13 and requires `protoc` on `PATH`
+for both the runtime build and application code generation. Use a local dependency
+on the checkout to try the current implementation:
+
+```toml
+[dependencies]
+prost = "0.13"
+ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
+
+[build-dependencies]
+ttrpc-codegen = { path = "../ttrpc-rust/codegen" }
+```
+
+Adjust the paths to your checkout. The Prost generator in `codegen/` is a separate
+crate from the rust-protobuf generator in `ttrpc-codegen/`; select the appropriate
+path. The two protobuf backend features are mutually exclusive. Because disabling
+default features also disables `sync`, list the runtime features explicitly.
+
+Use `.prost()` in `build.rs`. Set `Customize::async_all = true` for async bindings
+and enable the runtime's `async` feature; generated async bindings also require
+`async-trait` in your application. Streaming requires async bindings. The
+[Prost generator guide](./codegen/README.md) includes a complete dependency setup,
+service definition, build script, and generated-module import.
+
+Generated Rust files and modules follow the protobuf package rather than the
+input filename. For example, `package example;` produces `example.rs`, containing
+both message types and service bindings. Rust identifier casing may also differ
+from rust-protobuf, such as `Cpu` instead of `CPU`; use the generated APIs for your
+selected backend. The protobuf schema and ttrpc wire protocol remain the same.
+
+The [Prost examples](./example-prost/README.md) demonstrate synchronous, asynchronous,
+and streaming calls over Unix sockets. Run a server and client in separate terminals:
+
+```bash
+cargo run --manifest-path example-prost/Cargo.toml --example server
+cargo run --manifest-path example-prost/Cargo.toml --example client
+```
+
+On Unix, `security_extension` is available with either backend. Generate local
+API documentation for Prost, both runtimes, and the security extension with:
+
+```bash
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --no-default-features \
+  --features sync,async,prost,security_extension --open
+```
+
+The docs.rs configuration selects `rustprotobuf`. The local command above lets
+you inspect the Prost APIs and fails on documentation warnings. The generator's
+own documentation is built separately:
+
+```bash
+RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path codegen/Cargo.toml --no-deps --open
+```
+
 ## Transport addresses
 
 | Address | Transport | Platforms |
@@ -196,14 +252,17 @@ ttrpc does not provide TLS. If you expose TCP beyond a trusted boundary, secure 
 | [`ttrpc`](https://crates.io/crates/ttrpc) | Sync and async client/server runtime |
 | [`ttrpc-codegen`](https://crates.io/crates/ttrpc-codegen) | Build-script API for parsing `.proto` files and generating Rust code |
 | [`ttrpc-compiler`](https://crates.io/crates/ttrpc-compiler) | Service code generator and `protoc` plugin |
-| [`example`](https://github.com/containerd/ttrpc-rust/tree/master/example) | End-to-end unary and streaming examples |
+| [`example`](https://github.com/containerd/ttrpc-rust/tree/master/example) | End-to-end unary and streaming examples using rust-protobuf |
+| [Prost generator](./codegen) | Standalone build-script generator using Prost and `protoc` |
+| [`example-prost`](./example-prost) | Standalone unary and streaming examples using Prost |
 
 ## Compatibility
 
 - `ttrpc` runtime minimum supported Rust version: **1.70**
 - Repository development toolchain: see [`rust-toolchain.toml`](https://github.com/containerd/ttrpc-rust/blob/master/rust-toolchain.toml)
-- Default feature: `sync`
-- Optional feature: `async`
+- Default features: `sync`, `rustprotobuf`
+- Optional features: `async`, `prost`, `security_extension` (Unix only)
+- Enable exactly one of `rustprotobuf` and `prost`; never use `--all-features` for the runtime.
 - Keep `protobuf`, `protobuf-codegen`, and generated sources on matching versions. Regenerate bindings after changing the Protocol Buffers runtime version.
 
 ## Development
@@ -213,8 +272,12 @@ ttrpc does not provide TLS. If you expose TCP beyond a trusted boundary, secure 
 # build the root crate with --all-features; `make test` covers both backends.
 make test
 
-# Run formatting and Clippy checks
+# Run formatting, Clippy, and strict API documentation checks
 make check-all
+
+# The Prost generator is a separate workspace
+make -C codegen test
+make -C codegen check
 ```
 
 ## Project details
@@ -228,23 +291,3 @@ As a containerd subproject, you will find the:
 - and [Contributing guidelines](https://github.com/containerd/.project/blob/main/CONTRIBUTING.md)
 
 information in the [`containerd/.project`](https://github.com/containerd/.project) repository.
-
-# ttrpc-rust with the Prost backend
-
-The `prost` feature builds the runtime and generates bindings with the
-[Prost](https://crates.io/crates/prost) protobuf compiler. There are certain
-different behaviors from the default rust-protobuf version:
-
-1. `protoc` must be installed (the codegen invokes it at build time).
-2. The "prost" and "rustprotobuf" backends are mutually exclusive, so
-   `default-features` (which enables "rustprotobuf") must be disabled and the
-   desired runtime feature must be listed explicitly, e.g.
-   `ttrpc = { version = "1.0", default-features = false, features = ["sync", "prost"] }`.
-3. The generated Rust files are named after their package name rather than the
-   proto filename.
-4. Some identifiers are cased differently, e.g. for "CPU", rust-protobuf
-   generates `CPU`-style acronyms while Prost generates `Cpu`.
-
-The [example](./example) crate uses the rust-protobuf backend, and
-[example-prost](./example-prost) demonstrates the same workflows with the
-Prost backend.
