@@ -218,9 +218,9 @@ impl MessageHeader {
     pub async fn read_from(
         mut reader: impl tokio::io::AsyncReadExt + Unpin,
     ) -> std::io::Result<MessageHeader> {
-        let mut content = vec![0; MESSAGE_HEADER_LENGTH];
+        let mut content = [0; MESSAGE_HEADER_LENGTH];
         reader.read_exact(&mut content).await?;
-        Ok(MessageHeader::from(&content))
+        Ok(MessageHeader::from(content))
     }
 }
 
