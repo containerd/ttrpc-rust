@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use async_trait::async_trait;
+use std::future::Future;
 use log::{error, trace};
 use tokio::io::{split, AsyncWrite};
 use tokio::time::{sleep_until, Instant};
@@ -117,19 +117,17 @@ pub trait Builder {
     fn build(&mut self) -> (Self::Reader, Self::Writer);
 }
 
-#[async_trait]
 pub trait WriterDelegate {
-    async fn recv(&mut self) -> Option<SendingMessage>;
-    async fn exit(&self);
+    fn recv(&mut self) -> impl Future<Output = Option<SendingMessage>> + Send;
+    fn exit(&self) -> impl Future<Output = ()> + Send;
 }
 
-#[async_trait]
 pub trait ReaderDelegate {
-    async fn wait_shutdown(&self);
-    async fn disconnect(&self, e: Error);
-    async fn exit(&self);
-    async fn handle_msg(&self, msg: GenMessage);
-    async fn handle_err(&self, header: MessageHeader, e: Error);
+    fn wait_shutdown(&self) -> impl Future<Output = ()> + Send;
+    fn disconnect(&self, e: Error) -> impl Future<Output = ()> + Send;
+    fn exit(&self) -> impl Future<Output = ()> + Send;
+    fn handle_msg(&self, msg: GenMessage) -> impl Future<Output = ()> + Send;
+    fn handle_err(&self, header: MessageHeader, e: Error) -> impl Future<Output = ()> + Send;
 }
 
 pub struct Connection<B: Builder> {
@@ -165,6 +163,8 @@ where
             mut writer_task,
             reader_delegate,
         } = self;
+        let shutdown = reader_delegate.wait_shutdown();
+        tokio::pin!(shutdown);
         loop {
             select! {
                 // Writer failures take priority, then shutdown, then incoming frames.
@@ -184,7 +184,7 @@ where
                     }
                     break;
                 }
-                _v = reader_delegate.wait_shutdown() => {
+                _v = &mut shutdown => {
                     trace!("Receive shutdown.");
                     break;
                 }

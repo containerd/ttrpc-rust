@@ -11,7 +11,6 @@ use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
 use tokio::{
     self,
     sync::mpsc,
@@ -369,7 +368,6 @@ struct ClientWriter {
     rx: MessageReceiver,
 }
 
-#[async_trait]
 impl WriterDelegate for ClientWriter {
     async fn recv(&mut self) -> Option<SendingMessage> {
         self.rx.recv().await
@@ -383,7 +381,6 @@ struct ClientReader {
     conn_ctx: Arc<ConnectionContext>,
 }
 
-#[async_trait]
 impl ReaderDelegate for ClientReader {
     async fn wait_shutdown(&self) {
         std::future::pending().await
