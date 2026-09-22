@@ -43,7 +43,7 @@ message Any {
   // server that maps type URLs to message definitions as follows:
   //
   // * If no scheme is provided, `https` is assumed.
-  // * An HTTP GET on the URL must yield a [google.protobuf.Type][]
+  // * An HTTP GET on the URL must yield a `google.protobuf.Type`
   //   value in binary format, or produce an error.
   // * Applications are allowed to cache lookup results based on the
   //   URL, or have them precompiled into a binary to avoid any
@@ -230,12 +230,12 @@ enum Code {
 // Get from github.com/gogo/googleapis/google/rpc/status.proto
 message Status {
   // The status code, which should be an enum value of
-  // [google.rpc.Code][google.rpc.Code].
+  // `google.rpc.Code`.
   Code code = 1;
 
   // A developer-facing error message, which should be in English. Any
   // user-facing error message should be localized and sent in the
-  // [google.rpc.Status.details][google.rpc.Status.details] field, or localized
+  // `google.rpc.Status.details` field, or localized
   // by the client.
   string message = 2;
 
