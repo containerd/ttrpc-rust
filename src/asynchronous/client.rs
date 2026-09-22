@@ -547,10 +547,7 @@ mod teardown_tests {
             _cx: &mut Context<'_>,
             _buf: &[u8],
         ) -> Poll<io::Result<usize>> {
-            Poll::Ready(Err(io::Error::new(
-                io::ErrorKind::Other,
-                "simulated write failure",
-            )))
+            Poll::Ready(Err(io::Error::other("simulated write failure")))
         }
 
         fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
