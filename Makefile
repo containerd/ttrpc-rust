@@ -52,7 +52,7 @@ check:
 ifeq ($(SUBCRATE),)
 ifneq ($(OS),Windows_NT)
 	cargo clippy --all-targets --no-default-features --features sync,async,prost,security_extension -- -D warnings
-	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --no-default-features --features sync,async,prost
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --no-default-features --features sync,async,prost,security_extension
 endif
 endif
 
