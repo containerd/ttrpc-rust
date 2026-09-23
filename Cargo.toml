@@ -9,7 +9,7 @@ members = [
 # they are standalone crates and intentionally kept decoupled from the
 # rustprotobuf-oriented workspace members above.
 exclude = [
-    "./codegen",
+    "./ttrpc-codegen-prost",
     "./example-prost",
 ]
 resolver = "2"

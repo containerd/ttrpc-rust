@@ -23,7 +23,7 @@ async-trait = "0.1.42"
 rand = "0.8.5"
 
 [build-dependencies]
-ttrpc-codegen = { path = "../codegen" }
+ttrpc-codegen-prost = { version = "0.1.0", path = "../ttrpc-codegen-prost" }
 
 [[example]]
 name = "client"

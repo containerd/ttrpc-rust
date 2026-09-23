@@ -23,7 +23,7 @@ jobs:
         run: |
           cargo test --workspace --features async,sync,security_extension
           cargo test -p ttrpc --no-default-features --features sync,async,prost
-          cargo test --manifest-path codegen/Cargo.toml
+          cargo test --manifest-path ttrpc-codegen-prost/Cargo.toml
 
   check:
     name: Check
@@ -40,9 +40,9 @@ jobs:
       - name: Check
         run: |
           make check-all
-          # The codegen crate is a standalone workspace root, so its checks
+          # The ttrpc-codegen-prost crate is a standalone workspace root, so its checks
           # must be invoked explicitly (protoc is required for its tests).
-          make -C codegen check
+          make -C ttrpc-codegen-prost check
 
   make:
     name: Build
@@ -63,7 +63,7 @@ jobs:
           make -C ttrpc-codegen
           make -C example build-examples
           make -C example-prost build-examples
-          make -C codegen test
+          make -C ttrpc-codegen-prost test
         # Keep bash so a native-command failure on Windows isn't masked by a
         # later successful command (PowerShell swallows non-zero exits).
         shell: bash

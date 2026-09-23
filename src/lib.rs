@@ -100,7 +100,7 @@
 //! ```
 //!
 //! Adjust the path to your checkout. Install `protoc` for the runtime build and application
-//! code generation, and use the separate [Prost generator] in `codegen/`. Its builder uses
+//! code generation, and use the separate [Prost generator] in `ttrpc-codegen-prost/`. Its builder uses
 //! `.prost()` and supports `Customize::async_all` for async and streaming bindings.
 //! Generated Rust modules follow the protobuf package name; see the [Prost examples] for
 //! sync, async, and streaming applications. Both backends use the same ttrpc wire protocol.
@@ -185,7 +185,7 @@
 //! their framing protocols are different even when their service definitions match.
 //!
 //! [client, server, and streaming examples]: https://github.com/containerd/ttrpc-rust/tree/master/example
-//! [Prost generator]: https://github.com/containerd/ttrpc-rust/tree/master/codegen
+//! [Prost generator]: https://github.com/containerd/ttrpc-rust/tree/master/ttrpc-codegen-prost
 //! [Prost examples]: https://github.com/containerd/ttrpc-rust/tree/master/example-prost
 //! [ttrpc]: https://github.com/containerd/ttrpc
 //! [`ttrpc-codegen`]: https://docs.rs/ttrpc-codegen

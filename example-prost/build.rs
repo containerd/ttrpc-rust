@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use ttrpc_codegen::{Codegen, Customize};
+use ttrpc_codegen_prost::{Codegen, Customize};
 
 // The schemas are shared with the rust-protobuf based `example` crate; this
 // crate only provides the Prost-generated Rust bindings.

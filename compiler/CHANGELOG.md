@@ -15,7 +15,7 @@ lines were maintained in parallel.
 
 - **Breaking:** Removed the unused `prost_codegen` module, which generated
   grpcio bindings, and its Prost 0.8 dependencies. Use the standalone Prost
-  generator in `codegen/` for ttrpc bindings.
+  generator in `ttrpc-codegen-prost/` for ttrpc bindings.
 
 ## [0.8.0] - 2025-07-15
 

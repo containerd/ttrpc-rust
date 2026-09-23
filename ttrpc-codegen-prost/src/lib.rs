@@ -15,7 +15,7 @@
 //! See the [setup guide] for a complete build script and application configuration,
 //! and the [examples] for working clients and servers.
 //!
-//! [setup guide]: https://github.com/containerd/ttrpc-rust/blob/master/codegen/README.md
+//! [setup guide]: https://github.com/containerd/ttrpc-rust/blob/master/ttrpc-codegen-prost/README.md
 //! [examples]: https://github.com/containerd/ttrpc-rust/tree/master/example-prost
 
 mod codegen;
