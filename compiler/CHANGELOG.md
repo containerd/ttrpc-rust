@@ -9,6 +9,14 @@ published crates and Git history. Release dates are crates.io publication
 dates. Releases are ordered by publication date because multiple version
 lines were maintained in parallel.
 
+## [Unreleased]
+
+### Removed
+
+- **Breaking:** Removed the unused `prost_codegen` module, which generated
+  grpcio bindings, and its Prost 0.8 dependencies. Use the standalone Prost
+  generator in `codegen/` for ttrpc bindings.
+
 ## [0.8.0] - 2025-07-15
 
 ### API changes

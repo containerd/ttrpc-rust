@@ -25,8 +25,6 @@
 
 /// Generates ttrpc service bindings from Protocol Buffers descriptors.
 pub mod codegen;
-/// Legacy Prost-based code generation helpers.
-pub mod prost_codegen;
 mod util;
 
 /// Customize generated code.
