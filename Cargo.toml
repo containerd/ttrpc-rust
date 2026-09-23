@@ -9,7 +9,7 @@ members = [
 # they are standalone crates and intentionally kept decoupled from the
 # rustprotobuf-oriented workspace members above.
 exclude = [
-    "./codegen",
+    "./ttrpc-codegen-prost",
     "./example-prost",
 ]
 resolver = "2"
@@ -29,8 +29,8 @@ authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 # version. For example, for protobuf:
 #   protobuf = { workspace = true }
 ttrpc = { version = "0.9.0", path = "./" }
-ttrpc-codegen = { version = "0.6.0", path = "./ttrpc-codegen" }
-ttrpc-compiler = { version = "0.8.0", path = "./compiler" }
+ttrpc-codegen = { version = "0.6.1", path = "./ttrpc-codegen" }
+ttrpc-compiler = { version = "0.9.0", path = "./compiler" }
 protobuf = "3.7.2"
 protobuf-codegen = "3.7.2"
 protobuf-parse = "3.7.2"

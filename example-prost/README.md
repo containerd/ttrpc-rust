@@ -1,7 +1,7 @@
 # Prost examples
 
 These examples use the local ttrpc runtime and the standalone Prost generator in
-[`codegen/`](../codegen). They share the `.proto` definitions in
+[`ttrpc-codegen-prost/`](../ttrpc-codegen-prost). They share the `.proto` definitions in
 [`example/protocols/protos/`](../example/protocols/protos) with the rust-protobuf
 examples. `build.rs` generates sync and async bindings when Cargo builds them.
 
@@ -37,7 +37,7 @@ enabled together with `prost`.
 
 Generated message and service APIs follow protobuf package names. The checked-in
 module glue re-exports the generated `grpc` and streaming packages under the
-names used by the example sources. See the [generator guide](../codegen/README.md)
+names used by the example sources. See the [generator guide](../ttrpc-codegen-prost/README.md)
 for adding Prost generation to your own application.
 
 ## Build and validate

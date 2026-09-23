@@ -1,8 +1,11 @@
-# ttrpc code generation with Prost
+# ttrpc-codegen-prost
 
 This standalone crate generates Prost messages and ttrpc clients, server traits,
 and service registration helpers from `.proto` files. It requires `protoc` on
 `PATH` and uses Prost 0.13. The runtime must also use the `prost` backend.
+The separate `ttrpc-codegen` package continues to use rust-protobuf. This
+generator was previously an unpublished package with the same name; its first
+release is planned as `ttrpc-codegen-prost` 0.1.0.
 
 ## Build a service
 
@@ -32,12 +35,12 @@ prost = "0.13"
 ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
 
 [build-dependencies]
-ttrpc-codegen = { path = "../ttrpc-rust/codegen" }
+ttrpc-codegen-prost = { version = "0.1", path = "../ttrpc-rust/ttrpc-codegen-prost" }
 ```
 
-The `codegen/` directory contains the Prost generator; `ttrpc-codegen/` contains
-the rust-protobuf generator. Their package names currently match, so use the
-explicit path above to select this generator from the checkout.
+The `ttrpc-codegen-prost/` directory contains the Prost generator;
+`ttrpc-codegen/` contains the rust-protobuf generator. Use the local path above
+until the Prost generator is published.
 
 Define `proto/greeter.proto`:
 
@@ -56,7 +59,7 @@ service Greeter {
 Generate the bindings in `build.rs`:
 
 ```rust
-use ttrpc_codegen::{Codegen, Customize};
+use ttrpc_codegen_prost::{Codegen, Customize};
 
 fn main() {
     println!("cargo:rerun-if-changed=proto/greeter.proto");
@@ -140,15 +143,15 @@ This crate has its own workspace. Run its checks explicitly from the repository
 root:
 
 ```bash
-make -C codegen test
-make -C codegen check
+make -C ttrpc-codegen-prost test
+make -C ttrpc-codegen-prost check
 ```
 
 `check` runs formatting, strict Clippy, and strict API documentation generation.
 To open the generator documentation directly:
 
 ```bash
-RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path codegen/Cargo.toml --no-deps --open
+RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path ttrpc-codegen-prost/Cargo.toml --no-deps --open
 ```
 
 The runtime's Prost and security extension documentation is a separate build

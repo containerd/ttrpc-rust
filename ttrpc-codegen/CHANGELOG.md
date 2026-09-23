@@ -8,6 +8,13 @@ published crates and Git history. Release dates are crates.io publication
 dates. Releases are ordered by publication date because multiple version
 lines were maintained in parallel.
 
+## [Unreleased]
+
+### Changed
+
+- Updated the `ttrpc-compiler` dependency to 0.9.0 after removing its unused
+  legacy Prost generator.
+
 ## [0.6.0] - 2025-07-15
 
 ### API changes

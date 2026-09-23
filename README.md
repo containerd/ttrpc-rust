@@ -189,18 +189,18 @@ prost = "0.13"
 ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
 
 [build-dependencies]
-ttrpc-codegen = { path = "../ttrpc-rust/codegen" }
+ttrpc-codegen-prost = { version = "0.1", path = "../ttrpc-rust/ttrpc-codegen-prost" }
 ```
 
-Adjust the paths to your checkout. The Prost generator in `codegen/` is a separate
-crate from the rust-protobuf generator in `ttrpc-codegen/`; select the appropriate
-path. The two protobuf backend features are mutually exclusive. Because disabling
+Adjust the paths to your checkout. The `ttrpc-codegen-prost` package is separate
+from the rust-protobuf `ttrpc-codegen` package; its first release is planned as
+version 0.1. The two protobuf backend features are mutually exclusive. Because disabling
 default features also disables `sync`, list the runtime features explicitly.
 
 Use `.prost()` in `build.rs`. Set `Customize::async_all = true` for async bindings
 and enable the runtime's `async` feature; generated async bindings also require
 `async-trait` in your application. Streaming requires async bindings. The
-[Prost generator guide](./codegen/README.md) includes a complete dependency setup,
+[Prost generator guide](./ttrpc-codegen-prost/README.md) includes a complete dependency setup,
 service definition, build script, and generated-module import.
 
 Generated Rust files and modules follow the protobuf package rather than the
@@ -230,7 +230,7 @@ you inspect the Prost APIs and fails on documentation warnings. The generator's
 own documentation is built separately:
 
 ```bash
-RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path codegen/Cargo.toml --no-deps --open
+RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path ttrpc-codegen-prost/Cargo.toml --no-deps --open
 ```
 
 ## Transport addresses
@@ -253,7 +253,7 @@ ttrpc does not provide TLS. If you expose TCP beyond a trusted boundary, secure 
 | [`ttrpc-codegen`](https://crates.io/crates/ttrpc-codegen) | Build-script API for parsing `.proto` files and generating Rust code |
 | [`ttrpc-compiler`](https://crates.io/crates/ttrpc-compiler) | Service code generator and `protoc` plugin |
 | [`example`](https://github.com/containerd/ttrpc-rust/tree/master/example) | End-to-end unary and streaming examples using rust-protobuf |
-| [Prost generator](./codegen) | Standalone build-script generator using Prost and `protoc` |
+| [`ttrpc-codegen-prost`](./ttrpc-codegen-prost) | Standalone build-script generator using Prost and `protoc` |
 | [`example-prost`](./example-prost) | Standalone unary and streaming examples using Prost |
 
 ## Compatibility
@@ -276,8 +276,8 @@ make test
 make check-all
 
 # The Prost generator is a separate workspace
-make -C codegen test
-make -C codegen check
+make -C ttrpc-codegen-prost test
+make -C ttrpc-codegen-prost check
 ```
 
 ## Project details
