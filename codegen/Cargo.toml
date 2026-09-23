@@ -19,9 +19,9 @@ readme = "README.md"
 [workspace]
 
 [dependencies]
-prost = "0.13"
-prost-types = "0.13"
-prost-build = "0.13"
+prost = "0.14.4"
+prost-types = "0.14.4"
+prost-build = "0.14.4"
 proc-macro2 = "1.0"
 quote = "1.0"
 lazy_static = "1.4"

@@ -95,7 +95,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! prost = "0.13"
+//! prost = "0.14.4"
 //! ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
 //! ```
 //!

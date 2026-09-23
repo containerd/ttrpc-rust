@@ -2,7 +2,7 @@
 
 This standalone crate generates Prost messages and ttrpc clients, server traits,
 and service registration helpers from `.proto` files. It requires `protoc` on
-`PATH` and uses Prost 0.13. The runtime must also use the `prost` backend.
+`PATH` and uses Prost 0.14.4. The runtime must also use the `prost` backend.
 
 ## Build a service
 
@@ -28,7 +28,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-prost = "0.13"
+prost = "0.14.4"
 ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
 
 [build-dependencies]
@@ -100,7 +100,7 @@ Replace the application's runtime dependencies with:
 ```toml
 [dependencies]
 async-trait = "0.1"
-prost = "0.13"
+prost = "0.14.4"
 ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["async", "prost"] }
 tokio = { version = "1", features = ["macros", "rt"] }
 ```

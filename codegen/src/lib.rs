@@ -2,7 +2,7 @@
 //!
 //! Use [`Codegen`] from a Cargo build script with `.prost()` to select this generator.
 //! Install `protoc` before building and enable the `prost` backend in the ttrpc runtime,
-//! with default features disabled. Generated messages require Prost 0.13.
+//! with default features disabled. Generated messages require Prost 0.14.4.
 //!
 //! Bindings are synchronous by default. Set [`Customize::async_all`] for async clients,
 //! servers, and streaming, and enable the runtime's `async` feature. Applications using

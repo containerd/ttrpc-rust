@@ -179,13 +179,13 @@ You can generate only one side with `async_client` or `async_server`. Streaming 
 
 ## Using Prost
 
-Prost support in this checkout uses `prost` 0.13 and requires `protoc` on `PATH`
+Prost support in this checkout uses `prost` 0.14.4 and requires `protoc` on `PATH`
 for both the runtime build and application code generation. Use a local dependency
 on the checkout to try the current implementation:
 
 ```toml
 [dependencies]
-prost = "0.13"
+prost = "0.14.4"
 ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
 
 [build-dependencies]
@@ -208,6 +208,10 @@ input filename. For example, `package example;` produces `example.rs`, containin
 both message types and service bindings. Rust identifier casing may also differ
 from rust-protobuf, such as `Cpu` instead of `CPU`; use the generated APIs for your
 selected backend. The protobuf schema and ttrpc wire protocol remain the same.
+
+When upgrading from Prost 0.13, update the application's `prost` dependency to
+0.14.4 and regenerate its bindings with the matching generator. Message types
+using different Prost minor versions implement different `prost::Message` traits.
 
 The [Prost examples](./example-prost/README.md) demonstrate synchronous, asynchronous,
 and streaming calls over Unix sockets. Run a server and client in separate terminals:

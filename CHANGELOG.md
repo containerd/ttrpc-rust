@@ -8,6 +8,15 @@ published crates and Git history. Release dates are crates.io publication
 dates. Because several release lines were maintained in parallel, releases
 are ordered by publication date rather than version number.
 
+## Unreleased
+
+### Changed
+
+- Updated the Prost backend, standalone generator, and examples to Prost 0.14.4.
+  Applications using this backend must update their Prost dependency and
+  regenerate bindings for the 0.14 series. The minimum supported Rust version
+  remains 1.85.
+
 ## [0.9.0] - 2025-07-15
 
 ### API changes
