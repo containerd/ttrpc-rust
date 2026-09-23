@@ -26,6 +26,12 @@ rand = "0.8.5"
 [build-dependencies]
 ttrpc-codegen-prost = { version = "0.1.0", path = "../ttrpc-codegen-prost" }
 
+[dev-dependencies]
+# Newer tempfile selects getrandom 0.4, which Cargo 1.80 cannot parse.
+tempfile = ">=3.0, <3.25"
+# Newer indexmap releases require a newer Rust/Cargo toolchain.
+indexmap = ">=2.0, <2.12"
+
 [[example]]
 name = "client"
 path = "./client.rs"

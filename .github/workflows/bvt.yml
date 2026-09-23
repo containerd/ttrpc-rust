@@ -23,8 +23,36 @@ jobs:
         run: |
           cargo test --workspace --features async,sync,security_extension
           cargo test -p ttrpc --no-default-features --features sync,async,prost
+          cargo check -p ttrpc-example --examples
           cargo test --manifest-path ttrpc-codegen-prost/Cargo.toml
           cargo check --manifest-path example-prost/Cargo.toml --examples
+      - name: Check fresh downstream resolution
+        run: |
+          for backend in rustprotobuf prost; do
+            consumer_dir=$(mktemp -d)
+            mkdir "$consumer_dir/src"
+            if [ "$backend" = rustprotobuf ]; then
+              dependency="ttrpc = { path = \"$GITHUB_WORKSPACE\" }"
+            else
+              dependency="ttrpc = { path = \"$GITHUB_WORKSPACE\", default-features = false, features = [\"sync\", \"async\", \"prost\"] }"
+            fi
+            cat > "$consumer_dir/Cargo.toml" <<EOF
+          [package]
+          name = "ttrpc-msrv-consumer"
+          version = "0.1.0"
+          edition = "2021"
+          rust-version = "1.80"
+
+          [dependencies]
+          $dependency
+          # Newer tempfile selects getrandom 0.4, which Cargo 1.80 cannot parse.
+          tempfile = ">=3.0, <3.25"
+          # Newer indexmap releases require a newer Rust/Cargo toolchain.
+          indexmap = ">=2.0, <2.12"
+          EOF
+            echo 'fn main() {}' > "$consumer_dir/src/main.rs"
+            cargo check --manifest-path "$consumer_dir/Cargo.toml"
+          done
 
   check:
     name: Check

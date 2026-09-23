@@ -3,6 +3,9 @@
 This standalone crate generates Prost messages and ttrpc clients, server traits,
 and service registration helpers from `.proto` files. It requires `protoc` on
 `PATH` and uses Prost 0.13. The runtime must also use the `prost` backend.
+Rust 1.80 users may need to constrain `tempfile` to `<3.25` and `indexmap` to
+`<2.12` in their application's `Cargo.toml` when resolving dependencies afresh.
+
 The separate `ttrpc-codegen` package continues to use rust-protobuf. This
 generator was previously an unpublished package with the same name; its first
 release is planned as `ttrpc-codegen-prost` 0.1.0.

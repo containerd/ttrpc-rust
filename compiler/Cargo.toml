@@ -15,7 +15,9 @@ homepage = "https://github.com/containerd/ttrpc-rust/tree/master/compiler"
 [dependencies]
 protobuf = { workspace = true }
 protobuf-codegen = { workspace = true }
-# Constrain protobuf-codegen's tempfile for downstream Cargo 1.80 users.
+
+[dev-dependencies]
+# Newer tempfile selects getrandom 0.4, which Cargo 1.80 cannot parse.
 tempfile = ">=3.0, <3.25"
 
 [[bin]]
