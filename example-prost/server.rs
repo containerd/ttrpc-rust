@@ -47,10 +47,10 @@ impl health::Health for HealthService {
     ) -> Result<health::VersionCheckResponse> {
         info!("version {:?}", req);
         info!("ctx {:?}", ctx);
-        let mut rep = health::VersionCheckResponse::default();
-        rep.agent_version = "mock 0.1".to_owned();
-        rep.grpc_version = "0.0.1".to_owned();
-        Ok(rep)
+        Ok(health::VersionCheckResponse {
+            agent_version: "mock 0.1".to_owned(),
+            grpc_version: "0.0.1".to_owned(),
+        })
     }
 }
 
@@ -73,7 +73,6 @@ impl agent::AgentService for AgentService {
                     ..Default::default()
                 },
             ],
-            ..Default::default()
         })
     }
 }

@@ -29,3 +29,12 @@ deps:
 	rustup default stable
 	rustup component add rustfmt clippy
 	../install_protoc.sh
+
+.PHONY: check
+check:
+ifeq ($(OS),Windows_NT)
+	@echo "Skipping check on Windows"
+else
+	cargo fmt --all -- --check
+	cargo clippy --examples -- -D warnings
+endif

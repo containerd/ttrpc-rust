@@ -23,3 +23,8 @@ deps:
 	rustup update stable
 	rustup default stable
 	rustup component add rustfmt clippy
+
+.PHONY: check
+check:
+	cargo fmt --all -- --check
+	cargo clippy --examples -- -D warnings

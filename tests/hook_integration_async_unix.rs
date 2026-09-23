@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use tokio::time::sleep;
 
 use ttrpc::asynchronous::{Client, MethodHandler, Server, Service, TtrpcContext};
-use ttrpc::proto::{Request, Response, Status};
+use ttrpc::proto::{Request, Response, ResponseInit, Status};
 use ttrpc::security_extension::{
     AcceptHook, ConnectHook, ConnectionData, ConnectionDataExt, HookError, HookOutput,
     PayloadTransform,
@@ -139,8 +139,7 @@ struct EchoHandler;
 impl MethodHandler for EchoHandler {
     async fn handler(&self, ctx: TtrpcContext, req: Request) -> ttrpc::Result<Response> {
         // Echo the request payload back as the response payload
-        let mut resp = Response::new();
-        resp.set_status(Status::default());
+        let mut resp = Response::init_status(Status::default());
         // Copy request payload to response payload
         resp.payload = req.payload;
 
@@ -167,8 +166,7 @@ impl MethodHandler for SlowEchoHandler {
     async fn handler(&self, _ctx: TtrpcContext, req: Request) -> ttrpc::Result<Response> {
         // Sleep just long enough to guarantee client timeout
         sleep(Duration::from_secs(1)).await;
-        let mut resp = Response::new();
-        resp.set_status(Status::default());
+        let mut resp = Response::init_status(Status::default());
         resp.payload = req.payload;
         Ok(resp)
     }
@@ -206,12 +204,13 @@ fn build_test_service() -> HashMap<String, Service> {
 }
 
 fn build_echo_request(payload: &[u8]) -> Request {
-    let mut req = Request::new();
-    req.service = TEST_SERVICE.to_string();
-    req.method = TEST_METHOD.to_string();
-    req.payload = payload.to_vec();
-    req.timeout_nano = 5_000_000_000; // 5 seconds
-    req
+    Request {
+        service: TEST_SERVICE.to_string(),
+        method: TEST_METHOD.to_string(),
+        payload: payload.to_vec(),
+        timeout_nano: 5_000_000_000, // 5 seconds
+        ..Default::default()
+    }
 }
 
 /// Brief yield to allow the server's background accept loop to start.
@@ -514,14 +513,12 @@ impl StreamHandler for DuplexEchoHandler {
             match stream.recv().await {
                 Ok(data) => {
                     // Decode as Request to extract payload
-                    let req = Request::decode(&data).unwrap_or_else(|_| {
-                        let mut r = Request::new();
-                        r.payload = data.clone();
-                        r
+                    let req = Request::decode(&data).unwrap_or_else(|_| Request {
+                        payload: data.clone(),
+                        ..Default::default()
                     });
                     // Build Response with same payload and encode it
-                    let mut resp = Response::new();
-                    resp.set_status(Status::default());
+                    let mut resp = Response::init_status(Status::default());
                     resp.payload = req.payload;
                     let encoded = resp
                         .encode()
@@ -534,8 +531,7 @@ impl StreamHandler for DuplexEchoHandler {
             }
         }
         // Send final response
-        let mut resp = Response::new();
-        resp.set_status(Status::default());
+        let mut resp = Response::init_status(Status::default());
         if let Some(role) = ctx.connection_data.get_typed::<String>("peer_role") {
             resp.payload = format!("stream_done:{}", role).into_bytes();
         } else {
@@ -558,11 +554,12 @@ fn build_test_service_with_stream() -> HashMap<String, Service> {
 }
 
 fn build_stream_request() -> Request {
-    let mut req = Request::new();
-    req.service = TEST_SERVICE.to_string();
-    req.method = TEST_STREAM_METHOD.to_string();
-    req.timeout_nano = 5_000_000_000;
-    req
+    Request {
+        service: TEST_SERVICE.to_string(),
+        method: TEST_STREAM_METHOD.to_string(),
+        timeout_nano: 5_000_000_000,
+        ..Default::default()
+    }
 }
 
 #[tokio::test]
@@ -596,8 +593,10 @@ async fn test_streaming_with_xor_transform() {
 
     // Send 3 messages and verify echo
     for i in 0u32..3 {
-        let mut msg = Request::new();
-        msg.payload = format!("stream_msg_{}", i).into_bytes();
+        let msg = Request {
+            payload: format!("stream_msg_{}", i).into_bytes(),
+            ..Default::default()
+        };
         stream.send(&msg).await.unwrap();
 
         let echoed = stream.recv().await.unwrap();
@@ -637,8 +636,10 @@ async fn test_streaming_without_transform_plaintext() {
         .unwrap();
     let mut stream = ttrpc::r#async::ClientStream::<Request, Response>::new(inner);
 
-    let mut msg = Request::new();
-    msg.payload = b"plain_stream_data".to_vec();
+    let msg = Request {
+        payload: b"plain_stream_data".to_vec(),
+        ..Default::default()
+    };
     stream.send(&msg).await.unwrap();
 
     let echoed = stream.recv().await.unwrap();
@@ -833,8 +834,10 @@ async fn test_stream_close_send_then_send_fails() {
     let stream = ttrpc::r#async::ClientStream::<Request, Response>::new(inner);
 
     // Send one message successfully
-    let mut msg = Request::new();
-    msg.payload = b"before_close".to_vec();
+    let msg = Request {
+        payload: b"before_close".to_vec(),
+        ..Default::default()
+    };
     stream.send(&msg).await.unwrap();
 
     // Close the send side
@@ -884,8 +887,10 @@ async fn test_server_shutdown_during_active_stream() {
     let mut stream = ttrpc::r#async::ClientStream::<Request, Response>::new(inner);
 
     // Send a message and receive echo — verifies stream works before shutdown
-    let mut msg = Request::new();
-    msg.payload = b"before_shutdown".to_vec();
+    let msg = Request {
+        payload: b"before_shutdown".to_vec(),
+        ..Default::default()
+    };
     stream.send(&msg).await.unwrap();
     let echoed = stream.recv().await.unwrap();
     assert_eq!(echoed.payload, b"before_shutdown");
@@ -980,8 +985,7 @@ impl StreamHandler for LimitedEchoHandler {
             stream.send(data).await?;
         }
         // Return final response — triggers server stream close
-        let mut resp = Response::new();
-        resp.set_status(Status::default());
+        let mut resp = Response::init_status(Status::default());
         resp.payload = b"limited_done".to_vec();
         Ok(Some(resp))
     }
@@ -1019,17 +1023,21 @@ async fn test_server_initiated_stream_close_client_gets_final_response() {
         .unwrap();
 
     // Build stream request for LimitedEcho method
-    let mut req = Request::new();
-    req.service = TEST_SERVICE.to_string();
-    req.method = "LimitedEcho".to_string();
-    req.timeout_nano = 5_000_000_000;
+    let req = Request {
+        service: TEST_SERVICE.to_string(),
+        method: "LimitedEcho".to_string(),
+        timeout_nano: 5_000_000_000,
+        ..Default::default()
+    };
 
     let inner = client.new_stream(req, true, true).await.unwrap();
     let mut stream = ttrpc::r#async::ClientStream::<Request, Response>::new(inner);
 
     // Send one message, server echoes it as DATA, then returns final response
-    let mut msg = Request::new();
-    msg.payload = b"limited_test".to_vec();
+    let msg = Request {
+        payload: b"limited_test".to_vec(),
+        ..Default::default()
+    };
     stream.send(&msg).await.unwrap();
 
     // First recv: gets the echo DATA message (raw bytes, decoded as Response).
@@ -1091,11 +1099,13 @@ async fn test_unary_request_timeout() {
         .unwrap();
 
     // Build request with very short timeout (100ms) — handler sleeps 1s
-    let mut req = Request::new();
-    req.service = TEST_SERVICE.to_string();
-    req.method = TEST_METHOD.to_string();
-    req.payload = b"timeout_test".to_vec();
-    req.timeout_nano = 100_000_000; // 100ms
+    let req = Request {
+        service: TEST_SERVICE.to_string(),
+        method: TEST_METHOD.to_string(),
+        payload: b"timeout_test".to_vec(),
+        timeout_nano: 100_000_000, // 100ms
+        ..Default::default()
+    };
 
     let result = client.request(req).await;
     assert!(result.is_err(), "Expected timeout error");
@@ -1147,8 +1157,10 @@ async fn test_streaming_server_false_rejects_data() {
     let mut stream = ttrpc::r#async::ClientStream::<Request, Response>::new(inner);
 
     // Send a message — server's DuplexEchoHandler will echo it back as DATA
-    let mut msg = Request::new();
-    msg.payload = b"test_data".to_vec();
+    let msg = Request {
+        payload: b"test_data".to_vec(),
+        ..Default::default()
+    };
     stream.send(&msg).await.unwrap();
 
     // recv() should fail because streaming_server=false (receivable=false)
@@ -1215,12 +1227,16 @@ async fn test_multiple_concurrent_streams_on_one_connection() {
     let mut stream2 = ttrpc::r#async::ClientStream::<Request, Response>::new(inner2);
 
     // Interleave sends/receives across both streams
-    let mut msg1 = Request::new();
-    msg1.payload = b"stream1_data".to_vec();
+    let msg1 = Request {
+        payload: b"stream1_data".to_vec(),
+        ..Default::default()
+    };
     stream1.send(&msg1).await.unwrap();
 
-    let mut msg2 = Request::new();
-    msg2.payload = b"stream2_data".to_vec();
+    let msg2 = Request {
+        payload: b"stream2_data".to_vec(),
+        ..Default::default()
+    };
     stream2.send(&msg2).await.unwrap();
 
     // Receive in reverse order to verify independence

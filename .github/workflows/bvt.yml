@@ -69,14 +69,20 @@ jobs:
         shell: bash
 
   security-extension:
-    name: Security Extension Tests
+    name: Security Extension Tests (${{ matrix.backend }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        backend: [rustprotobuf, prost]
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+      - name: Install Protoc
+        run: ./install_protoc.sh
+        shell: bash
       - name: Run tests with security_extension
         run: |
-          cargo test --features "async,sync,security_extension" --verbose
+          cargo test --no-default-features --features "async,sync,security_extension,${{ matrix.backend }}" --verbose
 
   deny:
     runs-on: ubuntu-latest

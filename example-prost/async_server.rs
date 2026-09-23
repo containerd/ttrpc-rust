@@ -42,10 +42,10 @@ impl health::Health for HealthService {
     ) -> Result<health::VersionCheckResponse> {
         info!("version {:?}", req);
         info!("ctx {:?}", ctx);
-        let mut rep = health::VersionCheckResponse::default();
-        rep.agent_version = "mock 0.1".to_string();
-        rep.grpc_version = "0.0.1".to_string();
-        Ok(rep)
+        Ok(health::VersionCheckResponse {
+            agent_version: "mock 0.1".to_string(),
+            grpc_version: "0.0.1".to_string(),
+        })
     }
 }
 
@@ -58,19 +58,18 @@ impl agent::AgentService for AgentService {
         _ctx: &::ttrpc::r#async::TtrpcContext,
         _req: agent::ListInterfacesRequest,
     ) -> ::ttrpc::Result<agent::Interfaces> {
-        let mut rp = Vec::new();
-
-        let mut i = types::Interface::default();
-        i.name = "first".to_string();
-        rp.push(i);
-        let mut i = types::Interface::default();
-        i.name = "second".to_string();
-        rp.push(i);
-
-        let mut i = agent::Interfaces::default();
-        i.interfaces = rp;
-
-        Ok(i)
+        Ok(agent::Interfaces {
+            interfaces: vec![
+                types::Interface {
+                    name: "first".to_string(),
+                    ..Default::default()
+                },
+                types::Interface {
+                    name: "second".to_string(),
+                    ..Default::default()
+                },
+            ],
+        })
     }
 }
 

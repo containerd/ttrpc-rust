@@ -23,7 +23,7 @@
 //!
 //! - Synchronous and Tokio-based asynchronous clients and servers.
 //! - Unary, client-streaming, server-streaming, and bidirectional RPCs.
-//! - Pure-Rust client and server generation from `.proto` files.
+//! - Client and server generation using rust-protobuf or Prost.
 //! - Unix domain socket, TCP, vsock, and Windows named-pipe transports.
 //! - Per-request metadata, deadlines, and structured RPC status errors.
 //!
@@ -43,7 +43,7 @@
 //!
 //! ```toml
 //! # Async only
-//! ttrpc = { version = "0.9", default-features = false, features = ["async"] }
+//! ttrpc = { version = "0.9", default-features = false, features = ["async", "rustprotobuf"] }
 //!
 //! # Sync and async
 //! # ttrpc = { version = "0.9", features = ["async"] }
@@ -84,6 +84,34 @@
 //! Choose `sync` for blocking applications and existing thread-based services. Choose
 //! `asynchronous` when the application already uses Tokio, needs many concurrent connections, or
 //! uses streaming RPCs.
+//!
+//! # Choosing a Protocol Buffers backend
+//!
+//! The default `rustprotobuf` backend uses rust-protobuf message types. The `prost` backend
+//! uses Prost message types. Enable exactly one backend and pair it with `sync`, `async`, or
+//! both runtime features. Disabling default features also disables `sync` and `rustprotobuf`.
+//!
+//! To use the Prost implementation from a checkout of this repository:
+//!
+//! ```toml
+//! [dependencies]
+//! prost = "0.13"
+//! ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
+//! ```
+//!
+//! Adjust the path to your checkout. Install `protoc` for the runtime build and application
+//! code generation, and use the separate [Prost generator] in `codegen/`. Its builder uses
+//! `.prost()` and supports `Customize::async_all` for async and streaming bindings.
+//! Generated Rust modules follow the protobuf package name; see the [Prost examples] for
+//! sync, async, and streaming applications. Both backends use the same ttrpc wire protocol.
+//!
+//! On Unix, add `security_extension` to use connection hooks and payload transforms with
+//! either backend. To build the complete Prost runtime documentation locally:
+//!
+//! ```sh
+//! RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --no-default-features \
+//!     --features sync,async,prost,security_extension --open
+//! ```
 //!
 //! # A tour of ttrpc
 //!
@@ -126,11 +154,14 @@
 //! # Feature flags
 //!
 //! - `sync` (default): thread-based client and server.
+//! - `rustprotobuf` (default): rust-protobuf message types and codec.
+//! - `prost`: Prost message types and codec; mutually exclusive with `rustprotobuf`.
 //! - `async`: Tokio-based client and server, streaming RPCs, and asynchronous transports.
 //! - `security_extension`: connection hooks and payload transforms for application-defined
 //!   authentication, encryption, and other per-connection policies. Unix only.
 //!
-//! Documentation on docs.rs is built with both features enabled.
+//! The docs.rs configuration enables `sync`, `async`, and `rustprotobuf`. Build locally with
+//! the command above to view the Prost and security extension APIs.
 //!
 //! # Transport addresses
 //!
@@ -154,6 +185,8 @@
 //! their framing protocols are different even when their service definitions match.
 //!
 //! [client, server, and streaming examples]: https://github.com/containerd/ttrpc-rust/tree/master/example
+//! [Prost generator]: https://github.com/containerd/ttrpc-rust/tree/master/codegen
+//! [Prost examples]: https://github.com/containerd/ttrpc-rust/tree/master/example-prost
 //! [ttrpc]: https://github.com/containerd/ttrpc
 //! [`ttrpc-codegen`]: https://docs.rs/ttrpc-codegen
 

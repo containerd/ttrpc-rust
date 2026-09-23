@@ -342,7 +342,8 @@ impl GenMessage {
 
 /// Encodes and decodes values carried by ttrpc frames.
 ///
-/// The crate implements this trait for all [`protobuf::Message`] types.
+/// Implemented for `protobuf::Message` types with the `rustprotobuf` feature,
+/// and for `prost::Message + Default` types with the `prost` feature.
 pub trait Codec {
     /// Error returned while encoding or decoding the value.
     type E;

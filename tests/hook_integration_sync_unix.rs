@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use ttrpc::proto::{Request, Response};
+use ttrpc::proto::{Request, Response, ResponseInit};
 use ttrpc::security_extension::{
     AcceptHook, ConnectHook, ConnectionData, ConnectionDataExt, HookError, HookOutput,
 };
@@ -82,8 +82,7 @@ struct SyncEchoHandler;
 
 impl MethodHandler for SyncEchoHandler {
     fn handler(&self, ctx: TtrpcContext, req: Request) -> ttrpc::Result<()> {
-        let mut resp = Response::new();
-        resp.set_status(get_status(Code::OK, "".to_string()));
+        let mut resp = Response::init_status(get_status(Code::OK, "".to_string()));
         // Echo the request payload back, optionally prefixed with connection data
         let mut payload = Vec::new();
         if let Some(role) = ctx.conn_ctx.data.get_typed::<String>("peer_role") {
@@ -125,10 +124,12 @@ fn test_sync_no_hook_plaintext_passthrough() {
 
     let client = Client::connect(&path).unwrap();
 
-    let mut req = Request::new();
-    req.set_service(TEST_SERVICE.to_string());
-    req.set_method(TEST_METHOD.to_string());
-    req.payload = b"hello".to_vec();
+    let req = Request {
+        service: TEST_SERVICE.to_string(),
+        method: TEST_METHOD.to_string(),
+        payload: b"hello".to_vec(),
+        ..Default::default()
+    };
 
     let resp = client.request(req).unwrap();
     assert_eq!(resp.payload, b"hello");
@@ -165,10 +166,12 @@ fn test_sync_accept_hook_called_on_connection() {
     let client = Client::with_hook(fd, connect_hook).unwrap();
 
     // Send a request to ensure the server processes the accept
-    let mut req = Request::new();
-    req.set_service(TEST_SERVICE.to_string());
-    req.set_method(TEST_METHOD.to_string());
-    req.payload = b"test".to_vec();
+    let req = Request {
+        service: TEST_SERVICE.to_string(),
+        method: TEST_METHOD.to_string(),
+        payload: b"test".to_vec(),
+        ..Default::default()
+    };
 
     let resp = client.request(req).unwrap();
 
@@ -208,11 +211,13 @@ fn test_sync_accept_hook_rejects_connection() {
     let client = Client::new(fd).unwrap();
 
     // Send a request to trigger the accept loop processing the connection
-    let mut req = Request::new();
-    req.set_service(TEST_SERVICE.to_string());
-    req.set_method(TEST_METHOD.to_string());
-    req.payload = b"fail".to_vec();
-    req.timeout_nano = 2_000_000_000; // 2 second timeout
+    let req = Request {
+        service: TEST_SERVICE.to_string(),
+        method: TEST_METHOD.to_string(),
+        payload: b"fail".to_vec(),
+        timeout_nano: 2_000_000_000, // 2 second timeout
+        ..Default::default()
+    };
 
     let result = client.request(req);
 
@@ -283,10 +288,12 @@ fn test_sync_xor_transform_roundtrip() {
         b"abc".to_vec(),
         vec![0u8; 1024],
     ] {
-        let mut req = Request::new();
-        req.set_service(TEST_SERVICE.to_string());
-        req.set_method(TEST_METHOD.to_string());
-        req.payload = payload.clone();
+        let req = Request {
+            service: TEST_SERVICE.to_string(),
+            method: TEST_METHOD.to_string(),
+            payload: payload.clone(),
+            ..Default::default()
+        };
 
         let resp = client.request(req).unwrap();
         // Response has "role:sync-client|" prefix + original payload
@@ -324,10 +331,12 @@ fn test_sync_connection_data_propagated() {
     let fd = create_connected_fd(&sock_path);
     let client = Client::with_hook(fd, connect_hook).unwrap();
 
-    let mut req = Request::new();
-    req.set_service(TEST_SERVICE.to_string());
-    req.set_method(TEST_METHOD.to_string());
-    req.payload = b"data".to_vec();
+    let req = Request {
+        service: TEST_SERVICE.to_string(),
+        method: TEST_METHOD.to_string(),
+        payload: b"data".to_vec(),
+        ..Default::default()
+    };
 
     let resp = client.request(req).unwrap();
     // Verify the connection data was accessible in the handler

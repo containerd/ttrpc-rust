@@ -101,9 +101,8 @@ fn connect_once() {
         assert_eq!(resp, expected_resp);
 
         println!(
-            "OS Thread {:?} - agent.list_interfaces() -> {} ended: {:?}",
+            "OS Thread {:?} - agent.list_interfaces() -> {resp:?} ended: {:?}",
             std::thread::current().id(),
-            "{resp:?}",
             now.elapsed(),
         );
     });

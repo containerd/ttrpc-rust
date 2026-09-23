@@ -48,9 +48,11 @@ endif
 check:
 	cargo fmt --all -- --check
 	cargo clippy --all-targets $(FEATURES) -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps $(FEATURES)
 ifeq ($(SUBCRATE),)
 ifneq ($(OS),Windows_NT)
-	cargo clippy --all-targets --no-default-features --features sync,async,prost -- -D warnings
+	cargo clippy --all-targets --no-default-features --features sync,async,prost,security_extension -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --no-default-features --features sync,async,prost,security_extension
 endif
 endif
 
@@ -59,3 +61,5 @@ check-all:
 	$(MAKE) check
 	$(MAKE) -C compiler check
 	$(MAKE) -C ttrpc-codegen check
+	$(MAKE) -C example check
+	$(MAKE) -C example-prost check

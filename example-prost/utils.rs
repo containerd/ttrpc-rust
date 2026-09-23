@@ -11,7 +11,7 @@ pub fn remove_if_sock_exist(sock_addr: &str) -> Result<()> {
         .expect("socket address is not expected");
 
     if Path::new(path).exists() {
-        fs::remove_file(&path)?;
+        fs::remove_file(path)?;
     }
 
     Ok(())
@@ -29,9 +29,7 @@ pub mod resp {
     }
 
     pub fn online_cpu_mem_not_impl() -> ttrpc::Error {
-        ttrpc::Error::RpcStatus(not_implemented_status(
-            "/grpc.AgentService/OnlineCPUMem",
-        ))
+        ttrpc::Error::RpcStatus(not_implemented_status("/grpc.AgentService/OnlineCPUMem"))
     }
 
     pub fn sync_agent_list_interfaces() -> ttrpc::Result<p::sync::agent::Interfaces> {
@@ -46,7 +44,6 @@ pub mod resp {
                     ..Default::default()
                 },
             ],
-            ..Default::default()
         })
     }
 
@@ -54,7 +51,6 @@ pub mod resp {
         Ok(p::sync::health::VersionCheckResponse {
             grpc_version: "0.0.1".to_string(),
             agent_version: "mock 0.1".to_string(),
-            ..Default::default()
         })
     }
 
@@ -70,7 +66,6 @@ pub mod resp {
                     ..Default::default()
                 },
             ],
-            ..Default::default()
         })
     }
 
@@ -78,7 +73,6 @@ pub mod resp {
         Ok(p::r#async::health::VersionCheckResponse {
             grpc_version: "0.0.1".to_string(),
             agent_version: "mock 0.1".to_string(),
-            ..Default::default()
         })
     }
 }

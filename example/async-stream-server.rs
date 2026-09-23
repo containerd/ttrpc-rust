@@ -158,7 +158,7 @@ impl streaming_ttrpc::Streaming for StreamingService {
             sleep(std::time::Duration::from_millis(100)).await;
             let mut e = streaming::EchoPayload::new();
             e.seq = seq;
-            e.msg = format!("hello");
+            e.msg = "hello".to_string();
             s.send(&e).await.unwrap();
             seq += 1;
         }
