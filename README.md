@@ -258,7 +258,7 @@ ttrpc does not provide TLS. If you expose TCP beyond a trusted boundary, secure 
 
 ## Compatibility
 
-- Runtime and code generators minimum supported Rust version: **1.85**
+- Runtime and code generators minimum supported Rust version: **1.80**
 - Repository development toolchain: see [`rust-toolchain.toml`](https://github.com/containerd/ttrpc-rust/blob/master/rust-toolchain.toml)
 - Default features: `sync`, `rustprotobuf`
 - Optional features: `async`, `prost`, `security_extension` (Unix only)

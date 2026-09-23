@@ -9,13 +9,20 @@ jobs:
     name: Minimum Supported Rust Version
     runs-on: ubuntu-latest
     env:
-      RUSTUP_TOOLCHAIN: "1.85.0"
-      CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+      RUSTUP_TOOLCHAIN: "1.80.0"
     steps:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Install Rust
-        run: rustup toolchain install 1.85.0 --profile minimal
+        run: |
+          rustup toolchain install 1.80.0 --profile minimal
+          rustup toolchain install 1.85.0 --profile minimal
+      - name: Resolve Rust 1.80 compatible dependencies
+        run: |
+          # Cargo 1.80 cannot use the MSRV-aware fallback resolver.
+          RUSTUP_TOOLCHAIN=1.85.0 CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo generate-lockfile
+          RUSTUP_TOOLCHAIN=1.85.0 CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo generate-lockfile --manifest-path codegen/Cargo.toml
+          RUSTUP_TOOLCHAIN=1.85.0 CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo generate-lockfile --manifest-path example-prost/Cargo.toml
       - name: Install Protoc
         run: ./install_protoc.sh
         shell: bash
@@ -24,6 +31,7 @@ jobs:
           cargo test --workspace --features async,sync,security_extension
           cargo test -p ttrpc --no-default-features --features sync,async,prost
           cargo test --manifest-path codegen/Cargo.toml
+          cargo check --manifest-path example-prost/Cargo.toml --examples
 
   check:
     name: Check
