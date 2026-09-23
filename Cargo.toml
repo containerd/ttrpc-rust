@@ -16,7 +16,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2018"
-rust-version = "1.85"
+rust-version = "1.80"
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/containerd/ttrpc-rust"

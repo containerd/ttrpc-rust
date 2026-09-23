@@ -2,7 +2,7 @@
 name = "ttrpc-codegen-prost"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.80"
 authors = ["The Ant Group Kata Team <kata@list.alibaba-inc.com>"]
 license = "Apache-2.0"
 keywords = ["codegen", "ttrpc", "protobuf"]
