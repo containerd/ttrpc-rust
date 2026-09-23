@@ -12,7 +12,6 @@ use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use futures::StreamExt as _;
 use tokio::{
     self, select, spawn,
@@ -411,7 +410,6 @@ struct ServerWriter {
     _server_shutdown: shutdown::Waiter,
 }
 
-#[async_trait]
 impl WriterDelegate for ServerWriter {
     async fn recv(&mut self) -> Option<SendingMessage> {
         self.rx.recv().await
@@ -428,7 +426,6 @@ struct ServerReader {
     conn_ctx: Arc<ConnectionContext>,
 }
 
-#[async_trait]
 impl ReaderDelegate for ServerReader {
     async fn wait_shutdown(&self) {
         self.server_shutdown.wait_shutdown().await

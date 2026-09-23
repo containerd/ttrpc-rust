@@ -18,18 +18,19 @@ use crate::sync::sys::PipeConnection;
 
 fn read_count(conn: &PipeConnection, count: usize) -> Result<Vec<u8>> {
     let mut v: Vec<u8> = vec![0; count];
+    let len = read_into(conn, &mut v)?;
+    v.truncate(len);
+    Ok(v)
+}
+
+fn read_into(conn: &PipeConnection, buf: &mut [u8]) -> Result<usize> {
     let mut len = 0;
-
-    if count == 0 {
-        return Ok(v.to_vec());
-    }
-
-    loop {
-        match conn.read(&mut v[len..]) {
+    while len < buf.len() {
+        match conn.read(&mut buf[len..]) {
             Ok(l) => {
                 len += l;
                 // when socket peer closed, it would return 0.
-                if len == count || l == 0 {
+                if l == 0 {
                     break;
                 }
             }
@@ -39,7 +40,7 @@ fn read_count(conn: &PipeConnection, count: usize) -> Result<Vec<u8>> {
         }
     }
 
-    Ok(v[0..len].to_vec())
+    Ok(len)
 }
 
 fn write_count(conn: &PipeConnection, buf: &[u8], count: usize) -> Result<usize> {
@@ -79,8 +80,8 @@ fn discard_count(conn: &PipeConnection, count: usize) -> Result<()> {
 }
 
 fn read_message_header(conn: &PipeConnection) -> Result<MessageHeader> {
-    let buf = read_count(conn, MESSAGE_HEADER_LENGTH)?;
-    let size = buf.len();
+    let mut buf = [0; MESSAGE_HEADER_LENGTH];
+    let size = read_into(conn, &mut buf)?;
     if size != MESSAGE_HEADER_LENGTH {
         return Err(sock_error_msg(
             size,
@@ -88,7 +89,7 @@ fn read_message_header(conn: &PipeConnection) -> Result<MessageHeader> {
         ));
     }
 
-    let mh = MessageHeader::from(&buf);
+    let mh = MessageHeader::from(buf);
 
     Ok(mh)
 }
@@ -117,7 +118,8 @@ pub fn read_message(conn: &PipeConnection) -> Result<(MessageHeader, Result<Vec<
 }
 
 fn write_message_header(conn: &PipeConnection, mh: MessageHeader) -> Result<()> {
-    let buf: Vec<u8> = mh.into();
+    let mut buf = [0; MESSAGE_HEADER_LENGTH];
+    mh.into_buf(&mut buf);
 
     let size = write_count(conn, &buf, MESSAGE_HEADER_LENGTH)?;
     if size != MESSAGE_HEADER_LENGTH {

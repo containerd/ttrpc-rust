@@ -138,7 +138,7 @@ impl PipeListener {
             Ok(fd) => {
                 if let Err(err) = set_fd_close_exec(fd) {
                     error!("fcntl failed after accept: {:?}", err);
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("{err:?}")));
+                    return Err(io::Error::other(format!("{err:?}")));
                 };
                 fd
             }
@@ -287,7 +287,7 @@ impl ClientConnection {
         }
 
         if pollers[0].revents != 0 {
-            return Err(io::Error::new(io::ErrorKind::Other, "pipe closed"));
+            return Err(io::Error::other("pipe closed"));
         }
 
         if pollers[pollers.len() - 1].revents == 0 {

@@ -33,10 +33,10 @@ pub struct Socket {
 
 macro_rules! io_other {
     ($fmt_str:literal, $($args:expr),*) => {
-        IoError::new(std::io::ErrorKind::Other, format!($fmt_str, $($args),*))
+        IoError::other(format!($fmt_str, $($args),*))
     };
     ($fmt_str:literal) => {
-        IoError::new(std::io::ErrorKind::Other, format!($fmt_str))
+        IoError::other(format!($fmt_str))
     };
 }
 

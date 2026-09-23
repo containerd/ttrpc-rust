@@ -113,20 +113,21 @@ pub fn from_pb(kvs: &Vec<KeyValue>) -> HashMap<String, Vec<String>> {
 pub fn to_pb(kvs: HashMap<String, Vec<String>>) -> Vec<KeyValue> {
     let mut meta = Vec::with_capacity(kvs.len());
 
-    for (k, vl) in kvs {
-        for v in vl {
-            #[cfg(not(feature = "prost"))]
-            let key = KeyValue {
-                key: k.clone(),
-                value: v.clone(),
-                ..Default::default()
+    for (mut k, vl) in kvs {
+        let mut values = vl.into_iter().peekable();
+        while let Some(value) = values.next() {
+            let key = if values.peek().is_some() {
+                k.clone()
+            } else {
+                std::mem::take(&mut k)
             };
-            #[cfg(feature = "prost")]
-            let key = KeyValue {
-                key: k.clone(),
-                value: v.clone(),
+            let entry = KeyValue {
+                key,
+                value,
+                #[cfg(feature = "rustprotobuf")]
+                special_fields: Default::default(),
             };
-            meta.push(key);
+            meta.push(entry);
         }
     }
 
@@ -147,16 +148,11 @@ mod tests {
             ("key1", "value1-2"),
             ("key2", "value2"),
         ] {
-            #[cfg(not(feature = "prost"))]
             let key = KeyValue {
                 key: i.0.to_string(),
                 value: i.1.to_string(),
-                ..Default::default()
-            };
-            #[cfg(feature = "prost")]
-            let key = KeyValue {
-                key: i.0.to_string(),
-                value: i.1.to_string(),
+                #[cfg(feature = "rustprotobuf")]
+                special_fields: Default::default(),
             };
             src.push(key);
         }

@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use async_trait::async_trait;
+use std::future::Future;
 use log::{error, trace};
 use tokio::io::{split, AsyncWrite};
 use tokio::time::{sleep_until, Instant};
@@ -29,10 +29,11 @@ pub(crate) fn request_timeout_error() -> Error {
 async fn write_message(
     writer: &mut (impl AsyncWrite + Unpin),
     sending_msg: &SendingMessage,
+    prefix: &mut Vec<u8>,
 ) -> WriteOutcome {
     let Some(control) = sending_msg.control.as_ref() else {
         trace!("write message: {:?}", sending_msg.msg);
-        return WriteOutcome::Complete(sending_msg.msg.write_to(writer).await);
+        return WriteOutcome::Complete(sending_msg.msg.write_to_buffered(writer, prefix).await);
     };
     let deadline = control.deadline();
 
@@ -48,14 +49,14 @@ async fn write_message(
     if let Some(deadline) = deadline {
         select! {
             biased;
-            result = sending_msg.msg.write_to(writer) => WriteOutcome::Complete(result),
+            result = sending_msg.msg.write_to_buffered(writer, prefix) => WriteOutcome::Complete(result),
             _ = control.cancelled() => WriteOutcome::Cancelled,
             _ = sleep_until(deadline) => WriteOutcome::DeadlineElapsed,
         }
     } else {
         select! {
             biased;
-            result = sending_msg.msg.write_to(writer) => WriteOutcome::Complete(result),
+            result = sending_msg.msg.write_to_buffered(writer, prefix) => WriteOutcome::Complete(result),
             _ = control.cancelled() => WriteOutcome::Cancelled,
         }
     }
@@ -65,12 +66,14 @@ async fn run_writer(
     mut writer: impl AsyncWrite + Unpin,
     mut writer_delegate: impl WriterDelegate,
 ) -> Result<()> {
+    // One bounded prefix buffer per connection, reused across frames.
+    let mut prefix = Vec::new();
     let result = loop {
         let Some(mut sending_msg) = writer_delegate.recv().await else {
             break Ok(());
         };
 
-        let failure = match write_message(&mut writer, &sending_msg).await {
+        let failure = match write_message(&mut writer, &sending_msg, &mut prefix).await {
             WriteOutcome::Complete(Ok(())) => {
                 sending_msg.send_result(Ok(()));
                 continue;
@@ -114,19 +117,17 @@ pub trait Builder {
     fn build(&mut self) -> (Self::Reader, Self::Writer);
 }
 
-#[async_trait]
 pub trait WriterDelegate {
-    async fn recv(&mut self) -> Option<SendingMessage>;
-    async fn exit(&self);
+    fn recv(&mut self) -> impl Future<Output = Option<SendingMessage>> + Send;
+    fn exit(&self) -> impl Future<Output = ()> + Send;
 }
 
-#[async_trait]
 pub trait ReaderDelegate {
-    async fn wait_shutdown(&self);
-    async fn disconnect(&self, e: Error);
-    async fn exit(&self);
-    async fn handle_msg(&self, msg: GenMessage);
-    async fn handle_err(&self, header: MessageHeader, e: Error);
+    fn wait_shutdown(&self) -> impl Future<Output = ()> + Send;
+    fn disconnect(&self, e: Error) -> impl Future<Output = ()> + Send;
+    fn exit(&self) -> impl Future<Output = ()> + Send;
+    fn handle_msg(&self, msg: GenMessage) -> impl Future<Output = ()> + Send;
+    fn handle_err(&self, header: MessageHeader, e: Error) -> impl Future<Output = ()> + Send;
 }
 
 pub struct Connection<B: Builder> {
@@ -162,6 +163,8 @@ where
             mut writer_task,
             reader_delegate,
         } = self;
+        let shutdown = reader_delegate.wait_shutdown();
+        tokio::pin!(shutdown);
         loop {
             select! {
                 // Writer failures take priority, then shutdown, then incoming frames.
@@ -181,7 +184,7 @@ where
                     }
                     break;
                 }
-                _v = reader_delegate.wait_shutdown() => {
+                _v = &mut shutdown => {
                     trace!("Receive shutdown.");
                     break;
                 }
