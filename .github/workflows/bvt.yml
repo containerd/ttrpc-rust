@@ -16,13 +16,6 @@ jobs:
       - name: Install Rust
         run: |
           rustup toolchain install 1.80.0 --profile minimal
-          rustup toolchain install 1.85.0 --profile minimal
-      - name: Resolve Rust 1.80 compatible dependencies
-        run: |
-          # Cargo 1.80 cannot use the MSRV-aware fallback resolver.
-          RUSTUP_TOOLCHAIN=1.85.0 CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo generate-lockfile
-          RUSTUP_TOOLCHAIN=1.85.0 CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo generate-lockfile --manifest-path ttrpc-codegen-prost/Cargo.toml
-          RUSTUP_TOOLCHAIN=1.85.0 CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo generate-lockfile --manifest-path example-prost/Cargo.toml
       - name: Install Protoc
         run: ./install_protoc.sh
         shell: bash

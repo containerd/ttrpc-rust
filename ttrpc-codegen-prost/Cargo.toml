@@ -24,3 +24,6 @@ prost-types = "0.13"
 prost-build = "0.13"
 proc-macro2 = "1.0"
 quote = "1.0"
+# Keep transitive prost-build dependencies compatible with Cargo 1.80.
+tempfile = ">=3.0, <3.25"
+indexmap = ">=2.0, <2.12"

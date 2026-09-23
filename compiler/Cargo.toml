@@ -15,9 +15,8 @@ homepage = "https://github.com/containerd/ttrpc-rust/tree/master/compiler"
 [dependencies]
 protobuf = { workspace = true }
 protobuf-codegen = { workspace = true }
-
-[dev-dependencies]
-tempfile = "3.0"
+# Constrain protobuf-codegen's tempfile for downstream Cargo 1.80 users.
+tempfile = ">=3.0, <3.25"
 
 [[bin]]
 name = "ttrpc_rust_plugin"
