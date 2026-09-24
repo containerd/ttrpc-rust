@@ -20,4 +20,5 @@ protobuf-parse = { workspace = true }
 ttrpc-compiler = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+# Newer tempfile selects getrandom 0.4, which Cargo 1.80 cannot parse.
+tempfile = ">=3.0, <3.25"

@@ -3,6 +3,7 @@ name = "ttrpc-example-prost"
 version = "0.2.0"
 authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 edition = "2018"
+rust-version = "1.80"
 license = "Apache-2.0"
 keywords = ["ttrpc", "protobuf", "rpc", "prost"]
 description = "An example of ttrpc using the Prost backend."
@@ -24,6 +25,12 @@ rand = "0.8.5"
 
 [build-dependencies]
 ttrpc-codegen-prost = { version = "0.1.0", path = "../ttrpc-codegen-prost" }
+
+[dev-dependencies]
+# Newer tempfile selects getrandom 0.4, which Cargo 1.80 cannot parse.
+tempfile = ">=3.0, <3.25"
+# Newer indexmap releases require a newer Rust/Cargo toolchain.
+indexmap = ">=2.0, <2.12"
 
 [[example]]
 name = "client"

@@ -16,7 +16,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2018"
-rust-version = "1.85"
+rust-version = "1.80"
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/containerd/ttrpc-rust"
@@ -76,6 +76,10 @@ prost-build = { version = "0.13", optional = true }
 
 [dev-dependencies]
 ttrpc-codegen = { workspace = true }
+# Newer tempfile selects getrandom 0.4, which Cargo 1.80 cannot parse.
+tempfile = ">=3.0, <3.25"
+# Newer indexmap releases require a newer Rust/Cargo toolchain.
+indexmap = ">=2.0, <2.12"
 
 [features]
 default = ["sync","rustprotobuf"]

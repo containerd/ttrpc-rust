@@ -2,7 +2,7 @@
 name = "ttrpc-codegen-prost"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.80"
 authors = ["The Ant Group Kata Team <kata@list.alibaba-inc.com>"]
 license = "Apache-2.0"
 keywords = ["codegen", "ttrpc", "protobuf"]
@@ -24,3 +24,9 @@ prost-types = "0.13"
 prost-build = "0.13"
 proc-macro2 = "1.0"
 quote = "1.0"
+
+[dev-dependencies]
+# Newer tempfile selects getrandom 0.4, which Cargo 1.80 cannot parse.
+tempfile = ">=3.0, <3.25"
+# Newer indexmap releases require a newer Rust/Cargo toolchain.
+indexmap = ">=2.0, <2.12"

@@ -3,6 +3,7 @@ name = "ttrpc-example"
 version = "0.2.0"
 authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 edition = "2018"
+rust-version = "1.80"
 license = "Apache-2.0"
 keywords = ["ttrpc", "protobuf", "rpc"]
 readme = "README.md"
@@ -20,7 +21,9 @@ ctrlc = { version = "3.0", features = ["termination"] }
 tokio = { version = "1.0.1", features = ["signal", "time", "rt-multi-thread", "macros"] }
 async-trait = "0.1.42"
 rand = "0.8.5"
-clap = { version = "4.5.40", features = ["derive"] }
+clap = { version = ">=4.5.40, <4.6", features = ["derive"] }
+# clap 4.5 accepts clap_lex 1.1, whose 2024 edition needs newer Cargo.
+clap_lex = ">=1.0, <1.1"
 
 [[example]]
 name = "client"

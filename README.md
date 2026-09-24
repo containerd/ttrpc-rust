@@ -258,7 +258,11 @@ ttrpc does not provide TLS. If you expose TCP beyond a trusted boundary, secure 
 
 ## Compatibility
 
-- Runtime and code generators minimum supported Rust version: **1.85**
+- Runtime and code generators minimum supported Rust version: **1.80**
+- With Rust 1.80–1.84, a fresh dependency resolution may select transitive
+  crates requiring a newer toolchain. If needed, constrain `tempfile` to
+  `<3.25` in your application's `Cargo.toml`. For `indexmap`, use `<2.12` on
+  Rust 1.80–1.81 or `<2.14` on Rust 1.82–1.84.
 - Repository development toolchain: see [`rust-toolchain.toml`](https://github.com/containerd/ttrpc-rust/blob/master/rust-toolchain.toml)
 - Default features: `sync`, `rustprotobuf`
 - Optional features: `async`, `prost`, `security_extension` (Unix only)
