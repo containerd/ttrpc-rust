@@ -3,9 +3,7 @@
 All notable changes to the `ttrpc-codegen-prost` crate are documented here.
 The format is based on [Keep a Changelog].
 
-## [Unreleased]
-
-The first release is being prepared as `0.1.0`.
+## [0.1.0] - 2026-09-30
 
 ### Added
 
@@ -25,7 +23,7 @@ The first release is being prepared as `0.1.0`.
 - Renamed the unpublished Prost package from `ttrpc-codegen` version `1.0.0`
   to `ttrpc-codegen-prost` version `0.1.0`. Rust imports now use
   `ttrpc_codegen_prost`; the rust-protobuf `ttrpc-codegen` package retains
-  its existing name and version line.
+  its existing name and version line. ([#332])
 
 ### Fixed
 
@@ -33,5 +31,6 @@ The first release is being prepared as `0.1.0`.
   descriptors share the same output package file. ([#286])
 
 [Keep a Changelog]: https://keepachangelog.com/en/2.0.0/
-[Unreleased]: https://github.com/containerd/ttrpc-rust/commits/master/ttrpc-codegen-prost
+[0.1.0]: https://github.com/containerd/ttrpc-rust/tree/v0.10.0/ttrpc-codegen-prost
 [#286]: https://github.com/containerd/ttrpc-rust/pull/286
+[#332]: https://github.com/containerd/ttrpc-rust/pull/332

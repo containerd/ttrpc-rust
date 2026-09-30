@@ -1,8 +1,30 @@
 # Release Process
 
-This document describes the steps to release a new version of the crate or wasi-demo-app images.
+This document describes how to release the ttrpc runtime and code generators.
 
 ## Crate Release Process
+
+### Versioning
+
+Choose versions relative to each crate's latest published release, not an
+unpublished version already present on the development branch. For `0.x.y`
+crates, incompatible changes require incrementing `x` and resetting `y` to zero,
+following [Cargo's compatibility rules]. Check both the generator's public API
+(including re-exported dependency types) and the generated bindings.
+
+The v0.10.0 release set is:
+
+| Crate | Previous release | New release |
+| --- | --- | --- |
+| `ttrpc` | 0.9.0 | 0.10.0 |
+| `ttrpc-compiler` | 0.8.0 | 0.9.0 |
+| `ttrpc-codegen` | 0.6.0 | 0.7.0 |
+| `ttrpc-codegen-prost` | Unpublished | 0.1.0 |
+
+The example crates have `publish = false` and use local path dependencies;
+their package versions are independent of this release.
+
+[Cargo's compatibility rules]: https://doc.rust-lang.org/cargo/reference/semver.html#change-categories
 
 ### Release Steps
 
@@ -16,19 +38,32 @@ This document describes the steps to release a new version of the crate or wasi-
    * `./ttrpc-codegen/Cargo.toml`: Bump the package version as needed.
    * `./Cargo.toml`: Bump package version as needed. Then bump the workspace dependencies version to match the respective crates versions.
    * `./ttrpc-codegen-prost/Cargo.toml`: Bump `ttrpc-codegen-prost` as needed and update its dependency version in `./example-prost/Cargo.toml`.
-3. Commit the changes and get them merged in the repo.
-4. Dry run the `cargo publish` command as follows:
+3. Update dependency examples, compatibility tables, and migration notes in
+   the READMEs and crate-level API documentation (`src/lib.rs`).
+4. Validate the release using the toolchain pinned in `rust-toolchain.toml`:
    ```bash
-   cargo +nightly publish \
-     -Z package-workspace \
+   cargo build -p ttrpc-example --examples
+   cargo test --workspace --features sync,async,security_extension
+   cargo test -p ttrpc --no-default-features --features sync,async,prost,security_extension
+   make check-all
+   ```
+   These commands are for Unix; `security_extension` is not supported on
+   Windows. Run the standalone Prost generator checks below as well.
+   Cargo.lock files are not tracked in this repository. These validation
+   commands generate them; keep them for the locked publish checks. Run
+   validation sequentially because example tests start Cargo subprocesses.
+5. Commit the release changes and dry run publishing the workspace crates:
+   ```bash
+   cargo publish \
      --dry-run \
      --locked \
      -p ttrpc \
      -p ttrpc-codegen \
      -p ttrpc-compiler
    ```
-5. If the dry run succeeds, publish the crates that need publishing using
-   `cargo publish -p <crate>` in the following order:
+6. After the release changes are merged and all checks pass, publish the
+   selected crates from the validated revision using
+   `cargo publish --locked -p <crate>` in the following order:
    1. `ttrpc-compiler`
    2. `ttrpc-codegen`
    3. `ttrpc`
@@ -41,6 +76,7 @@ publish it separately when selected for release:
 
 ```bash
 cargo test --manifest-path ttrpc-codegen-prost/Cargo.toml
+make -C ttrpc-codegen-prost check
 cargo build --manifest-path example-prost/Cargo.toml --examples
 cargo publish --manifest-path ttrpc-codegen-prost/Cargo.toml --dry-run --locked
 # After the dry run succeeds and the release changes are merged:
