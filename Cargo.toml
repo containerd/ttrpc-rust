@@ -28,7 +28,7 @@ authors = ["The AntFin Kata Team <kata@list.alibaba-inc.com>"]
 # workspace by specifying `workspace = true` instead of the crate
 # version. For example, for protobuf:
 #   protobuf = { workspace = true }
-ttrpc = { version = "0.9.0", path = "./" }
+ttrpc = { version = "0.10.0", path = "./" }
 ttrpc-codegen = { version = "0.7.0", path = "./ttrpc-codegen" }
 ttrpc-compiler = { version = "0.9.0", path = "./compiler" }
 protobuf = "3.7.2"
@@ -37,7 +37,7 @@ protobuf-parse = "3.7.2"
 
 [package]
 name = "ttrpc"
-version = "0.9.0"
+version = "0.10.0"
 authors = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
