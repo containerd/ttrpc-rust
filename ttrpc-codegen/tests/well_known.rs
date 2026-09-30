@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
-use ttrpc_codegen::{parse_and_typecheck, Codegen, Customize};
+use ttrpc_codegen::{parse_and_typecheck, Codegen, Customize, ProtobufCustomize};
 
 fn proto_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/protos")
@@ -46,11 +46,15 @@ fn generates_runtime_paths_for_embedded_types() {
             .rust_protobuf()
             .customize(Customize {
                 async_all,
+                gen_mod: true,
                 ..Default::default()
             })
+            .rust_protobuf_customize(ProtobufCustomize::default().gen_mod_rs(true))
             .run()
             .unwrap();
 
+        let modules = fs::read_to_string(output.path().join("mod.rs")).unwrap();
+        assert!(modules.starts_with("// @generated\n#![cfg_attr(rustfmt, rustfmt::skip)]\n"));
         let messages = fs::read_to_string(output.path().join("well_known.rs")).unwrap();
         let services = fs::read_to_string(output.path().join("well_known_ttrpc.rs")).unwrap();
         let timestamp = "::protobuf::well_known_types::timestamp::Timestamp";

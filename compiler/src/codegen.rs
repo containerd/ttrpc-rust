@@ -743,7 +743,8 @@ pub fn gen(
 /// Generates ttrpc service files and writes them to `out_dir`.
 ///
 /// When [`Customize::gen_mod`](crate::Customize::gen_mod) is enabled, this function also creates
-/// or updates `mod.rs` without discarding existing module declarations.
+/// or updates `mod.rs` without discarding existing module declarations. Generated indexes opt out
+/// of rustfmt, and existing comments and attributes retain their order.
 ///
 /// # Errors
 ///
@@ -762,13 +763,18 @@ pub fn gen_and_write(
 
     if customize.gen_mod {
         let file_path = out_dir.join("mod.rs");
-        let mut set = HashSet::new();
-        let mut lines = Vec::new();
+        let generated = "// @generated";
+        let rustfmt_skip = "#![cfg_attr(rustfmt, rustfmt::skip)]";
+        let mut lines = vec![generated.to_owned(), rustfmt_skip.to_owned()];
+        let mut set: HashSet<_> = lines.iter().cloned().collect();
         // Preserve existing order so comments and attributes stay with their modules.
         if let Ok(file) = File::open(&file_path) {
             let reader = io::BufReader::new(file);
             for line in reader.lines() {
                 let line = line?;
+                if line == generated || line == rustfmt_skip {
+                    continue;
+                }
                 set.insert(line.clone());
                 lines.push(line);
             }
@@ -842,7 +848,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generated_mod_rs_is_stable_and_preserves_existing_lines() {
+    fn generated_mod_rs_skips_rustfmt_and_preserves_existing_lines() {
         let descriptors: Vec<_> = ["zeta.proto", "alpha.proto"]
             .iter()
             .map(|&name| FileDescriptorProto {
@@ -858,9 +864,26 @@ mod tests {
             gen_mod: true,
             ..Default::default()
         };
-        let existing = "// @generated\n\n// Keep this module gated.\n#[cfg(unix)]\npub mod custom;\n\n#[cfg(unix)]\npub mod another;\npub mod alpha_ttrpc;\n";
+        let existing = "\n// Keep this module gated.\n#[cfg(unix)]\npub mod custom;\n\n#[cfg(unix)]\npub mod another;\npub mod alpha_ttrpc;\n";
+        let protobuf_modules = "\npub mod alpha;\npub mod zeta;\n";
+        let header = "// @generated\n#![cfg_attr(rustfmt, rustfmt::skip)]\n";
+        let existing_index = format!("// @generated\n{existing}");
+        let protobuf_index = format!("// @generated\n{protobuf_modules}");
 
-        for initial in [None, Some(existing)] {
+        for (initial, expected) in [
+            (
+                None,
+                format!("{header}pub mod alpha_ttrpc;\npub mod zeta_ttrpc;\n"),
+            ),
+            (
+                Some(existing_index.as_str()),
+                format!("{header}{existing}pub mod zeta_ttrpc;\n"),
+            ),
+            (
+                Some(protobuf_index.as_str()),
+                format!("{header}{protobuf_modules}pub mod alpha_ttrpc;\npub mod zeta_ttrpc;\n"),
+            ),
+        ] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("mod.rs");
             if let Some(contents) = initial {
@@ -872,10 +895,6 @@ mod tests {
                 "alpha.proto".to_owned(),
             ];
             gen_and_write(&descriptors, &inputs, dir.path(), &customize).unwrap();
-            let expected = match initial {
-                Some(contents) => format!("{contents}pub mod zeta_ttrpc;\n"),
-                None => "pub mod alpha_ttrpc;\npub mod zeta_ttrpc;\n".to_owned(),
-            };
             assert_eq!(fs::read_to_string(&path).unwrap(), expected);
 
             inputs.reverse();
