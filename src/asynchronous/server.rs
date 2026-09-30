@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::future::Future;
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
 use std::result::Result as StdResult;
@@ -284,7 +285,7 @@ impl Server {
                                             services,
                                             shutdown_waiter,
                                             conn_ctx,
-                                        ).await;
+                                        );
                                     });
                                 }
                                 Err(e) => {
@@ -306,6 +307,45 @@ impl Server {
             }
         });
         Ok(())
+    }
+
+    /// Serves a single already-connected socket with the registered services.
+    ///
+    /// The returned future does not borrow the server, so it can be awaited directly or passed to
+    /// `tokio::spawn`. It completes when the connection terminates or the server is shut down.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the accept hook rejects the connection, or if reading from or writing
+    /// to the connection fails.
+    pub fn serve_connection(
+        &self,
+        conn: Socket,
+    ) -> impl Future<Output = Result<()>> + Send + 'static {
+        let services = self.services.clone();
+        let shutdown_waiter = self.shutdown.subscribe();
+        #[cfg(feature = "security_extension")]
+        let server_ext = ServerExtensionConfig {
+            accept_hook: self.accept_hook.clone(),
+        };
+
+        async move {
+            #[cfg(feature = "security_extension")]
+            let conn_ctx = match server_ext.on_accept(&conn).await {
+                Ok(output) => Arc::new(ConnectionContext::new(output)),
+                Err(e) => return Err(Error::Others(format!("accept hook failed: {e}"))),
+            };
+            #[cfg(not(feature = "security_extension"))]
+            let conn_ctx = Arc::new(ConnectionContext::default());
+
+            let delegate = ServerBuilder {
+                services,
+                streams: Arc::new(Mutex::new(HashMap::new())),
+                shutdown_waiter,
+                conn_ctx,
+            };
+            Connection::new(conn, delegate).run().await
+        }
     }
 
     /// Stops the listener, closes active connections, and releases the listener.
@@ -349,7 +389,7 @@ impl Server {
     }
 }
 
-async fn spawn_connection_handler(
+fn spawn_connection_handler(
     conn: Socket,
     services: Arc<HashMap<String, Service>>,
     shutdown_waiter: shutdown::Waiter,
@@ -814,5 +854,26 @@ mod tests {
         // Sleep to wait for shutdown of server caused by server's lifetime over
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         assert!(!is_socket_in_use(addr));
+    }
+
+    #[tokio::test]
+    async fn test_serve_connection_returns_read_error() {
+        let server = Server::new();
+        let (local, peer) = tokio::net::UnixStream::pair().unwrap();
+        let task = tokio::spawn(server.serve_connection(local.into()));
+        drop(peer);
+
+        let res = task.await.unwrap();
+        assert!(matches!(res, Err(Error::Socket(_))), "{:?}", res);
+    }
+
+    #[tokio::test]
+    async fn test_serve_connection_returns_ok_on_shutdown() {
+        let mut server = Server::new();
+        let (local, _peer) = tokio::net::UnixStream::pair().unwrap();
+        let task = tokio::spawn(server.serve_connection(local.into()));
+
+        server.shutdown().await.unwrap();
+        assert_eq!(task.await.unwrap(), Ok(()));
     }
 }
