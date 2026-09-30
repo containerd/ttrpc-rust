@@ -3,23 +3,19 @@
 This standalone crate generates Prost messages and ttrpc clients, server traits,
 and service registration helpers from `.proto` files. It requires `protoc` on
 `PATH` and uses Prost 0.13. The runtime must also use the `prost` backend.
-The separate `ttrpc-codegen` package continues to use rust-protobuf. This
-generator was previously an unpublished package with the same name; its first
-release is planned as `ttrpc-codegen-prost` 0.1.0.
+The separate `ttrpc-codegen` package continues to use rust-protobuf.
+`ttrpc-codegen-prost` 0.1 targets ttrpc 0.10.
 
 ## Build a service
 
-The following example assumes your application and a checkout of this repository
-are sibling directories:
+Create an application with the following layout:
 
 ```text
-parent/
-  ttrpc-rust/
-  prost-greeter/
-    Cargo.toml
-    build.rs
-    proto/greeter.proto
-    src/lib.rs
+prost-greeter/
+  Cargo.toml
+  build.rs
+  proto/greeter.proto
+  src/lib.rs
 ```
 
 In the application's `Cargo.toml`:
@@ -32,15 +28,11 @@ edition = "2021"
 
 [dependencies]
 prost = "0.13"
-ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
+ttrpc = { version = "0.10", default-features = false, features = ["sync", "prost"] }
 
 [build-dependencies]
-ttrpc-codegen-prost = { version = "0.1", path = "../ttrpc-rust/ttrpc-codegen-prost" }
+ttrpc-codegen-prost = "0.1"
 ```
-
-The `ttrpc-codegen-prost/` directory contains the Prost generator;
-`ttrpc-codegen/` contains the rust-protobuf generator. Use the local path above
-until the Prost generator is published.
 
 Define `proto/greeter.proto`:
 
@@ -104,7 +96,7 @@ Replace the application's runtime dependencies with:
 [dependencies]
 async-trait = "0.1"
 prost = "0.13"
-ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["async", "prost"] }
+ttrpc = { version = "0.10", default-features = false, features = ["async", "prost"] }
 tokio = { version = "1", features = ["macros", "rt"] }
 ```
 
