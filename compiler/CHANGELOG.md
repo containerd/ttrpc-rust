@@ -9,13 +9,39 @@ published crates and Git history. Release dates are crates.io publication
 dates. Releases are ordered by publication date because multiple version
 lines were maintained in parallel.
 
-## [Unreleased]
+## [0.9.0] - 2026-09-30
+
+### API changes
+
+- **Breaking:** RPC bindings for canonical Google well-known types now use
+  the types from the `protobuf` runtime unless their proto files are selected
+  explicitly for generation. Update service implementations and call sites
+  that used locally generated well-known types. These bindings require the
+  new handler macro forms in ttrpc 0.10. ([#322])
+- **Migration:** Upgrade the runtime to ttrpc 0.10 and regenerate bindings.
+  Build scripts using `ttrpc-codegen` should upgrade it to 0.7.
+
+### Added
+
+- Resolved canonical Google well-known RPC input and output types through the
+  `protobuf` runtime, while preserving locally generated types when their
+  proto files are explicitly selected as inputs. ([#322])
+
+### Fixed
+
+- Stabilized generated module ordering and kept generated `mod.rs` files from
+  being reordered by rustfmt, without duplicating headers or declarations.
+  ([#326], [#335])
+
+### Changed
+
+- Expanded public API documentation. ([#320])
 
 ### Removed
 
 - **Breaking:** Removed the unused `prost_codegen` module, which generated
   grpcio bindings, and its Prost 0.8 dependencies. Use the standalone Prost
-  generator in `ttrpc-codegen-prost/` for ttrpc bindings.
+  generator in `ttrpc-codegen-prost/` for ttrpc bindings. ([#332])
 
 ## [0.8.0] - 2025-07-15
 
@@ -183,6 +209,7 @@ lines were maintained in parallel.
 
 [Keep a Changelog]: https://keepachangelog.com/en/2.0.0/
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
+[0.9.0]: https://github.com/containerd/ttrpc-rust/compare/v0.9.0...v0.10.0
 [0.8.0]: https://github.com/containerd/ttrpc-rust/compare/1d4cdeaf...f31f5925
 [0.7.0]: https://github.com/containerd/ttrpc-rust/compare/b9e9dd8a...1d4cdeaf
 [0.6.3]: https://github.com/containerd/ttrpc-rust/compare/6fe7d395...b9e9dd8a
@@ -199,3 +226,8 @@ lines were maintained in parallel.
 [0.3.2]: https://github.com/containerd/ttrpc-rust/compare/7e3634e0...4bebaa0f
 [0.3.1]: https://github.com/containerd/ttrpc-rust/commits/7e3634e0
 [0.3.0]: https://crates.io/crates/ttrpc-compiler/0.3.0
+[#320]: https://github.com/containerd/ttrpc-rust/pull/320
+[#322]: https://github.com/containerd/ttrpc-rust/pull/322
+[#326]: https://github.com/containerd/ttrpc-rust/pull/326
+[#332]: https://github.com/containerd/ttrpc-rust/pull/332
+[#335]: https://github.com/containerd/ttrpc-rust/pull/335

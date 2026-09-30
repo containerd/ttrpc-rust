@@ -1,11 +1,16 @@
-# A compiler of ttrpc-rust
+# ttrpc-compiler
 
-generate rust version ttrpc code from proto files.
+Generate rust-protobuf ttrpc service bindings from Protocol Buffers descriptors.
 
 ## Usage
 
-- [Manual Generation](https://github.com/containerd/ttrpc-rust#1-generate-with-protoc-command) uses ttrpc-compiler as a protoc plugin
-- [Programmatic Generation](https://github.com/containerd/ttrpc-rust#2-generate-programmatically) uses ttrpc-compiler as a rust crate
+- For build-script generation, use [`ttrpc-codegen`](../ttrpc-codegen/README.md).
+  The [quick start](../README.md#add-ttrpc-to-your-project) includes the runtime
+  dependencies, proto definition, and build script.
+- For manual generation, install the `ttrpc_rust_plugin` binary with
+  `cargo install ttrpc-compiler --version 0.9.0 --locked` and configure `protoc`
+  to use it as the `protoc-gen-ttrpc` plugin. This generates service bindings;
+  generate the message types separately with `protobuf-codegen`.
 
 ## Well-known types
 
@@ -14,9 +19,15 @@ corresponding types provided by the `protobuf` runtime. Well-known proto files e
 for generation continue to use their locally generated modules.
 
 ## Versions
+
+Use these release pairs:
+
 | ttrpc-compiler version | ttrpc version |
 | ------------- | ------------- |
-| 0.3.x | <= 0.4.x |
-| 0.4.x | == 0.5.x  |
-| 0.5.x | == 0.6.x |
-| 0.6.x | >= 0.7.x |
+| 0.8.0 | 0.9.x |
+| 0.9.x | 0.10.x |
+
+Version 0.9 requires Rust 1.80 or newer. It removes the legacy `prost_codegen`
+module and changes the generated APIs for well-known types. See the
+[0.10 migration guide](../README.md#upgrading-from-09) and
+[compiler changelog](./CHANGELOG.md) before upgrading.
