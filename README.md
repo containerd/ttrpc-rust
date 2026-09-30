@@ -71,10 +71,10 @@ Add the runtime, Protocol Buffers support, and build-time generator:
 ```toml
 [dependencies]
 protobuf = "3.7"
-ttrpc = "0.9"
+ttrpc = "0.10"
 
 [build-dependencies]
-ttrpc-codegen = "0.6"
+ttrpc-codegen = "0.7.0"
 ```
 
 For async clients, servers, and streaming, use the following dependency set:
@@ -83,11 +83,11 @@ For async clients, servers, and streaming, use the following dependency set:
 [dependencies]
 async-trait = "0.1"
 protobuf = "3.7"
-ttrpc = { version = "0.9", features = ["async"] }
+ttrpc = { version = "0.10", features = ["async"] }
 tokio = { version = "1", features = ["macros", "rt"] }
 
 [build-dependencies]
-ttrpc-codegen = "0.6"
+ttrpc-codegen = "0.7.0"
 ```
 
 Define a service in `proto/greeter.proto`:
@@ -179,23 +179,22 @@ You can generate only one side with `async_client` or `async_server`. Streaming 
 
 ## Using Prost
 
-Prost support in this checkout uses `prost` 0.13 and requires `protoc` on `PATH`
-for both the runtime build and application code generation. Use a local dependency
-on the checkout to try the current implementation:
+Prost support uses `prost` 0.13 and requires `protoc` on `PATH` for both the
+runtime build and application code generation:
 
 ```toml
 [dependencies]
 prost = "0.13"
-ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
+ttrpc = { version = "0.10", default-features = false, features = ["sync", "prost"] }
 
 [build-dependencies]
-ttrpc-codegen-prost = { version = "0.1", path = "../ttrpc-rust/ttrpc-codegen-prost" }
+ttrpc-codegen-prost = "0.1"
 ```
 
-Adjust the paths to your checkout. The `ttrpc-codegen-prost` package is separate
-from the rust-protobuf `ttrpc-codegen` package; its first release is planned as
-version 0.1. The two protobuf backend features are mutually exclusive. Because disabling
-default features also disables `sync`, list the runtime features explicitly.
+The `ttrpc-codegen-prost` package is separate from the rust-protobuf
+`ttrpc-codegen` package and uses its own version line. The two protobuf backend
+features are mutually exclusive. Because disabling default features also
+disables `sync`, list the runtime features explicitly.
 
 Use `.prost()` in `build.rs`. Set `Customize::async_all = true` for async bindings
 and enable the runtime's `async` feature; generated async bindings also require
@@ -268,6 +267,37 @@ ttrpc does not provide TLS. If you expose TCP beyond a trusted boundary, secure 
 - Optional features: `async`, `prost`, `security_extension` (Unix only)
 - Enable exactly one of `rustprotobuf` and `prost`; never use `--all-features` for the runtime.
 - Keep `protobuf`, `protobuf-codegen`, and generated sources on matching versions. Regenerate bindings after changing the Protocol Buffers runtime version.
+
+### Upgrading from 0.9
+
+Upgrade the runtime and generators together, then regenerate checked-in bindings:
+
+| Component | Version for this release |
+| --- | --- |
+| `ttrpc` | 0.10 |
+| `ttrpc-codegen` (rust-protobuf) | 0.7 |
+| `ttrpc-compiler` (also used by `ttrpc-codegen`) | 0.9 |
+| `ttrpc-codegen-prost` (Prost) | 0.1 |
+
+- With default features disabled, explicitly select `rustprotobuf` or `prost`
+  as well as `sync` and/or `async`. For Prost, follow [Using Prost](#using-prost).
+- Import `Customize` from `ttrpc_codegen`, or upgrade a direct
+  `ttrpc-compiler` dependency to 0.9. The 0.8 and 0.9 types are not interchangeable.
+- Generated RPC inputs and outputs for canonical Google well-known types now
+  use `protobuf::well_known_types` unless their proto files are explicitly
+  selected for generation. Update affected service signatures and call sites.
+- Code that constructs server contexts directly must initialize the new
+  sync `conn_ctx` or async `connection_data` field. `Default::default()` gives
+  either field an empty context; async contexts also support `..Default::default()`.
+- Custom `proto::Codec` implementations must implement `merge`.
+  `asynchronous::StreamInner::new` is no longer public; use generated clients
+  and typed stream APIs. Custom sync handlers should use `TtrpcContext::respond`
+  or `send_response` so connection payload transforms are applied.
+
+The removed `ttrpc_compiler::prost_codegen` module generated grpcio bindings.
+For ttrpc with Prost, use the separate `ttrpc-codegen-prost` package.
+See the [runtime](./CHANGELOG.md), [compiler](./compiler/CHANGELOG.md), and
+[codegen](./ttrpc-codegen/CHANGELOG.md) changelogs for the full API changes.
 
 ## Development
 

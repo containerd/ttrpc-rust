@@ -8,6 +8,58 @@ published crates and Git history. Release dates are crates.io publication
 dates. Because several release lines were maintained in parallel, releases
 are ordered by publication date rather than version number.
 
+## [0.10.0] - 2026-09-30
+
+### API changes
+
+- **Breaking:** Builds with default features disabled must explicitly select
+  either `rustprotobuf` or `prost`, along with the desired runtime features.
+  The two protobuf backends are mutually exclusive. ([#286])
+- **Breaking:** Direct construction of synchronous `TtrpcContext` now requires
+  `conn_ctx`; asynchronous `TtrpcContext` requires `connection_data`. Use a
+  default connection context or `..Default::default()` for async test contexts.
+  ([#316])
+- **Breaking:** Custom implementations of `proto::Codec` must implement the
+  new `merge` method. ([#286])
+- **Breaking:** `asynchronous::StreamInner::new` is no longer public; use the
+  generated clients and typed stream APIs instead. ([#316])
+- **Migration:** Regenerate rust-protobuf bindings with `ttrpc-codegen` 0.7.0
+  and `ttrpc-compiler` 0.9.0. For Prost, use `ttrpc-codegen-prost` 0.1.0 with
+  Prost 0.13 and install `protoc`.
+- **Deprecated:** Use `TtrpcContext::respond` or `send_response` instead of
+  `response_to_channel` to preserve per-connection payload transforms. ([#316])
+
+### Added
+
+- Added a Prost 0.13 backend for synchronous, asynchronous, and streaming RPCs.
+  ([#286])
+- Added the Unix-only `security_extension` feature with accept/connect hooks,
+  per-connection metadata, and pluggable payload transforms. ([#316])
+- Added API documentation, backend setup guides, and Prost examples.
+  ([#286], [#320], [#329])
+
+### Changed
+
+- Reduced allocation and copying by reusing sync receive and async send
+  buffers, using stack-allocated frame headers, and moving owned metadata.
+  ([#328])
+- Coalesced async frame headers with a bounded payload prefix and removed
+  boxed futures from internal connection delegates. ([#327], [#328])
+- Raised the declared minimum supported Rust version from 1.70 to 1.80 and
+  added CI coverage for both protobuf backends and the code generators on
+  Rust 1.80. ([#333])
+
+### Fixed
+
+- Enforced async unary request deadlines during queueing and writing, and
+  cleaned up pending registrations when requests time out or are cancelled.
+  ([#318])
+- Preserved client stream frame ordering, including data and close frames.
+  ([#312])
+- Closed async connections after writer failures. ([#324])
+- Validated the complete encoded request size, including the protobuf envelope.
+  ([#286])
+
 ## [0.9.0] - 2025-07-15
 
 ### API changes
@@ -519,6 +571,7 @@ are ordered by publication date rather than version number.
 
 [Keep a Changelog]: https://keepachangelog.com/en/2.0.0/
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
+[0.10.0]: https://github.com/containerd/ttrpc-rust/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/containerd/ttrpc-rust/compare/cfe37a2c...f31f5925
 [0.8.6]: https://github.com/containerd/ttrpc-rust/compare/af812a6f...44d34d5c
 [0.5.10]: https://github.com/containerd/ttrpc-rust/compare/9a79290f...5784dc00
@@ -564,3 +617,13 @@ are ordered by publication date rather than version number.
 [0.2.1]: https://github.com/containerd/ttrpc-rust/compare/fce4b488...90d85de6
 [0.2.0]: https://github.com/containerd/ttrpc-rust/compare/76888ad7...fce4b488
 [0.1.0]: https://github.com/containerd/ttrpc-rust/commits/76888ad7
+[#286]: https://github.com/containerd/ttrpc-rust/pull/286
+[#312]: https://github.com/containerd/ttrpc-rust/pull/312
+[#316]: https://github.com/containerd/ttrpc-rust/pull/316
+[#318]: https://github.com/containerd/ttrpc-rust/pull/318
+[#320]: https://github.com/containerd/ttrpc-rust/pull/320
+[#324]: https://github.com/containerd/ttrpc-rust/pull/324
+[#327]: https://github.com/containerd/ttrpc-rust/pull/327
+[#328]: https://github.com/containerd/ttrpc-rust/pull/328
+[#329]: https://github.com/containerd/ttrpc-rust/pull/329
+[#333]: https://github.com/containerd/ttrpc-rust/pull/333
