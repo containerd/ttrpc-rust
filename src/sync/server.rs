@@ -563,9 +563,10 @@ impl Server {
                             let pipe = pipe_connection_child.clone();
                             let (res_tx, res_rx): (MessageSender, MessageReceiver) = channel();
                             let handler = thread::spawn(move || {
+                                let mut prefix = Vec::new();
                                 for r in res_rx.iter() {
                                     trace!("response thread get {:?}", r);
-                                    if let Err(e) = write_message(&pipe, r.0, r.1) {
+                                    if let Err(e) = write_message(&pipe, r.0, &r.1, &mut prefix) {
                                         error!("write_message got {:?}", e);
                                         quit_res.store(true, Ordering::SeqCst);
                                         break;

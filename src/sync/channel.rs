@@ -43,30 +43,6 @@ fn read_into(conn: &PipeConnection, buf: &mut [u8]) -> Result<usize> {
     Ok(len)
 }
 
-fn write_count(conn: &PipeConnection, buf: &[u8], count: usize) -> Result<usize> {
-    let mut len = 0;
-
-    if count == 0 {
-        return Ok(0);
-    }
-
-    loop {
-        match conn.write(&buf[len..]) {
-            Ok(l) => {
-                len += l;
-                if len == count {
-                    break;
-                }
-            }
-            Err(e) => {
-                return Err(Error::Socket(e.to_string()));
-            }
-        }
-    }
-
-    Ok(len)
-}
-
 fn discard_count(conn: &PipeConnection, count: usize) -> Result<()> {
     let mut need_discard = count;
 
@@ -117,31 +93,171 @@ pub fn read_message(conn: &PipeConnection) -> Result<(MessageHeader, Result<Vec<
     Ok((mh, Ok(buf)))
 }
 
-fn write_message_header(conn: &PipeConnection, mh: MessageHeader) -> Result<()> {
-    let mut buf = [0; MESSAGE_HEADER_LENGTH];
-    mh.into_buf(&mut buf);
+pub fn write_message(
+    conn: &PipeConnection,
+    header: MessageHeader,
+    payload: &[u8],
+    prefix: &mut Vec<u8>,
+) -> Result<()> {
+    write_frame(header, payload, prefix, |bytes| {
+        conn.write(bytes).map_err(|e| Error::Socket(e.to_string()))
+    })
+}
 
-    let size = write_count(conn, &buf, MESSAGE_HEADER_LENGTH)?;
-    if size != MESSAGE_HEADER_LENGTH {
-        return Err(sock_error_msg(
-            size,
-            format!("Send Message header length size {size} is not right"),
-        ));
+fn write_frame(
+    header: MessageHeader,
+    payload: &[u8],
+    prefix: &mut Vec<u8>,
+    mut write: impl FnMut(&[u8]) -> Result<usize>,
+) -> Result<()> {
+    // Match the async writer: coalesce only a bounded prefix and reuse it.
+    let prefix_len = payload.len().min(DEFAULT_PAGE_SIZE - MESSAGE_HEADER_LENGTH);
+    let len = MESSAGE_HEADER_LENGTH + prefix_len;
+    if prefix.capacity() < len {
+        prefix.reserve_exact(len - prefix.len());
     }
+    prefix.resize(len, 0);
+    header.into_buf(&mut *prefix);
+    prefix[MESSAGE_HEADER_LENGTH..].copy_from_slice(&payload[..prefix_len]);
 
+    for mut remaining in [prefix.as_slice(), &payload[prefix_len..]] {
+        while !remaining.is_empty() {
+            let written = write(remaining)?;
+            if written == 0 {
+                return Err(Error::Socket(
+                    "failed to write ttrpc frame: write zero".into(),
+                ));
+            }
+            remaining = &remaining[written..];
+        }
+    }
     Ok(())
 }
 
-pub fn write_message(conn: &PipeConnection, mh: MessageHeader, buf: Vec<u8>) -> Result<()> {
-    write_message_header(conn, mh)?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let size = write_count(conn, &buf, buf.len())?;
-    if size != buf.len() {
-        return Err(sock_error_msg(
-            size,
-            format!("Send Message length size {size} is not right"),
-        ));
+    fn frame_bytes(header: MessageHeader, payload: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0; MESSAGE_HEADER_LENGTH];
+        header.into_buf(&mut bytes);
+        bytes.extend_from_slice(payload);
+        bytes
     }
 
-    Ok(())
+    #[test]
+    fn writes_a_bounded_prefix_and_handles_short_writes() {
+        let boundary = DEFAULT_PAGE_SIZE - MESSAGE_HEADER_LENGTH;
+        for size in [0, 1, boundary - 1, boundary, boundary + 1, 128 * 1024] {
+            let payload: Vec<_> = (0..size).map(|i| i as u8).collect();
+            let header = MessageHeader::new_request(7, size as u32);
+            for max_write in [usize::MAX, 3] {
+                let mut prefix = Vec::new();
+                let mut bytes = Vec::new();
+                let mut writes = Vec::new();
+                write_frame(header, &payload, &mut prefix, |buf| {
+                    let n = buf.len().min(max_write);
+                    writes.push(n);
+                    bytes.extend_from_slice(&buf[..n]);
+                    Ok(n)
+                })
+                .unwrap();
+                assert_eq!(bytes, frame_bytes(header, &payload));
+                assert!(prefix.len() <= DEFAULT_PAGE_SIZE);
+                if max_write == usize::MAX {
+                    assert_eq!(writes.len(), if size > boundary { 2 } else { 1 });
+                    assert_eq!(
+                        writes[0],
+                        (size + MESSAGE_HEADER_LENGTH).min(DEFAULT_PAGE_SIZE)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reuses_buffer_without_sending_stale_bytes() {
+        let mut prefix = Vec::with_capacity(DEFAULT_PAGE_SIZE);
+        let original_buffer = prefix.as_ptr();
+        let original_capacity = prefix.capacity();
+        let mut bytes = Vec::new();
+        let mut expected = Vec::new();
+        for (id, size) in [DEFAULT_PAGE_SIZE * 2, 0, 64, DEFAULT_PAGE_SIZE, 1]
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            let payload = vec![id as u8; size];
+            let header = MessageHeader::new_response(id as u32, size as u32);
+            write_frame(header, &payload, &mut prefix, |buf| {
+                let n = buf.len().min(7);
+                bytes.extend_from_slice(&buf[..n]);
+                Ok(n)
+            })
+            .unwrap();
+            assert_eq!(prefix.as_ptr(), original_buffer);
+            assert_eq!(prefix.capacity(), original_capacity);
+            expected.extend(frame_bytes(header, &payload));
+        }
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn propagates_write_errors_and_rejects_zero_writes() {
+        let payload = vec![1; DEFAULT_PAGE_SIZE];
+        let header = MessageHeader::new_response(7, payload.len() as u32);
+        // Fail in either the coalesced prefix or the remaining payload.
+        for fail_at in [0, 1] {
+            for zero in [false, true] {
+                let mut calls = 0;
+                let result = write_frame(header, &payload, &mut Vec::new(), |buf| {
+                    let call = calls;
+                    calls += 1;
+                    if call != fail_at {
+                        return Ok(buf.len());
+                    }
+                    if zero {
+                        Ok(0)
+                    } else {
+                        Err(Error::Socket("broken pipe".into()))
+                    }
+                });
+                assert!(matches!(result, Err(Error::Socket(_))));
+                assert_eq!(calls, fail_at + 1);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn round_trips_reused_frames_over_a_socket() {
+        use std::os::unix::{io::AsRawFd, net::UnixStream};
+        use std::{thread, time::Duration};
+
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        sender
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let sizes = [128 * 1024, 1, 0, DEFAULT_PAGE_SIZE, 64];
+        let reader = thread::spawn(move || {
+            let conn = PipeConnection::new(receiver.as_raw_fd());
+            for (id, size) in sizes.iter().copied().enumerate() {
+                let (header, payload) = read_message(&conn).unwrap();
+                assert_eq!(header, MessageHeader::new_response(id as u32, size as u32));
+                assert_eq!(payload.unwrap(), vec![id as u8; size]);
+            }
+            assert!(read_message(&conn).is_err());
+        });
+        let conn = PipeConnection::new(sender.as_raw_fd());
+        let mut prefix = Vec::new();
+        for (id, size) in sizes.iter().copied().enumerate() {
+            let header = MessageHeader::new_response(id as u32, size as u32);
+            write_message(&conn, header, &vec![id as u8; size], &mut prefix).unwrap();
+        }
+        drop(sender);
+        reader.join().unwrap();
+    }
 }
