@@ -143,6 +143,7 @@ impl Client {
         let sender_ctx = conn_ctx.clone();
         thread::spawn(move || {
             let mut stream_id: u32 = 1;
+            let mut prefix = Vec::new();
             for (buf, recver_tx) in rx.iter() {
                 let current_stream_id = stream_id;
                 stream_id += 2;
@@ -176,7 +177,7 @@ impl Client {
                     }
                 };
 
-                if let Err(e) = write_message(&sender_client, mh, buf) {
+                if let Err(e) = write_message(&sender_client, mh, &buf, &mut prefix) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
                         let mut map = receiver_map.lock().unwrap();
