@@ -71,10 +71,10 @@ Add the runtime, Protocol Buffers support, and build-time generator:
 ```toml
 [dependencies]
 protobuf = "3.7"
-ttrpc = "0.9"
+ttrpc = "0.10"
 
 [build-dependencies]
-ttrpc-codegen = "0.6"
+ttrpc-codegen = "0.7.0"
 ```
 
 For async clients, servers, and streaming, use the following dependency set:
@@ -83,11 +83,11 @@ For async clients, servers, and streaming, use the following dependency set:
 [dependencies]
 async-trait = "0.1"
 protobuf = "3.7"
-ttrpc = { version = "0.9", features = ["async"] }
+ttrpc = { version = "0.10", features = ["async"] }
 tokio = { version = "1", features = ["macros", "rt"] }
 
 [build-dependencies]
-ttrpc-codegen = "0.6"
+ttrpc-codegen = "0.7.0"
 ```
 
 Define a service in `proto/greeter.proto`:
@@ -179,23 +179,22 @@ You can generate only one side with `async_client` or `async_server`. Streaming 
 
 ## Using Prost
 
-Prost support in this checkout uses `prost` 0.13 and requires `protoc` on `PATH`
-for both the runtime build and application code generation. Use a local dependency
-on the checkout to try the current implementation:
+Prost support uses `prost` 0.13 and requires `protoc` on `PATH` for both the
+runtime build and application code generation:
 
 ```toml
 [dependencies]
 prost = "0.13"
-ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
+ttrpc = { version = "0.10", default-features = false, features = ["sync", "prost"] }
 
 [build-dependencies]
-ttrpc-codegen-prost = { version = "0.1", path = "../ttrpc-rust/ttrpc-codegen-prost" }
+ttrpc-codegen-prost = "0.1"
 ```
 
-Adjust the paths to your checkout. The `ttrpc-codegen-prost` package is separate
-from the rust-protobuf `ttrpc-codegen` package; its first release is planned as
-version 0.1. The two protobuf backend features are mutually exclusive. Because disabling
-default features also disables `sync`, list the runtime features explicitly.
+The `ttrpc-codegen-prost` package is separate from the rust-protobuf
+`ttrpc-codegen` package and uses its own version line. The two protobuf backend
+features are mutually exclusive. Because disabling default features also
+disables `sync`, list the runtime features explicitly.
 
 Use `.prost()` in `build.rs`. Set `Customize::async_all = true` for async bindings
 and enable the runtime's `async` feature; generated async bindings also require
@@ -268,6 +267,10 @@ ttrpc does not provide TLS. If you expose TCP beyond a trusted boundary, secure 
 - Optional features: `async`, `prost`, `security_extension` (Unix only)
 - Enable exactly one of `rustprotobuf` and `prost`; never use `--all-features` for the runtime.
 - Keep `protobuf`, `protobuf-codegen`, and generated sources on matching versions. Regenerate bindings after changing the Protocol Buffers runtime version.
+
+For release notes and API migration details, see the
+[runtime](./CHANGELOG.md), [compiler](./compiler/CHANGELOG.md),
+and [codegen](./ttrpc-codegen/CHANGELOG.md) changelogs.
 
 ## Development
 

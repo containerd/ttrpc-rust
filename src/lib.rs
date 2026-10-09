@@ -33,20 +33,21 @@
 //!
 //! ```toml
 //! [dependencies]
-//! ttrpc = "0.9"
+//! protobuf = "3.7"
+//! ttrpc = "0.10"
 //!
 //! [build-dependencies]
-//! ttrpc-codegen = "0.6"
+//! ttrpc-codegen = "0.7"
 //! ```
 //!
 //! To use the Tokio runtime, disable the default synchronous runtime or enable both:
 //!
 //! ```toml
 //! # Async only
-//! ttrpc = { version = "0.9", default-features = false, features = ["async", "rustprotobuf"] }
+//! ttrpc = { version = "0.10", default-features = false, features = ["async", "rustprotobuf"] }
 //!
 //! # Sync and async
-//! # ttrpc = { version = "0.9", features = ["async"] }
+//! # ttrpc = { version = "0.10", features = ["async"] }
 //! ```
 //!
 //! Generate message types and service bindings from `build.rs`:
@@ -74,6 +75,10 @@
 //! helper for the server. See the repository's complete [client, server, and streaming examples]
 //! for working programs.
 //!
+//! When upgrading from ttrpc 0.9, use ttrpc-codegen 0.7 and ttrpc-compiler 0.9,
+//! regenerate bindings, and review the [runtime changelog]. The runtime and generators
+//! require Rust 1.80 or newer.
+//!
 //! # Choosing a runtime
 //!
 //! | Runtime | Feature | Execution model | Streaming |
@@ -91,15 +96,18 @@
 //! uses Prost message types. Enable exactly one backend and pair it with `sync`, `async`, or
 //! both runtime features. Disabling default features also disables `sync` and `rustprotobuf`.
 //!
-//! To use the Prost implementation from a checkout of this repository:
+//! To use the Prost backend:
 //!
 //! ```toml
 //! [dependencies]
 //! prost = "0.13"
-//! ttrpc = { path = "../ttrpc-rust", default-features = false, features = ["sync", "prost"] }
+//! ttrpc = { version = "0.10", default-features = false, features = ["sync", "prost"] }
+//!
+//! [build-dependencies]
+//! ttrpc-codegen-prost = "0.1"
 //! ```
 //!
-//! Adjust the path to your checkout. Install `protoc` for the runtime build and application
+//! Install `protoc` for the runtime build and application
 //! code generation, and use the separate [Prost generator] in `ttrpc-codegen-prost/`. Its builder uses
 //! `.prost()` and supports `Customize::async_all` for async and streaming bindings.
 //! Generated Rust modules follow the protobuf package name; see the [Prost examples] for
@@ -187,6 +195,7 @@
 //! [client, server, and streaming examples]: https://github.com/containerd/ttrpc-rust/tree/master/example
 //! [Prost generator]: https://github.com/containerd/ttrpc-rust/tree/master/ttrpc-codegen-prost
 //! [Prost examples]: https://github.com/containerd/ttrpc-rust/tree/master/example-prost
+//! [runtime changelog]: https://github.com/containerd/ttrpc-rust/blob/v0.10.0/CHANGELOG.md
 //! [ttrpc]: https://github.com/containerd/ttrpc
 //! [`ttrpc-codegen`]: https://docs.rs/ttrpc-codegen
 

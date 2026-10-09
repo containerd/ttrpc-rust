@@ -47,20 +47,26 @@ Cargo.toml:
 
 ```
 [build-dependencies]
-ttrpc-codegen = "0.2"
+ttrpc-codegen = "0.7.0"
 ```
 
 ## Versions
+
+Use these release pairs:
+
 | ttrpc-codegen version | ttrpc version |
 | ------------- | ------------- |
-| 0.1.x | <= 0.4.x  |
-| 0.2.x | == 0.5.x  |
-| 0.3.x | == 0.6.x  |
-| 0.4.x | >= 0.7.x  |
-| 0.5.x | >= 0.7.x  |
+| 0.6.0 | 0.9.x |
+| 0.7.x | 0.10.x |
+
+Version 0.7 requires Rust 1.80 or newer and uses `ttrpc-compiler` 0.9.
+Import `Customize` from `ttrpc_codegen` to use the matching compiler type.
+Regenerate bindings and review the [runtime changelog](../CHANGELOG.md)
+when upgrading from 0.6; see the [changelog](./CHANGELOG.md) for API details.
 
 ## Alternative
-The alternative is to use
-[protoc-rust crate](https://github.com/stepancheg/rust-protobuf),
-which relies on `protoc` command to parse descriptors. Both crates should produce the same result,
-otherwise please file a bug report.
+
+For manual rust-protobuf service generation with `protoc`, use the
+[`ttrpc-compiler` plugin](../compiler/README.md#usage).
+For Prost messages and services, use the separate
+[`ttrpc-codegen-prost` package](../ttrpc-codegen-prost/README.md).

@@ -4,16 +4,38 @@ All notable changes to the `ttrpc-codegen` crate are documented in this file.
 
 The format is based on [Keep a Changelog], and this project follows
 [Semantic Versioning]. Historical entries were reconstructed from the
-published crates and Git history. Release dates are crates.io publication
-dates. Releases are ordered by publication date because multiple version
-lines were maintained in parallel.
+published crates and Git history. Dates on historical entries are crates.io
+publication dates. Historical releases are ordered by publication date rather
+than version number because several release lines were maintained in parallel.
+New release entries omit dates; see crates.io for publication timestamps.
 
-## [Unreleased]
+## [0.7.0]
+
+### API changes
+
+- **Breaking:** The re-exported `Customize` type and `Codegen::customize`
+  now use `ttrpc-compiler` 0.9. Types from `ttrpc-compiler` 0.8 are not
+  interchangeable; use `ttrpc_codegen::Customize` or upgrade direct compiler
+  dependencies to 0.9. ([#332])
+- **Breaking:** RPC bindings for canonical Google well-known types now use
+  the types from the `protobuf` runtime unless their proto files are selected
+  explicitly for generation. Update service implementations and call sites
+  that used locally generated well-known types. These bindings require the
+  new handler macro forms in ttrpc 0.10. ([#322])
+- **Migration:** Upgrade to ttrpc 0.10 and regenerate checked-in bindings.
+  This release starts a new compatibility line rather than a 0.6 patch.
+
+### Added
+
+- Resolved canonical Google well-known proto imports without extra include
+  directories or copied proto files. ([#322])
 
 ### Changed
 
+- Replaced the bundled proto parser with `protobuf-parse` 3.7.2. ([#322])
 - Updated the `ttrpc-compiler` dependency to 0.9.0 after removing its unused
-  legacy Prost generator.
+  legacy Prost generator. ([#332])
+- Expanded API documentation and retained Rust 1.80 support. ([#320], [#333])
 
 ## [0.6.0] - 2025-07-15
 
@@ -169,6 +191,7 @@ lines were maintained in parallel.
 
 [Keep a Changelog]: https://keepachangelog.com/en/2.0.0/
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
+[0.7.0]: https://github.com/containerd/ttrpc-rust/compare/v0.9.0...v0.10.0
 [0.6.0]: https://github.com/containerd/ttrpc-rust/compare/1d4cdeaf...f31f5925
 [0.5.0]: https://github.com/containerd/ttrpc-rust/compare/22cd9ca4...1d4cdeaf
 [0.2.4]: https://github.com/containerd/ttrpc-rust/compare/4b90ee15...8968bfad
@@ -184,3 +207,7 @@ lines were maintained in parallel.
 [0.2.0]: https://github.com/containerd/ttrpc-rust/compare/9ea607a6...eef20041
 [0.1.2]: https://github.com/containerd/ttrpc-rust/compare/ec2a9193...9ea607a6
 [0.1.1]: https://github.com/containerd/ttrpc-rust/commits/ec2a9193
+[#320]: https://github.com/containerd/ttrpc-rust/pull/320
+[#322]: https://github.com/containerd/ttrpc-rust/pull/322
+[#332]: https://github.com/containerd/ttrpc-rust/pull/332
+[#333]: https://github.com/containerd/ttrpc-rust/pull/333
