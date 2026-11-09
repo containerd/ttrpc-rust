@@ -77,17 +77,11 @@ impl AsyncWrite for BlockedSocket {
         Poll::Pending
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Poll::Pending
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -111,17 +105,11 @@ impl AsyncWrite for SinkSocket {
         Poll::Ready(Ok(buf.len()))
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -153,17 +141,11 @@ impl AsyncWrite for GatedSocket {
         }
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         self.gate.poll_ready(cx).map(|()| Ok(()))
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -175,11 +157,7 @@ fn blocked_client() -> (Client, Arc<AtomicUsize>, Arc<Notify>) {
         write_polls: write_polls.clone(),
         write_started: write_started.clone(),
     };
-    (
-        Client::new(Socket::new(socket)),
-        write_polls,
-        write_started,
-    )
+    (Client::new(Socket::new(socket)), write_polls, write_started)
 }
 
 fn request_with_timeout(timeout: Duration) -> Request {
@@ -210,7 +188,14 @@ async fn request_deadline_covers_a_full_outbound_queue() {
         .into_iter()
         .all(|result| result.expect("request task panicked").is_err()));
     assert!(write_polls.load(Ordering::Relaxed) > 0);
-    assert!(client.streams.lock().unwrap().is_empty());
+    assert!(client
+        .session()
+        .await
+        .unwrap()
+        .streams
+        .lock()
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]
@@ -222,8 +207,15 @@ async fn response_timeout_removes_the_stream_without_closing_the_connection() {
         .await;
 
     assert!(result.is_err());
-    assert!(client.streams.lock().unwrap().is_empty());
-    assert!(!client.req_tx.is_closed());
+    assert!(client
+        .session()
+        .await
+        .unwrap()
+        .streams
+        .lock()
+        .unwrap()
+        .is_empty());
+    assert!(!client.session().await.unwrap().req_tx.is_closed());
 }
 
 #[tokio::test]
@@ -235,6 +227,9 @@ async fn expired_queued_request_preserves_the_timeout_error() {
         payload: Vec::new(),
     };
     client
+        .session()
+        .await
+        .unwrap()
         .req_tx
         .send(SendingMessage::new(blocker))
         .await
@@ -249,6 +244,9 @@ async fn expired_queued_request_preserves_the_timeout_error() {
         payload: Vec::new(),
     };
     client
+        .session()
+        .await
+        .unwrap()
         .req_tx
         .send(SendingMessage::new(marker))
         .await
@@ -257,9 +255,7 @@ async fn expired_queued_request_preserves_the_timeout_error() {
     tokio::time::sleep(Duration::from_millis(75)).await;
     gate.open();
     timeout(Duration::from_secs(1), async {
-        while gate.bytes_written.load(Ordering::Relaxed)
-            < 2 * crate::proto::MESSAGE_HEADER_LENGTH
-        {
+        while gate.bytes_written.load(Ordering::Relaxed) < 2 * crate::proto::MESSAGE_HEADER_LENGTH {
             tokio::task::yield_now().await;
         }
     })
@@ -274,8 +270,15 @@ async fn expired_queued_request_preserves_the_timeout_error() {
         gate.bytes_written.load(Ordering::Relaxed),
         2 * crate::proto::MESSAGE_HEADER_LENGTH
     );
-    assert!(client.streams.lock().unwrap().is_empty());
-    assert!(!client.req_tx.is_closed());
+    assert!(client
+        .session()
+        .await
+        .unwrap()
+        .streams
+        .lock()
+        .unwrap()
+        .is_empty());
+    assert!(!client.session().await.unwrap().req_tx.is_closed());
 }
 
 #[tokio::test]
@@ -290,8 +293,18 @@ async fn cancelling_an_in_progress_write_cleans_up_and_closes_the_connection() {
     request.abort();
     request.await.expect_err("request task was not cancelled");
 
-    timeout(Duration::from_secs(1), client.req_tx.closed())
+    timeout(
+        Duration::from_secs(1),
+        client.session().await.unwrap().req_tx.closed(),
+    )
+    .await
+    .expect("connection was not closed after cancelling an in-progress write");
+    assert!(client
+        .session()
         .await
-        .expect("connection was not closed after cancelling an in-progress write");
-    assert!(client.streams.lock().unwrap().is_empty());
+        .unwrap()
+        .streams
+        .lock()
+        .unwrap()
+        .is_empty());
 }

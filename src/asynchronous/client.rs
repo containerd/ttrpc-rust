@@ -6,10 +6,15 @@
 
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::future::Future;
+
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+
+use futures::future::{BoxFuture, Shared};
+use futures::FutureExt;
 
 use tokio::{
     self,
@@ -62,16 +67,64 @@ impl Drop for StreamRegistrationGuard<'_> {
     }
 }
 
-/// A cloneable asynchronous ttrpc connection.
+/// A cloneable asynchronous ttrpc client.
 ///
 /// Generated service clients wrap this type. Clones share one connection and can issue concurrent
-/// unary and streaming requests.
+/// unary and streaming requests. [`Client::connect_with`] also allows subsequent requests to
+/// reconnect after a connection failure; failed requests and existing streams are never replayed.
 #[derive(Clone)]
 pub struct Client {
+    inner: ClientInner,
+}
+
+#[derive(Clone)]
+enum ClientInner {
+    Fixed(Arc<Session>),
+    Reconnecting(Arc<Reconnect>),
+}
+
+// Every connection owns its request IDs, stream registry and security context.
+// Replacing a session cannot move in-flight requests or streams to another socket.
+struct Session {
     req_tx: MessageSender,
-    next_stream_id: Arc<AtomicU32>,
+    next_stream_id: AtomicU32,
     streams: ClientStreams,
     conn_ctx: Arc<ConnectionContext>,
+}
+
+type SharedConnection = Shared<BoxFuture<'static, Result<Arc<Session>>>>;
+type Connector = Box<dyn Fn() -> BoxFuture<'static, Result<Arc<Session>>> + Send + Sync>;
+
+struct Reconnect {
+    connector: Connector,
+    current: Mutex<SharedConnection>,
+    // Reconnecting clients do not accept security hooks. Keep an empty, stable
+    // metadata value for the existing borrowed connection_data() API.
+    #[cfg(feature = "security_extension")]
+    data: crate::security_extension::ConnectionData,
+}
+
+impl Reconnect {
+    async fn session(&self) -> Result<Arc<Session>> {
+        let attempt = {
+            let mut current = self
+                .current
+                .lock()
+                .map_err(|_| Error::Others("Failed to acquire lock on connection".to_string()))?;
+            let reconnect = match current.peek() {
+                None => false,
+                Some(Ok(session)) => session.req_tx.is_closed(),
+                Some(Err(_)) => true,
+            };
+            if reconnect {
+                *current = (self.connector)().shared();
+            }
+            current.clone()
+        };
+        // Each waiter retains its own attempt, including its failure result.
+        // Only a subsequent call can replace a completed, failed attempt.
+        attempt.await
+    }
 }
 
 impl Client {
@@ -88,6 +141,74 @@ impl Client {
             .await
             .map_err(err_to_others_err!(e, "Socket::connect error "))?;
         Self::new_inner(socket, None)
+    }
+
+    /// Connects using a reusable connector and enables on-demand reconnection.
+    ///
+    /// The connector must return a fresh, connected [`Socket`] on each call,
+    /// including any transport-specific handshake. It is called for the initial
+    /// connection and when a new RPC observes that the previous connection closed.
+    /// Concurrent callers share one connection attempt and its result. A failed
+    /// RPC is never replayed, and existing streams remain on their original connection.
+    ///
+    /// The connector must not block the executor and should bound its own connection
+    /// and handshake time. Each RPC's timeout also includes waiting for a connection.
+    /// There are no background retries: if all waiters leave, the shared connection
+    /// future is retained but stops progressing until another caller polls it.
+    /// Dropping all client clones drops any retained connection attempt.
+    ///
+    /// This constructor does not install a security hook. Use `Client::with_hook`
+    /// for a single connection with a hook when `security_extension` is enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns the initial connector error. Later connector failures are returned
+    /// to the RPCs waiting for that attempt; a subsequent RPC may try again.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # #[cfg(unix)]
+    /// # async fn example() -> ttrpc::Result<()> {
+    /// use ttrpc::r#async::{Client, transport::Socket};
+    /// let address = String::from("/tmp/agent.sock");
+    /// let client = Client::connect_with(move || {
+    ///     let address = address.clone();
+    ///     async move {
+    ///         tokio::net::UnixStream::connect(&address).await
+    ///             .map(Socket::from)
+    ///             .map_err(|error| ttrpc::Error::Socket(error.to_string()))
+    ///     }
+    /// }).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn connect_with<F, Fut>(connector: F) -> Result<Client>
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Socket>> + Send + 'static,
+    {
+        let connector: Connector = Box::new(move || {
+            let future = connector();
+            async move {
+                let socket = future.await?;
+                Ok(Arc::new(Session::new(
+                    socket,
+                    Arc::new(ConnectionContext::default()),
+                )))
+            }
+            .boxed()
+        });
+        let current = connector().shared();
+        current.clone().await?;
+        Ok(Client {
+            inner: ClientInner::Reconnecting(Arc::new(Reconnect {
+                connector,
+                current: Mutex::new(current),
+                #[cfg(feature = "security_extension")]
+                data: Default::default(),
+            })),
+        })
     }
 
     #[cfg(unix)]
@@ -152,10 +273,13 @@ impl Client {
     ///
     /// This is the [`ConnectionData`](crate::security_extension::ConnectionData)
     /// returned by the hook during connection establishment. Empty (default)
-    /// when no hook was configured.
+    /// when no hook was configured, including clients created by [`Client::connect_with`].
     #[cfg(feature = "security_extension")]
     pub fn connection_data(&self) -> &crate::security_extension::ConnectionData {
-        &self.conn_ctx.data
+        match &self.inner {
+            ClientInner::Fixed(session) => &session.conn_ctx.data,
+            ClientInner::Reconnecting(reconnect) => &reconnect.data,
+        }
     }
 
     fn new_inner(
@@ -188,23 +312,36 @@ impl Client {
         #[cfg(not(feature = "security_extension"))]
         let conn_ctx = Arc::new(ConnectionContext::default());
 
-        let (req_tx, rx): (MessageSender, MessageReceiver) = mpsc::channel(100);
-        let req_map = Arc::new(Mutex::new(HashMap::new()));
-        let delegate = ClientBuilder {
-            rx: Some(rx),
-            streams: req_map.clone(),
-            conn_ctx: conn_ctx.clone(),
-        };
-
-        let conn = Connection::new(stream, delegate);
-        tokio::spawn(async move { conn.run().await });
-
         Ok(Client {
-            req_tx,
-            next_stream_id: Arc::new(AtomicU32::new(1)),
-            streams: req_map,
-            conn_ctx,
+            inner: ClientInner::Fixed(Arc::new(Session::new(stream, conn_ctx))),
         })
+    }
+
+    async fn session(&self) -> Result<Arc<Session>> {
+        match &self.inner {
+            ClientInner::Fixed(session) => Ok(session.clone()),
+            ClientInner::Reconnecting(reconnect) => reconnect.session().await,
+        }
+    }
+
+    async fn session_for_request(
+        &self,
+        req: &mut Request,
+        deadline: Option<Instant>,
+    ) -> Result<Arc<Session>> {
+        if let Some(deadline) = deadline {
+            let session = timeout_at(deadline, self.session())
+                .await
+                .map_err(|_| request_timeout_error())??;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(request_timeout_error());
+            }
+            req.timeout_nano = remaining.as_nanos().min(i64::MAX as u128) as i64;
+            Ok(session)
+        } else {
+            self.session().await
+        }
     }
 
     /// Sends a unary request and waits for its response.
@@ -217,13 +354,65 @@ impl Client {
     ///
     /// Returns an error when the request is oversized, serialization or transport fails, the
     /// timeout expires, the response is malformed, or the server returns a non-OK status.
-    pub async fn request(&self, req: Request) -> Result<Response> {
-        let timeout_nano = req.timeout_nano;
-        let deadline = if timeout_nano == 0 {
-            None
-        } else {
-            Some(Instant::now() + std::time::Duration::from_nanos(timeout_nano as u64))
+    pub async fn request(&self, mut req: Request) -> Result<Response> {
+        let deadline = request_deadline(&req);
+        let session = self.session_for_request(&mut req, deadline).await?;
+        session.request(req, deadline).await
+    }
+
+    /// Opens a low-level streaming RPC.
+    ///
+    /// Generated streaming client methods select the appropriate `streaming_client` and
+    /// `streaming_server` values and wrap the returned [`StreamInner`] in a typed stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request is oversized, the stream registry is unavailable, the
+    /// connection is closed, or a client-streaming request also contains an initial payload.
+    pub async fn new_stream(
+        &self,
+        mut req: Request,
+        streaming_client: bool,
+        streaming_server: bool,
+    ) -> Result<StreamInner> {
+        let deadline = request_deadline(&req);
+        let session = self.session_for_request(&mut req, deadline).await?;
+        session
+            .new_stream(req, streaming_client, streaming_server)
+            .await
+    }
+}
+
+fn request_deadline(req: &Request) -> Option<Instant> {
+    if req.timeout_nano == 0 {
+        None
+    } else {
+        Some(Instant::now() + std::time::Duration::from_nanos(req.timeout_nano as u64))
+    }
+}
+
+impl Session {
+    fn new(stream: Socket, conn_ctx: Arc<ConnectionContext>) -> Self {
+        let (req_tx, rx): (MessageSender, MessageReceiver) = mpsc::channel(100);
+        let req_map = Arc::new(Mutex::new(HashMap::new()));
+        let delegate = ClientBuilder {
+            rx: Some(rx),
+            streams: req_map.clone(),
+            conn_ctx: conn_ctx.clone(),
         };
+
+        let conn = Connection::new(stream, delegate);
+        tokio::spawn(async move { conn.run().await });
+
+        Self {
+            req_tx,
+            next_stream_id: AtomicU32::new(1),
+            streams: req_map,
+            conn_ctx,
+        }
+    }
+
+    async fn request(&self, req: Request, deadline: Option<Instant>) -> Result<Response> {
         let stream_id = self.next_stream_id.fetch_add(2, Ordering::Relaxed);
 
         let mut msg: GenMessage = Message::new_request(stream_id, req)?
@@ -253,9 +442,9 @@ impl Client {
 
         let result = if let Some(deadline) = deadline {
             timeout_at(deadline, rx.recv())
-            .await
-            .map_err(|_| request_timeout_error())?
-            .ok_or(Error::RemoteClosed)?
+                .await
+                .map_err(|_| request_timeout_error())?
+                .ok_or(Error::RemoteClosed)?
         } else {
             rx.recv().await.ok_or(Error::RemoteClosed)?
         };
@@ -273,16 +462,7 @@ impl Client {
         Ok(res)
     }
 
-    /// Opens a low-level streaming RPC.
-    ///
-    /// Generated streaming client methods select the appropriate `streaming_client` and
-    /// `streaming_server` values and wrap the returned [`StreamInner`] in a typed stream.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the request is oversized, the stream registry is unavailable, the
-    /// connection is closed, or a client-streaming request also contains an initial payload.
-    pub async fn new_stream(
+    async fn new_stream(
         &self,
         req: Request,
         streaming_client: bool,
@@ -624,3 +804,7 @@ mod teardown_tests {
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "reconnect_tests.rs"]
+mod reconnect_tests;
