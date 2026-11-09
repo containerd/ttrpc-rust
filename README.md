@@ -244,6 +244,52 @@ RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path ttrpc-codegen-prost/Cargo.t
 
 ttrpc does not provide TLS. If you expose TCP beyond a trusted boundary, secure the transport at the deployment or network layer.
 
+## Async client reconnection
+
+`Client::connect_with` accepts a reusable async connector returning a connected
+`transport::Socket`. The connector can perform application-specific setup such
+as a hybrid-vsock handshake before handing the connection to ttrpc.
+
+```rust
+use ttrpc::r#async::{transport::Socket, Client};
+
+let address = String::from("/run/agent.sock");
+let client = Client::connect_with(move || {
+    let address = address.clone();
+    async move {
+        let stream = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            tokio::net::UnixStream::connect(address),
+        )
+        .await
+        .map_err(|_| ttrpc::Error::Socket("connect timed out".into()))?
+        .map_err(|error| ttrpc::Error::Socket(error.to_string()))?;
+        Ok(Socket::from(stream))
+    }
+}).await?;
+// Pass client to a generated service client as usual.
+```
+
+This Unix example uses Tokio's nonblocking connect. Connectors must not block the
+executor and should bound the entire connection attempt, including any handshake.
+
+- The initial connection is established before `connect_with` returns.
+- After a connection closes, the next RPC initiates a new connection. Concurrent
+  waiters share that attempt and its success or failure. There is no retry loop.
+- Failed RPCs are never replayed: the server may already have performed their
+  side effects. Existing streams terminate on their original connection; callers
+  must explicitly open new streams.
+- A unary RPC's timeout includes connection acquisition, and only its remaining
+  time is sent to the server. Opening a streaming RPC also bounds connection
+  acquisition; this does not add a lifetime timeout to an established stream.
+- If every waiter times out or is cancelled, the attempt is retained but is not
+  polled in the background. A later caller can resume it. Dropping all client
+  clones and active guards drops the retained attempt.
+
+`Client::connect`, `Client::new`, and `Client::with_hook` keep their single-connection
+behavior. `connect_with` does not install security hooks, and its
+`connection_data()` is empty when the security extension is enabled.
+
 ## Workspace
 
 | Crate | Purpose |
