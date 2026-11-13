@@ -24,15 +24,25 @@ use crate::proto::{
 pub type MessageSender = mpsc::Sender<SendingMessage>;
 pub type MessageReceiver = mpsc::Receiver<SendingMessage>;
 
-// Client results are routed directly from the shared connection reader, so sending must never
-// wait for one stream's consumer. Server stream data is dispatched by per-frame handler tasks and
-// retains its existing bounded channel.
+// Results are routed directly from the shared connection reader on both sides, so sending must
+// never wait for one stream's consumer: a stream nobody reads would otherwise stall the reader
+// and with it every other stream on the connection.
 pub(crate) type ClientResultSender = mpsc::UnboundedSender<Result<GenMessage>>;
 pub(crate) type ClientResultReceiver = mpsc::UnboundedReceiver<Result<GenMessage>>;
-pub(crate) type ServerResultSender = mpsc::Sender<Result<GenMessage>>;
-pub(crate) type ServerResultReceiver = mpsc::Receiver<Result<GenMessage>>;
+pub(crate) type ServerResultSender = mpsc::UnboundedSender<Result<GenMessage>>;
+pub(crate) type ServerResultReceiver = mpsc::UnboundedReceiver<Result<GenMessage>>;
 pub(crate) type ClientStreams = Arc<Mutex<HashMap<u32, ClientResultSender>>>;
-pub(crate) type ServerStreams = Arc<Mutex<HashMap<u32, ServerResultSender>>>;
+pub(crate) type ServerStreams = Arc<Mutex<HashMap<u32, StreamQueue>>>;
+
+/// A registered server stream: where to queue its DATA frames, and how many payload bytes are
+/// queued for a handler that has not received them yet.
+#[derive(Debug)]
+pub(crate) struct StreamQueue {
+    pub(crate) tx: ServerResultSender,
+    pub(crate) queued: usize,
+    /// Set once `queued` passed its limit and the stream was failed.
+    pub(crate) overflowed: bool,
+}
 
 #[derive(Debug)]
 enum ResultReceiver {
@@ -56,6 +66,15 @@ enum StreamRegistry {
 }
 
 impl StreamRegistry {
+    /// Uncounts payload bytes handed to a server stream's handler.
+    fn uncount(&self, stream_id: u32, len: usize) {
+        if let Self::Server(streams) = self {
+            if let Some(stream) = streams.lock().unwrap().get_mut(&stream_id) {
+                stream.queued = stream.queued.saturating_sub(len);
+            }
+        }
+    }
+
     fn remove(&self, stream_id: u32) {
         match self {
             Self::Client(streams) => {
@@ -759,6 +778,7 @@ impl StreamReceiver {
             return Err(Error::RemoteClosed);
         }
         let msg = _recv(&mut self.rx).await?;
+        self.streams.uncount(self.stream_id, msg.payload.len());
 
         let payload = match msg.header.type_ {
             MESSAGE_TYPE_RESPONSE => {
