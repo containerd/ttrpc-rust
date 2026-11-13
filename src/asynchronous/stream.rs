@@ -6,33 +6,52 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::ConnectionContext;
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tokio::time::Instant;
 
 use super::Client;
 use crate::error::{Error, Result};
 use crate::proto::{
     check_oversize, Code, Codec, GenMessage, Response, FLAG_NO_DATA, FLAG_REMOTE_CLOSED,
+    MESSAGE_HEADER_LENGTH,
     MESSAGE_TYPE_DATA, MESSAGE_TYPE_RESPONSE,
 };
 
 pub type MessageSender = mpsc::Sender<SendingMessage>;
 pub type MessageReceiver = mpsc::Receiver<SendingMessage>;
 
-// Client results are routed directly from the shared connection reader, so sending must never
-// wait for one stream's consumer. Server stream data is dispatched by per-frame handler tasks and
-// retains its existing bounded channel.
+// Results are routed directly from the shared connection reader on both sides, so sending must
+// never wait for one stream's consumer: a stream nobody reads would otherwise stall the reader
+// and with it every other stream on the connection.
 pub(crate) type ClientResultSender = mpsc::UnboundedSender<Result<GenMessage>>;
 pub(crate) type ClientResultReceiver = mpsc::UnboundedReceiver<Result<GenMessage>>;
-pub(crate) type ServerResultSender = mpsc::Sender<Result<GenMessage>>;
-pub(crate) type ServerResultReceiver = mpsc::Receiver<Result<GenMessage>>;
+pub(crate) type ServerResultSender = mpsc::UnboundedSender<Result<GenMessage>>;
+pub(crate) type ServerResultReceiver = mpsc::UnboundedReceiver<Result<GenMessage>>;
 pub(crate) type ClientStreams = Arc<Mutex<HashMap<u32, ClientResultSender>>>;
-pub(crate) type ServerStreams = Arc<Mutex<HashMap<u32, ServerResultSender>>>;
+pub(crate) type ServerStreams = Arc<Mutex<HashMap<u32, StreamQueue>>>;
+
+/// A registered server stream: where to queue its DATA frames, and how much is queued for a
+/// handler that has not received it yet.
+#[derive(Debug)]
+pub(crate) struct StreamQueue {
+    pub(crate) tx: ServerResultSender,
+    /// Bytes queued, by [`queued_cost`]. The stream's receiver uncounts what it takes.
+    pub(crate) queued: Arc<AtomicUsize>,
+    /// Signalled once `queued` passes its limit.
+    pub(crate) overflow: Arc<Notify>,
+    pub(crate) overflowed: bool,
+}
+
+/// What one queued frame counts against its stream's limit. The header is counted too, so that
+/// a flood of empty frames cannot queue without limit.
+pub(crate) fn queued_cost(msg: &GenMessage) -> usize {
+    MESSAGE_HEADER_LENGTH + msg.payload.len()
+}
 
 #[derive(Debug)]
 enum ResultReceiver {
@@ -52,18 +71,22 @@ impl ResultReceiver {
 #[derive(Debug)]
 enum StreamRegistry {
     Client(ClientStreams),
-    Server(ServerStreams),
+    /// The server unregisters a stream itself, once its response is sent, so only the queued
+    /// byte count lives here.
+    Server(Arc<AtomicUsize>),
 }
 
 impl StreamRegistry {
+    /// Uncounts a frame handed to a server stream's handler.
+    fn uncount(&self, msg: &GenMessage) {
+        if let Self::Server(queued) = self {
+            queued.fetch_sub(queued_cost(msg), Ordering::Relaxed);
+        }
+    }
+
     fn remove(&self, stream_id: u32) {
-        match self {
-            Self::Client(streams) => {
-                streams.lock().unwrap().remove(&stream_id);
-            }
-            Self::Server(streams) => {
-                streams.lock().unwrap().remove(&stream_id);
-            }
+        if let Self::Client(streams) = self {
+            streams.lock().unwrap().remove(&stream_id);
         }
     }
 }
@@ -590,7 +613,7 @@ impl StreamInner {
         rx: ServerResultReceiver,
         sendable: bool,
         recveivable: bool,
-        streams: ServerStreams,
+        queued: Arc<AtomicUsize>,
         conn_ctx: Arc<ConnectionContext>,
     ) -> Self {
         Self::new(
@@ -600,7 +623,7 @@ impl StreamInner {
             sendable,
             recveivable,
             Kind::Server,
-            StreamRegistry::Server(streams),
+            StreamRegistry::Server(queued),
             conn_ctx,
         )
     }
@@ -679,8 +702,8 @@ pub struct StreamSender {
 
 /// Untyped receiving half of a stream.
 ///
-/// Inbound transforms are applied in wire order before messages reach this receiver. Dropping this
-/// value unregisters the stream from its connection.
+/// Inbound transforms are applied in wire order before messages reach this receiver. On the
+/// client, dropping this value unregisters the stream from its connection.
 #[derive(Debug)]
 pub struct StreamReceiver {
     rx: ResultReceiver,
@@ -759,6 +782,7 @@ impl StreamReceiver {
             return Err(Error::RemoteClosed);
         }
         let msg = _recv(&mut self.rx).await?;
+        self.streams.uncount(&msg);
 
         let payload = match msg.header.type_ {
             MESSAGE_TYPE_RESPONSE => {
