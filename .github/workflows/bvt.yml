@@ -19,13 +19,18 @@ jobs:
       - name: Install Protoc
         run: ./install_protoc.sh
         shell: bash
+      - name: Select Tokio compatible with Rust 1.80
+        run: |
+          # Tokio 1.54 requires Rust 1.85; keep this constraint local to MSRV CI.
+          cargo update -p tokio --precise 1.53.3
+          cargo update --manifest-path example-prost/Cargo.toml -p tokio --precise 1.53.3
       - name: Test runtime and code generators
         run: |
-          cargo test --workspace --features async,sync,security_extension
-          cargo test -p ttrpc --no-default-features --features sync,async,prost
-          cargo check -p ttrpc-example --examples
+          cargo test --locked --workspace --features async,sync,security_extension
+          cargo test --locked -p ttrpc --no-default-features --features sync,async,prost
+          cargo check --locked -p ttrpc-example --examples
           cargo test --manifest-path ttrpc-codegen-prost/Cargo.toml
-          cargo check --manifest-path example-prost/Cargo.toml --examples
+          cargo check --locked --manifest-path example-prost/Cargo.toml --examples
 
   check:
     name: Check
