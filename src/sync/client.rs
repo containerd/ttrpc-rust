@@ -141,31 +141,42 @@ impl Client {
 
         //Sender
         let sender_ctx = conn_ctx.clone();
-        thread::spawn(move || {
-            let mut stream_id: u32 = 1;
-            let mut prefix = Vec::new();
-            for (buf, recver_tx) in rx.iter() {
-                let current_stream_id = stream_id;
-                stream_id += 2;
-                //Put current_stream_id and recver_tx to recver_map
-                {
-                    let mut map = receiver_map.lock().unwrap();
-                    map.insert(current_stream_id, recver_tx.clone());
-                }
-                let mut mh = MessageHeader::new_request(0, buf.len() as u32);
-                mh.set_stream_id(current_stream_id);
-
-                // ── outbound transform ──
-                let (mh, buf) = match sender_ctx.outbound_buf(
-                    buf,
-                    &serialize_aad(&mh),
-                    false,
-                ) {
-                    Ok(transformed) => {
-                        mh.length = transformed.len() as u32;
-                        (mh, transformed)
+        thread::Builder::new()
+            .name("client_sender".into())
+            .spawn(move || {
+                let mut stream_id: u32 = 1;
+                let mut prefix = Vec::new();
+                for (buf, recver_tx) in rx.iter() {
+                    let current_stream_id = stream_id;
+                    stream_id += 2;
+                    //Put current_stream_id and recver_tx to recver_map
+                    {
+                        let mut map = receiver_map.lock().unwrap();
+                        map.insert(current_stream_id, recver_tx.clone());
                     }
-                    Err(e) => {
+                    let mut mh = MessageHeader::new_request(0, buf.len() as u32);
+                    mh.set_stream_id(current_stream_id);
+
+                    // ── outbound transform ──
+                    let (mh, buf) = match sender_ctx.outbound_buf(buf, &serialize_aad(&mh), false) {
+                        Ok(transformed) => {
+                            mh.length = transformed.len() as u32;
+                            (mh, transformed)
+                        }
+                        Err(e) => {
+                            {
+                                let mut map = receiver_map.lock().unwrap();
+                                map.remove(&current_stream_id);
+                            }
+                            recver_tx
+                                .send(Err(e))
+                                .unwrap_or_else(|_e| error!("The request has returned"));
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = write_message(&sender_client, mh, &buf, &mut prefix) {
+                        //Remove current_stream_id and recver_tx to recver_map
                         {
                             let mut map = receiver_map.lock().unwrap();
                             map.remove(&current_stream_id);
@@ -173,23 +184,11 @@ impl Client {
                         recver_tx
                             .send(Err(e))
                             .unwrap_or_else(|_e| error!("The request has returned"));
-                        continue;
                     }
-                };
-
-                if let Err(e) = write_message(&sender_client, mh, &buf, &mut prefix) {
-                    //Remove current_stream_id and recver_tx to recver_map
-                    {
-                        let mut map = receiver_map.lock().unwrap();
-                        map.remove(&current_stream_id);
-                    }
-                    recver_tx
-                        .send(Err(e))
-                        .unwrap_or_else(|_e| error!("The request has returned"));
                 }
-            }
-            trace!("Sender quit");
-        });
+                trace!("Sender quit");
+            })
+            .map_err(err_to_others_err!(e, "spawn client sender thread: "))?;
 
         //Reciver
         let receiver_connection = connection;
@@ -198,60 +197,61 @@ impl Client {
         //this thread should be release.
         let receiver_client = weak_client.clone();
         let receiver_ctx = conn_ctx.clone();
-        thread::spawn(move || {
-            loop {
-                //The count of ClientConnection's Arc will be add one , and back to original value when this code ends. 
-                if let Some(receiver_client) = receiver_client.upgrade(){
-                    match receiver_client.ready() {
-                        Ok(None) => {
-                            continue;
+        thread::Builder::new()
+            .name("client_receiver".into())
+            .spawn(move || {
+                loop {
+                    //The count of ClientConnection's Arc will be add one , and back to original value when this code ends.
+                    if let Some(receiver_client) = receiver_client.upgrade() {
+                        match receiver_client.ready() {
+                            Ok(None) => {
+                                continue;
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("pipeConnection ready error {:?}", e);
+                                break;
+                            }
                         }
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!("pipeConnection ready error {:?}", e);
-                            break;
-                        }
+                    } else {
+                        break;
                     }
-                } else {
-                    break;
+
+                    match read_message(&receiver_connection) {
+                        Ok((mh, y)) => {
+                            let buf = match y {
+                                Ok(data) => {
+                                    receiver_ctx.inbound_buf(data, &serialize_aad(&mh), false)
+                                }
+                                Err(e) => Err(e),
+                            };
+                            trans_resp(recver_map_orig.clone(), mh, buf);
+                        }
+                        Err(x) => match x {
+                            Error::Socket(y) => {
+                                trace!("Socket error {}", y);
+                                let mut map = recver_map_orig.lock().unwrap();
+                                for (_, recver_tx) in map.iter_mut() {
+                                    recver_tx
+                                        .send(Err(Error::Socket(format!("socket error {y}"))))
+                                        .unwrap_or_else(|e| {
+                                            error!("The request has returned error {:?}", e)
+                                        });
+                                }
+                                map.clear();
+                                break;
+                            }
+                            _ => {
+                                trace!("Others error {:?}", x);
+                                continue;
+                            }
+                        },
+                    };
                 }
 
-                match read_message(&receiver_connection) {
-                    Ok((mh, y)) => {
-                        let buf = match y {
-                            Ok(data) => receiver_ctx.inbound_buf(
-                                data,
-                                &serialize_aad(&mh),
-                                false,
-                            ),
-                            Err(e) => Err(e),
-                        };
-                        trans_resp(recver_map_orig.clone(), mh, buf);
-                    }
-                    Err(x) => match x {
-                        Error::Socket(y) => {
-                            trace!("Socket error {}", y);
-                            let mut map = recver_map_orig.lock().unwrap();
-                            for (_, recver_tx) in map.iter_mut() {
-                                recver_tx
-                                    .send(Err(Error::Socket(format!("socket error {y}"))))
-                                    .unwrap_or_else(|e| {
-                                        error!("The request has returned error {:?}", e)
-                                    });
-                            }
-                            map.clear();
-                            break;
-                        }
-                        _ => {
-                            trace!("Others error {:?}", x);
-                            continue;
-                        }
-                    },
-                };
-            }
-
-            trace!("Receiver quit");
-        });
+                trace!("Receiver quit");
+            })
+            .map_err(err_to_others_err!(e, "spawn client receiver thread: "))?;
 
         Ok(Client {
             _connection: client,
