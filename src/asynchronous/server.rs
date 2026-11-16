@@ -9,13 +9,15 @@ use std::convert::TryFrom;
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
 use std::result::Result as StdResult;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::StreamExt as _;
 use tokio::{
     self, select, spawn,
-    sync::mpsc::{channel, Sender},
+    sync::mpsc::{channel, unbounded_channel, Sender},
+    sync::Notify,
     time::timeout,
 };
 
@@ -30,7 +32,7 @@ use crate::proto::{
 use crate::r#async::connection::*;
 use crate::r#async::shutdown;
 use crate::r#async::stream::{
-    MessageReceiver, MessageSender, ServerStreams, StreamInner,
+    queued_cost, MessageReceiver, MessageSender, ServerStreams, StreamInner, StreamQueue,
 };
 use crate::r#async::utils;
 use crate::r#async::{MethodHandler, StreamHandler, TtrpcContext};
@@ -40,6 +42,10 @@ use crate::ConnectionContext;
 
 const DEFAULT_CONN_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_SERVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Most bytes of DATA frames one stream may have queued for a handler that is not receiving
+/// them. Past this the stream is failed with [`Code::RESOURCE_EXHAUSTED`].
+const MAX_QUEUED_STREAM_BYTES: usize = 64 << 20;
 
 /// Dispatch table for one generated async service.
 ///
@@ -453,8 +459,6 @@ impl ReaderDelegate for ServerReader {
         let context = self.context();
         //Check if it is already shutdown no need select wait
         if !handler_shutdown_waiter.is_shutdown() {
-            let (wait_tx, wait_rx) = tokio::sync::oneshot::channel::<()>();
-
             // ── Inbound transform for ALL frames in wire order ──
             // Authenticate every inbound frame sequentially before any header
             // validation or routing. This prevents:
@@ -475,6 +479,17 @@ impl ReaderDelegate for ServerReader {
                 return;
             }
 
+            // DATA frames are queued here, in the reader, so that a stream's
+            // frames reach its handler in wire order. Handing them to a task
+            // each let those tasks race: frames reached the handler out of
+            // order, and a REMOTE_CLOSED frame could overtake the last one and
+            // end the stream with its payload unread.
+            if msg.header.type_ == MESSAGE_TYPE_DATA {
+                context.queue_data(msg).await;
+                return;
+            }
+
+            let (wait_tx, wait_rx) = tokio::sync::oneshot::channel::<()>();
             spawn(async move {
                 select! {
                     _ = context.handle_msg(msg, wait_tx) => {}
@@ -561,37 +576,66 @@ impl HandlerContext {
                 },
                 Err(status) => self.respond_with_status(stream_id, status).await,
             },
-            MESSAGE_TYPE_DATA => {
-                // no need to wait data message handling
-                drop(wait_tx);
-
-                // DATA transform already applied in ServerReader::handle_msg()
-                // (wire order, before spawn).
-                let stream_tx = self.streams.lock().unwrap().get(&stream_id).cloned();
-                if let Some(stream_tx) = stream_tx {
-                    if let Err(e) = stream_tx.send(Ok(msg)).await {
-                        self.respond_with_status(
-                            stream_id,
-                            get_status(
-                                Code::INVALID_ARGUMENT,
-                                format!("Stream id {stream_id}: handling data error: {e}"),
-                            ),
-                        )
-                        .await;
-                    }
-                } else {
-                    self.respond_with_status(
-                        stream_id,
-                        get_status(Code::INVALID_ARGUMENT, "Stream is no longer active"),
-                    )
-                    .await;
-                }
-            }
             _ => {
                 // TODO: else we must ignore this for future compat. log this?
                 // TODO(wllenyj): Compatible with golang behavior.
                 error!("Unknown message type. {:?}", msg.header);
             }
+        }
+
+        // A stream stays registered until its response is sent, so DATA frames still in flight
+        // are dropped quietly instead of answered with an error that could reach the client
+        // ahead of that response.
+        self.streams.lock().unwrap().remove(&stream_id);
+    }
+
+    /// Queues one DATA frame for its stream without waiting on the stream's handler.
+    ///
+    /// The queue is unbounded so that a handler which stops receiving cannot stall the connection
+    /// reader, and with it every other stream on the connection. Once a stream has more than
+    /// [`MAX_QUEUED_STREAM_BYTES`] queued, `handle_stream` cancels its handler and fails it.
+    async fn queue_data(&self, msg: GenMessage) {
+        let stream_id = msg.header.stream_id;
+
+        if (stream_id % 2) != 1 {
+            self.respond_with_status(
+                stream_id,
+                get_status(Code::INVALID_ARGUMENT, "stream id must be odd"),
+            )
+            .await;
+            return;
+        }
+
+        // DATA transform already applied in ServerReader::handle_msg() (wire order).
+        let known = {
+            let mut streams = self.streams.lock().unwrap();
+            match streams.get_mut(&stream_id) {
+                None => false,
+                // The stream is being failed; its response is on the way.
+                Some(stream) if stream.overflowed => true,
+                Some(stream) => {
+                    let cost = queued_cost(&msg);
+                    if stream.queued.fetch_add(cost, Ordering::Relaxed) + cost
+                        > MAX_QUEUED_STREAM_BYTES
+                    {
+                        stream.overflowed = true;
+                        stream.overflow.notify_one();
+                    } else {
+                        // A send error means the handler has returned, and its own response ends
+                        // the stream.
+                        let _ = stream.tx.send(Ok(msg));
+                    }
+                    true
+                }
+            }
+        };
+
+        if !known {
+            self.respond_with_status(
+                stream_id,
+                get_status(Code::INVALID_ARGUMENT, "Stream is no longer active"),
+            )
+            .await;
         }
     }
 
@@ -686,36 +730,14 @@ impl HandlerContext {
         wait_tx: tokio::sync::oneshot::Sender<()>,
     ) -> StdResult<Option<Response>, Status> {
         let stream_id = req_msg.header.stream_id;
-        let req = req_msg.payload;
+        let mut req = req_msg.payload;
         let path = utils::get_path(&req.service, &req.method);
 
-        let (tx, rx) = channel(100);
-        let stream_tx = tx.clone();
-        self.streams.lock().unwrap().insert(stream_id, tx);
+        let (tx, rx) = unbounded_channel();
+        let queued = Arc::new(AtomicUsize::new(0));
+        let overflow = Arc::new(Notify::new());
 
         let no_data = (req_msg.header.flags & FLAG_NO_DATA) == FLAG_NO_DATA;
-
-        drop(wait_tx);
-
-        let si = StreamInner::new_server(
-            stream_id,
-            self.tx.clone(),
-            rx,
-            true, // TODO
-            true,
-            self.streams.clone(),
-            self.conn_ctx.clone(),
-        );
-
-        let ctx = TtrpcContext {
-            mh: req_msg.header,
-            metadata: context::from_pb(&req.metadata),
-            timeout_nano: req.timeout_nano,
-            connection_data: self.conn_ctx.data.clone(),
-        };
-
-        let task = spawn(async move { stream.handler(ctx, si).await });
-
         if !no_data {
             // "Fake" the first DATA message from the stream-init REQUEST payload.
             //
@@ -726,18 +748,75 @@ impl HandlerContext {
             // FLAG_NO_DATA set), this block is skipped and all DATA messages
             // arrive via the normal `handle_msg` route where they are
             // transformed in the connection reader (wire order).
+            //
+            // It is queued before the stream is registered, so that a DATA frame the reader
+            // takes next cannot land ahead of the payload the stream opened with.
+            let payload = std::mem::take(&mut req.payload);
             let msg = GenMessage {
-                header: MessageHeader::new_data(stream_id, req.payload.len() as u32),
-                payload: req.payload,
+                header: MessageHeader::new_data(stream_id, payload.len() as u32),
+                payload,
             };
-            stream_tx.send(Ok(msg)).await.map_err(|e| {
+            // Counted like any DATA frame, since the receiver uncounts it like one.
+            queued.store(queued_cost(&msg), Ordering::Relaxed);
+            tx.send(Ok(msg)).map_err(|e| {
                 error!("send stream data {} got error {:?}", path, &e);
-                get_status(Code::UNKNOWN, e)
+                get_status(Code::UNKNOWN, e.to_string())
             })?;
         }
-        task.await
-            .unwrap_or_else(|e| Err(Error::Others(format!("stream {path} task got error {e:?}"))))
-            .map_err(|e| get_status(Code::UNKNOWN, e))
+
+        self.streams.lock().unwrap().insert(
+            stream_id,
+            StreamQueue {
+                tx,
+                queued: queued.clone(),
+                overflow: overflow.clone(),
+                overflowed: false,
+            },
+        );
+
+        // The reader is held until here, so every DATA frame it hands on afterwards finds this
+        // stream registered and queues behind the payload above.
+        drop(wait_tx);
+
+        let si = StreamInner::new_server(
+            stream_id,
+            self.tx.clone(),
+            rx,
+            true, // TODO
+            true,
+            queued,
+            self.conn_ctx.clone(),
+        );
+
+        let ctx = TtrpcContext {
+            mh: req_msg.header,
+            metadata: context::from_pb(&req.metadata),
+            timeout_nano: req.timeout_nano,
+            connection_data: self.conn_ctx.data.clone(),
+        };
+
+        let mut task = spawn(async move { stream.handler(ctx, si).await });
+
+        select! {
+            // A handler that has already returned answers for itself, even if frames it never
+            // read pushed the stream over the limit afterwards.
+            biased;
+            result = &mut task => result
+                .unwrap_or_else(|e| Err(Error::Others(format!("stream {path} task got error {e:?}"))))
+                .map_err(|e| get_status(Code::UNKNOWN, e)),
+            _ = overflow.notified() => {
+                // Cancelling the handler drops its receiver, and with it everything queued.
+                task.abort();
+                Err(get_status(
+                    Code::RESOURCE_EXHAUSTED,
+                    format!(
+                        "Stream id {stream_id}: more than {} MiB queued for a handler that is not \
+                         receiving it",
+                        MAX_QUEUED_STREAM_BYTES >> 20
+                    ),
+                ))
+            }
+        }
     }
 
     async fn respond(&self, stream_id: u32, resp: Response) -> Result<()> {
