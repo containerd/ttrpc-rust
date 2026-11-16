@@ -195,7 +195,7 @@
 //! [client, server, and streaming examples]: https://github.com/containerd/ttrpc-rust/tree/master/example
 //! [Prost generator]: https://github.com/containerd/ttrpc-rust/tree/master/ttrpc-codegen-prost
 //! [Prost examples]: https://github.com/containerd/ttrpc-rust/tree/master/example-prost
-//! [runtime changelog]: https://github.com/containerd/ttrpc-rust/blob/v0.10.0/CHANGELOG.md
+//! [runtime changelog]: https://github.com/containerd/ttrpc-rust/blob/v0.10.1/CHANGELOG.md
 //! [ttrpc]: https://github.com/containerd/ttrpc
 //! [`ttrpc-codegen`]: https://docs.rs/ttrpc-codegen
 
