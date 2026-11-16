@@ -575,7 +575,7 @@ impl Server {
                             let pipe = pipe_connection_child.clone();
                             let (res_tx, res_rx): (MessageSender, MessageReceiver) = channel();
                             let handler = match thread::Builder::new()
-                                .name("response".into())
+                                .name("server_sender".into())
                                 .spawn(move || {
                                     let mut prefix = Vec::new();
                                     for r in res_rx.iter() {
@@ -608,8 +608,9 @@ impl Server {
                                 crossbeam::channel::unbounded();
                             let (cancel_tx, cancel_rx) = crossbeam::channel::unbounded::<()>();
                             let control_tx_reader = control_tx.clone();
-                            let reader =
-                                thread::Builder::new().name("reader".into()).spawn(move || {
+                            let reader = thread::Builder::new()
+                                .name("server_receiver".into())
+                                .spawn(move || {
                                     while !quit_reader.load(Ordering::SeqCst) {
                                         let msg = read_message(&pipe_reader);
                                         match msg {
