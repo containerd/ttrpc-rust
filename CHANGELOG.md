@@ -9,6 +9,29 @@ publication dates. Historical releases are ordered by publication date rather
 than version number because several release lines were maintained in parallel.
 New release entries omit dates; see crates.io for publication timestamps.
 
+## [0.10.1]
+
+### Added
+
+- Added `asynchronous::Client::connect_with` for on-demand reconnection through
+  an application-provided connector. Concurrent callers share connection
+  attempts, and connection acquisition counts toward RPC deadlines. Failed
+  RPCs are not replayed, and existing streams remain on their original
+  connection. Existing constructors keep their single-connection behavior.
+  ([#339])
+
+### Changed
+
+- Enabled only the required nix features, removing the unused `aio` feature
+  and its unmaintained `pin-utils` dependency. ([#344])
+
+### Fixed
+
+- Avoided panics in synchronous clients and servers when OS thread creation
+  fails, including when process or thread limits are reached. Return startup
+  errors, close connections whose initial threads cannot be created, and
+  retain existing workers when replenishing the worker pool fails. ([#342])
+
 ## [0.10.0]
 
 ### API changes
@@ -573,6 +596,7 @@ New release entries omit dates; see crates.io for publication timestamps.
 
 [Keep a Changelog]: https://keepachangelog.com/en/2.0.0/
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
+[0.10.1]: https://github.com/containerd/ttrpc-rust/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/containerd/ttrpc-rust/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/containerd/ttrpc-rust/compare/cfe37a2c...f31f5925
 [0.8.6]: https://github.com/containerd/ttrpc-rust/compare/af812a6f...44d34d5c
@@ -630,3 +654,6 @@ New release entries omit dates; see crates.io for publication timestamps.
 [#329]: https://github.com/containerd/ttrpc-rust/pull/329
 [#333]: https://github.com/containerd/ttrpc-rust/pull/333
 [#337]: https://github.com/containerd/ttrpc-rust/pull/337
+[#339]: https://github.com/containerd/ttrpc-rust/pull/339
+[#342]: https://github.com/containerd/ttrpc-rust/pull/342
+[#344]: https://github.com/containerd/ttrpc-rust/pull/344
