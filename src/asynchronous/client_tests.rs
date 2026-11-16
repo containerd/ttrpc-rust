@@ -192,6 +192,7 @@ fn request_with_timeout(timeout: Duration) -> Request {
 #[tokio::test]
 async fn request_deadline_covers_a_full_outbound_queue() {
     let (client, write_polls, _) = blocked_client();
+    let session = client.session().await.unwrap();
     let mut tasks = Vec::new();
 
     for _ in 0..110 {
@@ -210,31 +211,33 @@ async fn request_deadline_covers_a_full_outbound_queue() {
         .into_iter()
         .all(|result| result.expect("request task panicked").is_err()));
     assert!(write_polls.load(Ordering::Relaxed) > 0);
-    assert!(client.streams.lock().unwrap().is_empty());
+    assert!(session.streams.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn response_timeout_removes_the_stream_without_closing_the_connection() {
     let client = Client::new(Socket::new(SinkSocket));
+    let session = client.session().await.unwrap();
 
     let result = client
         .request(request_with_timeout(Duration::from_millis(50)))
         .await;
 
     assert!(result.is_err());
-    assert!(client.streams.lock().unwrap().is_empty());
-    assert!(!client.req_tx.is_closed());
+    assert!(session.streams.lock().unwrap().is_empty());
+    assert!(!session.req_tx.is_closed());
 }
 
 #[tokio::test]
 async fn expired_queued_request_preserves_the_timeout_error() {
     let gate = Arc::new(WriteGate::new());
     let client = Client::new(Socket::new(GatedSocket { gate: gate.clone() }));
+    let session = client.session().await.unwrap();
     let blocker = GenMessage {
         header: MessageHeader::new_data(2, 0),
         payload: Vec::new(),
     };
-    client
+    session
         .req_tx
         .send(SendingMessage::new(blocker))
         .await
@@ -248,7 +251,7 @@ async fn expired_queued_request_preserves_the_timeout_error() {
         header: MessageHeader::new_data(4, 0),
         payload: Vec::new(),
     };
-    client
+    session
         .req_tx
         .send(SendingMessage::new(marker))
         .await
@@ -274,13 +277,14 @@ async fn expired_queued_request_preserves_the_timeout_error() {
         gate.bytes_written.load(Ordering::Relaxed),
         2 * crate::proto::MESSAGE_HEADER_LENGTH
     );
-    assert!(client.streams.lock().unwrap().is_empty());
-    assert!(!client.req_tx.is_closed());
+    assert!(session.streams.lock().unwrap().is_empty());
+    assert!(!session.req_tx.is_closed());
 }
 
 #[tokio::test]
 async fn cancelling_an_in_progress_write_cleans_up_and_closes_the_connection() {
     let (client, _, write_started) = blocked_client();
+    let session = client.session().await.unwrap();
     let request_client = client.clone();
     let request = tokio::spawn(async move { request_client.request(Request::default()).await });
 
@@ -290,8 +294,8 @@ async fn cancelling_an_in_progress_write_cleans_up_and_closes_the_connection() {
     request.abort();
     request.await.expect_err("request task was not cancelled");
 
-    timeout(Duration::from_secs(1), client.req_tx.closed())
+    timeout(Duration::from_secs(1), session.req_tx.closed())
         .await
         .expect("connection was not closed after cancelling an in-progress write");
-    assert!(client.streams.lock().unwrap().is_empty());
+    assert!(session.streams.lock().unwrap().is_empty());
 }
