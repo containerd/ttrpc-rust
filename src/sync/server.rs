@@ -151,123 +151,121 @@ fn start_method_handler_thread(
     min: usize,
     max: usize,
     conn_ctx: Arc<ConnectionContext>,
-) {
-    thread::spawn(move || {
-        while !quit.load(Ordering::SeqCst) {
-            let c = wtc.fetch_add(1, Ordering::SeqCst) + 1;
-            if c > max {
-                wtc.fetch_sub(1, Ordering::SeqCst);
-                break;
-            }
-
-            let result = workload_rx.recv();
-
-            if quit.load(Ordering::SeqCst) {
-                // notify the connection dealing main thread to stop.
-                control_tx
-                    .send(())
-                    .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
-                break;
-            }
-
-            let c = wtc.fetch_sub(1, Ordering::SeqCst) - 1;
-            if c < min {
-                trace!("notify client handler to create much more worker threads!");
-                control_tx
-                    .send(())
-                    .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
-            }
-
-            let mh;
-            let buf;
-            match result {
-                Ok((x, Ok(y))) => {
-                    mh = x;
-                    buf = y;
+) -> std::io::Result<()> {
+    thread::Builder::new()
+        .name("method_handler".into())
+        .spawn(move || {
+            while !quit.load(Ordering::SeqCst) {
+                let c = wtc.fetch_add(1, Ordering::SeqCst) + 1;
+                if c > max {
+                    wtc.fetch_sub(1, Ordering::SeqCst);
+                    break;
                 }
-                Ok((mh, Err(e))) => {
-                    if let Err(x) = response_error_to_channel(
-                        mh.stream_id,
-                        e,
-                        res_tx.clone(),
-                        conn_ctx.as_ref(),
-                    ) {
-                        debug!("response_error_to_channel get error {:?}", x);
-                        quit_connection(quit, control_tx);
-                        break;
+
+                let result = workload_rx.recv();
+
+                if quit.load(Ordering::SeqCst) {
+                    // notify the connection dealing main thread to stop.
+                    control_tx
+                        .send(())
+                        .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
+                    break;
+                }
+
+                let c = wtc.fetch_sub(1, Ordering::SeqCst) - 1;
+                if c < min {
+                    trace!("notify client handler to create much more worker threads!");
+                    control_tx
+                        .send(())
+                        .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
+                }
+
+                let mh;
+                let buf;
+                match result {
+                    Ok((x, Ok(y))) => {
+                        mh = x;
+                        buf = y;
                     }
+                    Ok((mh, Err(e))) => {
+                        if let Err(x) = response_error_to_channel(
+                            mh.stream_id,
+                            e,
+                            res_tx.clone(),
+                            conn_ctx.as_ref(),
+                        ) {
+                            debug!("response_error_to_channel get error {:?}", x);
+                            quit_connection(quit, control_tx);
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(x) => match x {
+                        crossbeam::channel::RecvError => {
+                            trace!("workload_rx recv error");
+                            quit_connection(quit, control_tx);
+                            trace!("workload_rx recv error, send control_tx");
+                            break;
+                        }
+                    },
+                }
+
+                if mh.type_ != MESSAGE_TYPE_REQUEST {
                     continue;
                 }
-                Err(x) => match x {
-                    crossbeam::channel::RecvError => {
-                        trace!("workload_rx recv error");
-                        quit_connection(quit, control_tx);
-                        trace!("workload_rx recv error, send control_tx");
-                        break;
+                let req = match <Request as Codec>::decode(&buf) {
+                    Ok(req) => req,
+                    Err(x) => {
+                        let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
+                        let res = ResponseInit::init_status(status);
+                        if let Err(x) =
+                            send_response(mh.stream_id, res, res_tx.clone(), conn_ctx.as_ref())
+                        {
+                            debug!("response_to_channel get error {:?}", x);
+                            quit_connection(quit, control_tx);
+                            break;
+                        }
+                        continue;
                     }
-                },
-            }
+                };
+                trace!("Got Message request {:?}", req);
 
-            if mh.type_ != MESSAGE_TYPE_REQUEST {
-                continue;
-            }
-            let req = match <Request as Codec>::decode(&buf) {
-                Ok(req) => req,
-                Err(x) => {
-                    let status = get_status(Code::INVALID_ARGUMENT, x.to_string());
+                let path = format!("/{}/{}", req.service, req.method);
+                let method = if let Some(x) = methods.get(&path) {
+                    x
+                } else {
+                    let status =
+                        get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
                     let res = ResponseInit::init_status(status);
-                    if let Err(x) = send_response(
-                        mh.stream_id,
-                        res,
-                        res_tx.clone(),
-                        conn_ctx.as_ref(),
-                    ) {
-                        debug!("response_to_channel get error {:?}", x);
+                    if let Err(x) =
+                        send_response(mh.stream_id, res, res_tx.clone(), conn_ctx.as_ref())
+                    {
+                        info!("response_to_channel get error {:?}", x);
                         quit_connection(quit, control_tx);
                         break;
                     }
                     continue;
-                }
-            };
-            trace!("Got Message request {:?}", req);
-
-            let path = format!("/{}/{}", req.service, req.method);
-            let method = if let Some(x) = methods.get(&path) {
-                x
-            } else {
-                let status = get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
-                let res = ResponseInit::init_status(status);
-                if let Err(x) = send_response(
-                    mh.stream_id,
-                    res,
-                    res_tx.clone(),
-                    conn_ctx.as_ref(),
-                ) {
-                    info!("response_to_channel get error {:?}", x);
+                };
+                let ctx = TtrpcContext {
+                    fd: connection.id(),
+                    cancel_rx: cancel_rx.clone(),
+                    mh,
+                    res_tx: res_tx.clone(),
+                    metadata: context::from_pb(&req.metadata),
+                    timeout_nano: req.timeout_nano,
+                    conn_ctx: conn_ctx.clone(),
+                };
+                if let Err(x) = method.handler(ctx, req) {
+                    debug!("method handle {} get error {:?}", path, x);
                     quit_connection(quit, control_tx);
                     break;
                 }
-                continue;
-            };
-            let ctx = TtrpcContext {
-                fd: connection.id(),
-                cancel_rx: cancel_rx.clone(),
-                mh,
-                res_tx: res_tx.clone(),
-                metadata: context::from_pb(&req.metadata),
-                timeout_nano: req.timeout_nano,
-                conn_ctx: conn_ctx.clone(),
-            };
-            if let Err(x) = method.handler(ctx, req) {
-                debug!("method handle {} get error {:?}", path, x);
-                quit_connection(quit, control_tx);
-                break;
             }
-        }
-    });
+        })
+        .map(|_| ())
 }
 
-fn start_method_handler_threads(num: usize, ts: &ThreadS) {
+fn start_method_handler_threads(num: usize, ts: &ThreadS) -> std::io::Result<()> {
     for _ in 0..num {
         if ts.quit.load(Ordering::SeqCst) {
             break;
@@ -284,14 +282,19 @@ fn start_method_handler_threads(num: usize, ts: &ThreadS) {
             ts.min,
             ts.max,
             ts.conn_ctx.clone(),
-        );
+        )?;
     }
+    Ok(())
 }
 
 fn check_method_handler_threads(ts: &ThreadS) {
     let c = ts.wtc.load(Ordering::SeqCst);
     if c < ts.min {
-        start_method_handler_threads(ts.default - c, ts);
+        // Busy workers will pick up queued requests once they finish, so a
+        // spawn failure only degrades concurrency instead of aborting.
+        if let Err(e) = start_method_handler_threads(ts.default - c, ts) {
+            warn!("spawn method handler thread failed with: {:?}", e);
+        }
     }
 }
 
@@ -473,7 +476,7 @@ impl Server {
                         }
                         info!("reaper thread exited");
                     })
-                    .unwrap();
+                    .map_err(err_to_others_err!(e, "spawn reaper thread: "))?;
                 self.reaper = Some((reaper_tx.clone(), reaper_handler));
                 reaper_tx
             }
@@ -558,23 +561,42 @@ impl Server {
                         .name("client_handler".into())
                         .spawn(move || {
                             debug!("Got new client");
+                            let conn_id = pipe_connection_child.id();
+                            // Hand the connection over to the reaper once it has been inserted
+                            // into the connections map; the reaper joins this thread and closes
+                            // the fd.
+                            let release_connection = move || {
+                                sync_rx.recv().unwrap_or(());
+                                reaper_tx_child.send(conn_id).unwrap();
+                            };
+
                             // Start response thread
                             let quit_res = child_quit.clone();
                             let pipe = pipe_connection_child.clone();
                             let (res_tx, res_rx): (MessageSender, MessageReceiver) = channel();
-                            let handler = thread::spawn(move || {
-                                let mut prefix = Vec::new();
-                                for r in res_rx.iter() {
-                                    trace!("response thread get {:?}", r);
-                                    if let Err(e) = write_message(&pipe, r.0, &r.1, &mut prefix) {
-                                        error!("write_message got {:?}", e);
-                                        quit_res.store(true, Ordering::SeqCst);
-                                        break;
+                            let handler = match thread::Builder::new()
+                                .name("response".into())
+                                .spawn(move || {
+                                    let mut prefix = Vec::new();
+                                    for r in res_rx.iter() {
+                                        trace!("response thread get {:?}", r);
+                                        if let Err(e) = write_message(&pipe, r.0, &r.1, &mut prefix)
+                                        {
+                                            error!("write_message got {:?}", e);
+                                            quit_res.store(true, Ordering::SeqCst);
+                                            break;
+                                        }
                                     }
-                                }
 
-                                trace!("response thread quit");
-                            });
+                                    trace!("response thread quit");
+                                }) {
+                                Ok(h) => h,
+                                Err(e) => {
+                                    error!("spawn response thread failed with: {:?}", e);
+                                    release_connection();
+                                    return;
+                                }
+                            };
 
                             let (control_tx, control_rx): (SyncSender<()>, Receiver<()>) =
                                 sync_channel(0);
@@ -586,63 +608,76 @@ impl Server {
                                 crossbeam::channel::unbounded();
                             let (cancel_tx, cancel_rx) = crossbeam::channel::unbounded::<()>();
                             let control_tx_reader = control_tx.clone();
-                            let reader = thread::spawn(move || {
-                                while !quit_reader.load(Ordering::SeqCst) {
-                                    let msg = read_message(&pipe_reader);
-                                    match msg {
-                                        Ok((mut x, y)) => {
-                                            // ── inbound transform ──
-                                            let y = match y {
-                                                Ok(data) => {
-                                                    let res = reader_ctx.inbound_buf(
-                                                        data,
-                                                        &serialize_aad(&x),
-                                                        true,
-                                                    );
-                                                    if let Ok(ref buf) = res {
-                                                        x.length = buf.len() as u32;
+                            let reader =
+                                thread::Builder::new().name("reader".into()).spawn(move || {
+                                    while !quit_reader.load(Ordering::SeqCst) {
+                                        let msg = read_message(&pipe_reader);
+                                        match msg {
+                                            Ok((mut x, y)) => {
+                                                // ── inbound transform ──
+                                                let y = match y {
+                                                    Ok(data) => {
+                                                        let res = reader_ctx.inbound_buf(
+                                                            data,
+                                                            &serialize_aad(&x),
+                                                            true,
+                                                        );
+                                                        if let Ok(ref buf) = res {
+                                                            x.length = buf.len() as u32;
+                                                        }
+                                                        res
                                                     }
-                                                    res
+                                                    Err(e) => Err(e),
+                                                };
+                                                let res = workload_tx.send((x, y));
+                                                match res {
+                                                    Ok(_) => {}
+                                                    Err(crossbeam::channel::SendError(e)) => {
+                                                        error!("Send workload error {:?}", e);
+                                                        quit_reader.store(true, Ordering::SeqCst);
+                                                        control_tx_reader.send(()).unwrap_or_else(
+                                                            |err| {
+                                                                trace!("Failed to send {:?}", err)
+                                                            },
+                                                        );
+                                                        break;
+                                                    }
                                                 }
-                                                Err(e) => Err(e),
-                                            };
-                                            let res = workload_tx.send((x, y));
-                                            match res {
-                                                Ok(_) => {}
-                                                Err(crossbeam::channel::SendError(e)) => {
-                                                    error!("Send workload error {:?}", e);
+                                            }
+                                            Err(x) => match x {
+                                                Error::Socket(y) => {
+                                                    trace!("Socket error {}", y);
+                                                    drop(cancel_tx);
                                                     quit_reader.store(true, Ordering::SeqCst);
+                                                    // the client connection would be closed and
+                                                    // the connection dealing main thread would
+                                                    // have exited.
                                                     control_tx_reader.send(()).unwrap_or_else(
                                                         |err| trace!("Failed to send {:?}", err),
                                                     );
+                                                    trace!("Socket error send control_tx");
                                                     break;
                                                 }
-                                            }
+                                                _ => {
+                                                    trace!("Other error {:?}", x);
+                                                    continue;
+                                                }
+                                            },
                                         }
-                                        Err(x) => match x {
-                                            Error::Socket(y) => {
-                                                trace!("Socket error {}", y);
-                                                drop(cancel_tx);
-                                                quit_reader.store(true, Ordering::SeqCst);
-                                                // the client connection would be closed and
-                                                // the connection dealing main thread would
-                                                // have exited.
-                                                control_tx_reader.send(()).unwrap_or_else(|err| {
-                                                    trace!("Failed to send {:?}", err)
-                                                });
-                                                trace!("Socket error send control_tx");
-                                                break;
-                                            }
-                                            _ => {
-                                                trace!("Other error {:?}", x);
-                                                continue;
-                                            }
-                                        },
                                     }
-                                }
 
-                                trace!("read message thread quit");
-                            });
+                                    trace!("read message thread quit");
+                                });
+                            let reader = match reader {
+                                Ok(h) => h,
+                                Err(e) => {
+                                    error!("spawn reader thread failed with: {:?}", e);
+                                    drop(res_tx);
+                                    handler.join().unwrap_or(());
+                                    release_connection();
+                                    return;
+                                }
+                            };
 
                             let pipe = pipe_connection_child.clone();
                             let ts = ThreadS {
@@ -659,7 +694,14 @@ impl Server {
                                 max,
                                 conn_ctx: &handler_ctx,
                             };
-                            start_method_handler_threads(ts.default, &ts);
+                            if let Err(e) = start_method_handler_threads(ts.default, &ts) {
+                                // Without workers queued requests would never be answered, so
+                                // close the connection; shutting down the read side stops the
+                                // reader, and the spawned workers follow.
+                                error!("spawn method handler thread failed with: {:?}", e);
+                                child_quit.store(true, Ordering::SeqCst);
+                                pipe.shutdown().unwrap_or(());
+                            }
 
                             while !child_quit.load(Ordering::SeqCst) {
                                 check_method_handler_threads(&ts);
@@ -676,12 +718,9 @@ impl Server {
                             handler.join().unwrap_or(());
                             reader.join().unwrap_or(());
 
-                            //wait untile this connection had been inserted connections map;
-                            sync_rx.recv().unwrap_or(());
-
                             // client_handler should not close fd before exit
                             // , which prevent fd reuse issue.
-                            reaper_tx_child.send(pipe.id()).unwrap();
+                            release_connection();
 
                             debug!("client thread quit");
                         })
@@ -713,7 +752,7 @@ impl Server {
                 drop(reaper_tx);
                 info!("ttrpc server listener stopped");
             })
-            .unwrap();
+            .map_err(err_to_others_err!(e, "spawn listener thread: "))?;
 
         self.handler = Some(handler);
         info!("server listen started");
