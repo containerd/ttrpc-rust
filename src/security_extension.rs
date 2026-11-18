@@ -204,7 +204,7 @@ async fn reserve_message_slot<'a>(
             } else {
                 reserve.await
             }
-            .map_err(|e| Error::Others(format!("reserve channel capacity failed: {e}")))
+            .map_err(|_| Error::LocalClosed)
         }
     }
 }
@@ -992,6 +992,19 @@ mod hooks {
         }
     }
 } // mod hooks
+
+#[cfg(all(test, feature = "async"))]
+#[tokio::test]
+async fn closed_writer_queue_returns_local_closed() {
+    let (tx, rx) = tokio::sync::mpsc::channel(1);
+    let _slot = tx.try_reserve().unwrap();
+    let reserve = reserve_message_slot(&tx, None);
+    tokio::pin!(reserve);
+    assert!(futures::poll!(&mut reserve).is_pending());
+
+    drop(rx);
+    assert!(matches!(reserve.await, Err(Error::LocalClosed)));
+}
 
 #[cfg(all(test, feature = "security_extension"))]
 mod tests {
