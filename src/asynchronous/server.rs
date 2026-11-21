@@ -617,7 +617,7 @@ impl HandlerContext {
 
         let srv = self.services.get(&req.service).ok_or_else(|| {
             get_status(
-                Code::INVALID_ARGUMENT,
+                Code::UNIMPLEMENTED,
                 format!("{} service does not exist", &req.service),
             )
         })?;

@@ -15,7 +15,7 @@ use ttrpc::r#async::{
     transport::{Listener, Socket},
     Client, MethodHandler, Server, Service, TtrpcContext,
 };
-use ttrpc::{Request, Response, Result};
+use ttrpc::{Code, Error, Request, Response, Result};
 
 struct Echo(Arc<AtomicUsize>);
 
@@ -142,4 +142,30 @@ async fn server_write_failure_allows_the_next_rpc_to_reconnect_without_replay() 
         .await
         .unwrap()
         .unwrap();
+}
+
+#[tokio::test]
+async fn unknown_service_returns_unimplemented() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("rpc.sock");
+    let address = format!("unix://{}", path.display());
+    let mut server = Server::new().bind(&address).unwrap();
+    server.start().await.unwrap();
+
+    let client = Client::connect(&address).await.unwrap();
+    let error = client
+        .request(Request {
+            service: "test.Unknown".into(),
+            method: "Call".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+
+    match error {
+        Error::RpcStatus(status) => assert_eq!(status.code(), Code::UNIMPLEMENTED),
+        other => panic!("expected RPC status, got {:?}", other),
+    }
+
+    server.shutdown().await.unwrap();
 }
