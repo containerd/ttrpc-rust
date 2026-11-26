@@ -157,7 +157,7 @@ where
         }
     }
 
-    pub async fn run(self) -> std::io::Result<()> {
+    pub async fn run(self) -> Result<()> {
         let Connection {
             mut reader,
             mut writer_task,
@@ -165,28 +165,29 @@ where
         } = self;
         let shutdown = reader_delegate.wait_shutdown();
         tokio::pin!(shutdown);
-        loop {
+        let result = loop {
             select! {
                 // Writer failures take priority, then shutdown, then incoming frames.
                 biased;
                 writer_result = &mut writer_task => {
-                    match writer_result {
-                        Ok(Ok(())) => {}
+                    let e = match writer_result {
+                        Ok(Ok(())) => break Ok(()),
                         Ok(Err(e)) => {
                             trace!("Write msg err: {:?}", e);
-                            reader_delegate.disconnect(e).await;
+                            e
                         }
                         Err(e) => {
                             let e = Error::Others(format!("Writer task failed: {e}"));
                             error!("Write task err: {:?}", e);
-                            reader_delegate.disconnect(e).await;
+                            e
                         }
-                    }
-                    break;
+                    };
+                    reader_delegate.disconnect(e.clone()).await;
+                    break Err(e);
                 }
                 _v = &mut shutdown => {
                     trace!("Receive shutdown.");
-                    break;
+                    break Ok(());
                 }
                 res = GenMessage::read_from(&mut reader) => {
                     match res {
@@ -203,16 +204,16 @@ where
                             trace!("Read msg err: {:?}", e);
                             writer_task.abort();
                             let _ = (&mut writer_task).await;
-                            reader_delegate.disconnect(e).await;
-                            break;
+                            reader_delegate.disconnect(e.clone()).await;
+                            break Err(e);
                         }
                     }
                 }
             }
-        }
+        };
         reader_delegate.exit().await;
         trace!("Reader task exit.");
 
-        Ok(())
+        result
     }
 }
