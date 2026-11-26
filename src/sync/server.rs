@@ -234,8 +234,7 @@ fn start_method_handler_thread(
                 let method = if let Some(x) = methods.get(&path) {
                     x
                 } else {
-                    let status =
-                        get_status(Code::INVALID_ARGUMENT, format!("{path} does not exist"));
+                    let status = get_status(Code::UNIMPLEMENTED, format!("{path} does not exist"));
                     let res = ResponseInit::init_status(status);
                     if let Err(x) =
                         send_response(mh.stream_id, res, res_tx.clone(), conn_ctx.as_ref())
